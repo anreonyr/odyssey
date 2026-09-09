@@ -32,3 +32,23 @@ bitflags = { version = "2", features = ["serde"] }
 [[bin]]
 name = "odyssey"
 path = "src/main.rs"
+
+# Integration tests are auto-discovered from tests/ by cargo, but
+# `tests/<name>/mod.rs` style directories need an explicit [[test]]
+# entry — the auto-discovery path doesn't pick them up under
+# cargo 1.100-nightly. Each test crate here shares tests/common/.
+[[test]]
+name = "alpha"
+path = "tests/alpha/mod.rs"
+
+[[test]]
+name = "beta"
+path = "tests/beta/mod.rs"
+
+[[test]]
+name = "gamma"
+path = "tests/gamma/mod.rs"
+
+[[test]]
+name = "delta"
+path = "tests/delta/mod.rs"
