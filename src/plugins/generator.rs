@@ -1,4 +1,4 @@
-//! Generator — mock LLM-style streaming resource.
+//! Generator plugin — `GeneratorResource: Resource`. Stream only.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,13 +7,13 @@ use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
-use crate::capability::{CapabilityChunk, StreamKind, StreamResource};
+use crate::capability::{CapabilityChunk, Resource, Slot};
 
 const TICK: Duration = Duration::from_millis(15);
 
 pub struct GeneratorResource;
 
-impl StreamResource for GeneratorResource {
+impl Resource for GeneratorResource {
     fn open(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
         let prompt = input
             .as_str()
@@ -50,8 +50,7 @@ pub fn generator_plugin() -> Arc<dyn Plugin> {
         "generator",
         vec![Injection::from("slot:generate")],
         |ctx: Context, _cfg: ()| async move {
-            let slot: Arc<crate::capability::Slot<GeneratorResource, StreamKind>> =
-                ctx.require("slot:generate")?;
+            let slot: Arc<Slot<GeneratorResource>> = ctx.require("slot:generate")?;
             ctx.logger().log(
                 LogLevel::Info,
                 format!(

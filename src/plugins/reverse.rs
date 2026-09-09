@@ -1,15 +1,15 @@
-//! Reverse — possession of `Slot<ReverseResource, SyncKind>`.
+//! Reverse plugin — `ReverseResource: Resource`. Sync only.
 
 use std::sync::Arc;
 
 use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::Value;
 
-use crate::capability::{SyncKind, SyncResource};
+use crate::capability::{Resource, Slot};
 
 pub struct ReverseResource;
 
-impl SyncResource for ReverseResource {
+impl Resource for ReverseResource {
     fn invoke(&self, input: Value) -> Result<Value, String> {
         let s = input
             .as_str()
@@ -27,7 +27,7 @@ pub fn reverse_plugin() -> Arc<dyn Plugin> {
         "reverse",
         vec![Injection::from("slot:reverse")],
         |ctx: Context, _cfg: ()| async move {
-            let slot: Arc<crate::capability::Slot<ReverseResource, SyncKind>> = ctx.require("slot:reverse")?;
+            let slot: Arc<Slot<ReverseResource>> = ctx.require("slot:reverse")?;
             ctx.logger().log(
                 LogLevel::Info,
                 format!(

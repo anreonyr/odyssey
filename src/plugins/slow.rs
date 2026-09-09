@@ -1,4 +1,5 @@
-//! Slow — sleeps longer than its declared budget to exercise timeout.
+//! Slow plugin — sleeps longer than its declared budget to exercise
+//! the timeout enforcement in `Capability::invoke`.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -6,13 +7,13 @@ use std::time::Duration;
 use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::Value;
 
-use crate::capability::{SyncKind, SyncResource};
+use crate::capability::{Resource, Slot};
 
 const SLEEP: Duration = Duration::from_millis(200);
 
 pub struct SlowResource;
 
-impl SyncResource for SlowResource {
+impl Resource for SlowResource {
     fn invoke(&self, input: Value) -> Result<Value, String> {
         std::thread::sleep(SLEEP);
         Ok(input)
@@ -28,7 +29,7 @@ pub fn slow_plugin() -> Arc<dyn Plugin> {
         "slow",
         vec![Injection::from("slot:slow")],
         |ctx: Context, _cfg: ()| async move {
-            let slot: Arc<crate::capability::Slot<SlowResource, SyncKind>> = ctx.require("slot:slow")?;
+            let slot: Arc<Slot<SlowResource>> = ctx.require("slot:slow")?;
             ctx.logger().log(
                 LogLevel::Info,
                 format!(

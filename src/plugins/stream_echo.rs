@@ -1,4 +1,4 @@
-//! stream_echo — possession of `Slot<StreamEchoResource, StreamKind>`.
+//! stream_echo plugin — `StreamEchoResource: Resource`. Stream only.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,16 +7,14 @@ use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
-use crate::capability::{
-    CapabilityChunk, StreamKind, StreamResource,
-};
+use crate::capability::{CapabilityChunk, Resource, Slot};
 
 const CHANNEL_CAPACITY: usize = 8;
 const TICK: Duration = Duration::from_millis(20);
 
 pub struct StreamEchoResource;
 
-impl StreamResource for StreamEchoResource {
+impl Resource for StreamEchoResource {
     fn open(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
         let text = input
             .as_str()
@@ -46,8 +44,7 @@ pub fn stream_echo_plugin() -> Arc<dyn Plugin> {
         "stream_echo",
         vec![Injection::from("slot:stream_echo")],
         |ctx: Context, _cfg: ()| async move {
-            let slot: Arc<crate::capability::Slot<StreamEchoResource, StreamKind>> =
-                ctx.require("slot:stream_echo")?;
+            let slot: Arc<Slot<StreamEchoResource>> = ctx.require("slot:stream_echo")?;
             ctx.logger().log(
                 LogLevel::Info,
                 format!(

@@ -1,4 +1,4 @@
-//! Sandbox — WASM-isolated execution with fuel.
+//! Sandbox plugin — WASM-isolated execution with fuel.
 
 use std::sync::Arc;
 
@@ -6,7 +6,7 @@ use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::{json, Value};
 use wasmtime::{Caller, Config, Engine, Linker, Module, Store};
 
-use crate::capability::{SyncKind, SyncResource};
+use crate::capability::{Resource, Slot};
 
 const DEFAULT_FUEL: u64 = 1_000_000;
 
@@ -16,7 +16,7 @@ pub struct SandboxState {
 
 pub struct SandboxResource;
 
-impl SyncResource for SandboxResource {
+impl Resource for SandboxResource {
     fn invoke(&self, input: Value) -> Result<Value, String> {
         let path = input
             .get("path")
@@ -101,7 +101,7 @@ pub fn sandbox_plugin() -> Arc<dyn Plugin> {
         "sandbox",
         vec![Injection::from("slot:exec")],
         |ctx: Context, _cfg: ()| async move {
-            let slot: Arc<crate::capability::Slot<SandboxResource, SyncKind>> = ctx.require("slot:exec")?;
+            let slot: Arc<Slot<SandboxResource>> = ctx.require("slot:exec")?;
             ctx.logger().log(
                 LogLevel::Info,
                 format!(

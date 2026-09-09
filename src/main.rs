@@ -3,18 +3,15 @@
 //! ## Possession model
 //!
 //! - The host owns the `CapabilitySpace` (seL4 CSpace).
-//! - The factory mints typed `Capability<R, K>` and installs them at fresh
+//! - The factory mints typed `Capability<R>` and installs them at fresh
 //!   slot ids.
-//! - Plugins receive `Slot<R, K>` references via cordis inject — these are
-//!   unforgeable handles to specific positions in the CSpace. The slot
-//!   reference is stable; the host can revoke the slot contents without
-//!   invalidating the plugin's reference (the plugin's lookup / invoke
-//!   will then fail).
+//! - Plugins receive `Slot<R>` references via cordis inject — these are
+//!   unforgeable handles to specific positions in the CSpace.
 //!
 //! ## Boot order
 //!
 //!   Phase 1  Parse manifests
-//!   Phase 2  Provide core services (capability_space, registry)
+//!   Phase 2  Provide core services (capability_space, capability_factory, registry)
 //!   Phase 3  Mint typed tokens, allocate slots, install + provide slots
 //!   Phase 4  Validate graph — fail-fast on missing providers
 //!   Phase 5  Start plugins — cordis resolves slot inject declarations
@@ -33,9 +30,7 @@ use std::collections::HashSet;
 use std::io::Write as _;
 use std::sync::Arc;
 
-use capability::{
-    Capability, CapabilityBudget, CapabilitySpace, StreamKind, SyncKind,
-};
+use capability::{Capability, CapabilityBudget, CapabilitySpace, CapKind, Slot};
 use dispatcher::CapabilityFactory;
 use http_bridge::serve;
 use manifest::{CapabilityDecl, PluginId, PluginManifest};
@@ -73,21 +68,22 @@ async fn print_stream(mut rx: tokio::sync::mpsc::Receiver<capability::Capability
 }
 
 // ---------------------------------------------------------------------------
-// Mint helpers — allocate slot + install + provide to cordis
+// Mint helpers
 // ---------------------------------------------------------------------------
 
-/// Mint a sync token at a fresh slot, install into the CSpace, and provide
-/// a `Slot<R, SyncKind>` handle to cordis. Returns the slot id.
-async fn mint_and_provide_sync<R, F>(
+/// Mint a token at a fresh slot, install into the CSpace, and provide
+/// a `Slot<R>` handle to cordis. Returns the slot id.
+async fn mint_and_provide<R, F>(
     ctx: &cordis::Context,
     factory: &CapabilityFactory,
     manifests: &[PluginManifest],
     plugin_name: &str,
+    kind: CapKind,
     slot_key: &str,
     handler_for: F,
 ) -> Result<Option<capability::SlotId>, Box<dyn std::error::Error>>
 where
-    R: capability::SyncResource + 'static,
+    R: capability::Resource + 'static,
     F: FnOnce(&CapabilityDecl, &PluginId) -> Arc<R>,
 {
     let Some(m) = manifests.iter().find(|m| m.plugin.name == plugin_name) else {
@@ -98,37 +94,8 @@ where
     })?;
     let budget = CapabilityBudget::new(m.resources.timeout_ms.unwrap_or(5000));
     let handler = handler_for(decl, &m.plugin);
-    let slot_id = factory.mint_sync::<R>(decl, &m.plugin, budget, handler);
-    let slot = capability::Slot::<R, SyncKind>::new(factory.space().clone(), slot_id);
-    // Provide the Slot struct to cordis — plugin bodies inject Slot<R, K>.
-    // cordis wraps in Arc; require returns Arc<Slot<R, K>>.
-    ctx.provide(slot_key, slot).await
-        .map_err(|e| format!("provide {slot_key}: {e}"))?;
-    Ok(Some(slot_id))
-}
-
-async fn mint_and_provide_stream<R, F>(
-    ctx: &cordis::Context,
-    factory: &CapabilityFactory,
-    manifests: &[PluginManifest],
-    plugin_name: &str,
-    slot_key: &str,
-    handler_for: F,
-) -> Result<Option<capability::SlotId>, Box<dyn std::error::Error>>
-where
-    R: capability::StreamResource + 'static,
-    F: FnOnce(&CapabilityDecl, &PluginId) -> Arc<R>,
-{
-    let Some(m) = manifests.iter().find(|m| m.plugin.name == plugin_name) else {
-        return Ok(None);
-    };
-    let decl = m.exposes.first().ok_or_else(|| {
-        format!("{plugin_name}: manifest must expose at least one capability")
-    })?;
-    let budget = CapabilityBudget::new(m.resources.timeout_ms.unwrap_or(5000));
-    let handler = handler_for(decl, &m.plugin);
-    let slot_id = factory.mint_stream::<R>(decl, &m.plugin, budget, handler);
-    let slot = capability::Slot::<R, StreamKind>::new(factory.space().clone(), slot_id);
+    let slot_id = factory.mint::<R>(kind, decl, &m.plugin, budget, handler);
+    let slot = Slot::<R>::new(factory.space().clone(), slot_id);
     ctx.provide(slot_key, slot).await
         .map_err(|e| format!("provide {slot_key}: {e}"))?;
     Ok(Some(slot_id))
@@ -164,14 +131,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     ctx.provide("registry", registry.clone()).await?;
     println!("[main] core services provided");
 
-    // Phase 3: Mint typed tokens, allocate slots, install + provide to cordis.
+    // Phase 3 + 4: Mint typed tokens, allocate slots, install + provide to cordis.
     println!("\n[mint] capability tokens:");
 
-    let echo_slot_id = mint_and_provide_sync::<EchoResource, _>(
+    let echo_slot_id = mint_and_provide::<EchoResource, _>(
         &ctx,
         &factory,
         &manifests,
         "echo",
+        CapKind::Sync,
         "slot:echo",
         |_, _| plugins::echo::handler(),
     )
@@ -180,11 +148,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  echo  →  slot={id}");
     }
 
-    let reverse_slot_id = mint_and_provide_sync::<ReverseResource, _>(
+    let reverse_slot_id = mint_and_provide::<ReverseResource, _>(
         &ctx,
         &factory,
         &manifests,
         "reverse",
+        CapKind::Sync,
         "slot:reverse",
         |_, _| plugins::reverse::handler(),
     )
@@ -193,11 +162,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  reverse  →  slot={id}");
     }
 
-    let slow_slot_id = mint_and_provide_sync::<SlowResource, _>(
+    let slow_slot_id = mint_and_provide::<SlowResource, _>(
         &ctx,
         &factory,
         &manifests,
         "slow",
+        CapKind::Sync,
         "slot:slow",
         |_, _| plugins::slow::handler(),
     )
@@ -206,11 +176,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  slow  →  slot={id}");
     }
 
-    let sandbox_slot_id = mint_and_provide_sync::<SandboxResource, _>(
+    let sandbox_slot_id = mint_and_provide::<SandboxResource, _>(
         &ctx,
         &factory,
         &manifests,
         "sandbox",
+        CapKind::Sync,
         "slot:exec",
         |_, _| plugins::sandbox::handler(),
     )
@@ -219,34 +190,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  exec  →  slot={id}");
     }
 
-    // Echo-chain — depends on the typed Capability<EchoResource, SyncKind>.
-    if let (Some(_echo_id), Some(m)) = (
+    // Echo-chain — depends on the typed Capability<EchoResource>.
+    if let (Some(echo_id), Some(m)) = (
         echo_slot_id,
         manifests.iter().find(|m| m.plugin.name == "echo-chain"),
     ) {
         let decl = m.exposes.first().unwrap();
         let budget = CapabilityBudget::new(m.resources.timeout_ms.unwrap_or(5000));
-        // Acquire the typed echo capability from the CSpace (lookup_typed
-        // downcasts via Arc::downcast).
         let echo_cap = cspace
-            .lookup_typed::<EchoResource, SyncKind>(echo_slot_id.unwrap())
+            .lookup_typed::<EchoResource>(echo_id)
             .ok_or_else(|| "echo-chain: typed echo capability missing")?;
-        let slot_id = factory.mint_sync::<EchoChainResource>(
+        let slot_id = factory.mint::<EchoChainResource>(
+            CapKind::Sync,
             decl,
             &m.plugin,
             budget,
             plugins::echo_chain::handler(echo_cap),
         );
-        let slot = capability::Slot::<EchoChainResource, SyncKind>::new(cspace.clone(), slot_id);
+        let slot = Slot::<EchoChainResource>::new(cspace.clone(), slot_id);
         ctx.provide("slot:echo_chain", slot).await?;
         println!("  echo_chain  →  slot={slot_id}");
     }
 
-    let stream_echo_slot_id = mint_and_provide_stream::<StreamEchoResource, _>(
+    let stream_echo_slot_id = mint_and_provide::<StreamEchoResource, _>(
         &ctx,
         &factory,
         &manifests,
         "stream_echo",
+        CapKind::Stream,
         "slot:stream_echo",
         |_, _| plugins::stream_echo::handler(),
     )
@@ -255,11 +226,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("  stream_echo  →  slot={id}");
     }
 
-    let gen_slot_id = mint_and_provide_stream::<GeneratorResource, _>(
+    let gen_slot_id = mint_and_provide::<GeneratorResource, _>(
         &ctx,
         &factory,
         &manifests,
         "generator",
+        CapKind::Stream,
         "slot:generate",
         |_, _| plugins::generator::handler(),
     )
@@ -350,7 +322,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n[demo] capability invocations:");
 
     if let Some(echo_slot) = ctx
-        .require::<capability::Slot<EchoResource, SyncKind>>("slot:echo")
+        .require::<Slot<EchoResource>>("slot:echo")
         .ok()
     {
         match echo_slot.invoke(json!({"message": "hello", "n": 42})) {
@@ -358,17 +330,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => println!("  echo error: {e}"),
         }
     }
-    if let Some(rev_slot) = ctx
-        .require::<capability::Slot<ReverseResource, SyncKind>>("slot:reverse")
-        .ok()
-    {
+    if let Some(rev_slot) = ctx.require::<Slot<ReverseResource>>("slot:reverse").ok() {
         match rev_slot.invoke(json!("pipeline")) {
             Ok(v) => println!("  reverse: {v}"),
             Err(e) => println!("  reverse error: {e}"),
         }
     }
     if let Some(stream_slot) = ctx
-        .require::<capability::Slot<StreamEchoResource, StreamKind>>("slot:stream_echo")
+        .require::<Slot<StreamEchoResource>>("slot:stream_echo")
         .ok()
     {
         match stream_slot.open(json!("hello world from stream_echo")) {
@@ -380,10 +349,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => println!("  stream_echo error: {e}"),
         }
     }
-    if let Some(slow_slot) = ctx
-        .require::<capability::Slot<SlowResource, SyncKind>>("slot:slow")
-        .ok()
-    {
+    if let Some(slow_slot) = ctx.require::<Slot<SlowResource>>("slot:slow").ok() {
         println!(
             "\n  slow slot (timeout={}ms, will timeout):",
             slow_slot.meta().map(|m| m.timeout_ms).unwrap_or(0)
@@ -403,18 +369,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    // Pipeline — hold typed Capability<R, SyncKind> in stages.
+    // Pipeline — hold typed Capability<R> in stages.
     println!("\n[pipeline] token-based composition:");
     if let (Some(rev_slot), Some(echo_slot)) = (
-        ctx.require::<capability::Slot<ReverseResource, SyncKind>>("slot:reverse")
-            .ok(),
-        ctx.require::<capability::Slot<EchoResource, SyncKind>>("slot:echo")
-            .ok(),
+        ctx.require::<Slot<ReverseResource>>("slot:reverse").ok(),
+        ctx.require::<Slot<EchoResource>>("slot:echo").ok(),
     ) {
-        let rev_cap: Arc<Capability<ReverseResource, SyncKind>> = rev_slot
+        let rev_cap: Arc<Capability<ReverseResource>> = rev_slot
             .capability()
             .ok_or("rev slot empty")?;
-        let echo_cap: Arc<Capability<EchoResource, SyncKind>> = echo_slot
+        let echo_cap: Arc<Capability<EchoResource>> = echo_slot
             .capability()
             .ok_or("echo slot empty")?;
         let stages = vec![
@@ -430,7 +394,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Generator streaming.
     if let Some(gen_slot) = ctx
-        .require::<capability::Slot<GeneratorResource, StreamKind>>("slot:generate")
+        .require::<Slot<GeneratorResource>>("slot:generate")
         .ok()
     {
         match gen_slot.open(json!("hello there")) {
@@ -445,10 +409,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Sandbox via slot.
     println!("\n[sandbox] exec via slot (fuel=1_000_000):");
-    if let Some(sandbox_slot) = ctx
-        .require::<capability::Slot<SandboxResource, SyncKind>>("slot:exec")
-        .ok()
-    {
+    if let Some(sandbox_slot) = ctx.require::<Slot<SandboxResource>>("slot:exec").ok() {
         match sandbox_slot.invoke(json!({
             "path": "plugins/sandbox_programs/hello.wat",
             "fuel": 1_000_000
@@ -462,10 +423,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(echo_slot_id) = echo_slot_id {
         println!("\n[revoke] clearing echo slot={echo_slot_id}...");
         cspace.revoke(echo_slot_id);
-        if let Some(echo_slot) = ctx
-            .require::<capability::Slot<EchoResource, SyncKind>>("slot:echo")
-            .ok()
-        {
+        if let Some(echo_slot) = ctx.require::<Slot<EchoResource>>("slot:echo").ok() {
             match echo_slot.invoke(json!({"after": "revoke"})) {
                 Ok(v) => println!("  [unexpected] {v}"),
                 Err(e) => println!("  [expected after revoke] {e}"),
@@ -474,33 +432,31 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Demonstrate the four capability operations: grant / transfer /
-    // restrict / revoke. Operates on the typed `Slot<R, K>` references
+    // restrict / revoke. Operates on the typed `Slot<R>` references
     // already in scope.
     println!("\n[ops] grant / transfer / restrict / revoke:");
 
     if let (Some(echo_id), Some(slow_id)) = (echo_slot_id, slow_slot_id) {
         // Re-mint echo for the demo since the slot above was just revoked.
-        let echo_remint_id = factory.mint_sync::<EchoResource>(
+        let echo_remint_id = factory.mint::<EchoResource>(
+            CapKind::Sync,
             manifests.iter().find(|m| m.plugin.name == "echo").unwrap().exposes.first().unwrap(),
             &manifests.iter().find(|m| m.plugin.name == "echo").unwrap().plugin,
             CapabilityBudget::new(5000),
             plugins::echo::handler(),
         );
         let _ = echo_id;
-        let echo_slot = capability::Slot::<EchoResource, SyncKind>::new(cspace.clone(), echo_remint_id);
+        let echo_slot = Slot::<EchoResource>::new(cspace.clone(), echo_remint_id);
 
         // 1) Grant: derive a new slot "echo_lite" with reduced timeout.
         let lite_rights = capability::CapabilityRights { timeout_ms: 100 };
         let lite_id = echo_slot.grant(lite_rights, "echo_lite".to_string())?;
-        let lite_slot = capability::Slot::<EchoResource, SyncKind>::new(cspace.clone(), lite_id);
+        let lite_slot = Slot::<EchoResource>::new(cspace.clone(), lite_id);
         println!("  grant:    slot={lite_id} timeout=100ms (source preserved)");
-        // Source still works with original budget.
         match echo_slot.invoke(json!({"via": "source"})) {
             Ok(_) => println!("    source echo still works"),
             Err(e) => println!("    source echo error: {e}"),
         }
-        // Derived slot enforces the smaller budget; we just demonstrate
-        // that it exists, not that the budget trips on a fast call.
         let lite_cap = lite_slot.capability().expect("lite slot populated");
         println!(
             "    lite cap timeout_ms={} id={}",
@@ -509,23 +465,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
 
         // 2) Restrict: same operation semantically, different intent.
-        // Derive "echo_strict" with even smaller timeout. Source unchanged.
         let strict_rights = capability::CapabilityRights { timeout_ms: 50 };
         let strict_id = echo_slot.restrict(strict_rights, "echo_strict".to_string())?;
         println!("  restrict: slot={strict_id} timeout=50ms");
 
         // 3) Transfer: move slow to a new slot "slow_moved" with new
         //    timeout. Source slot is cleared.
-        let slow_slot = capability::Slot::<SlowResource, SyncKind>::new(cspace.clone(), slow_id);
+        let slow_slot = Slot::<SlowResource>::new(cspace.clone(), slow_id);
         let moved_id = slow_slot.transfer(capability::CapabilityRights { timeout_ms: 1000 })?;
         println!("  transfer: slot={moved_id} name=slow (source cleared)");
-        // Source is empty — invoke should fail.
         match slow_slot.invoke(json!({})) {
             Ok(_) => println!("    [unexpected] source still works"),
             Err(e) => println!("    [expected] source empty: {e}"),
         }
-        // Target is at the new slot, name "slow" (taken from source).
-        let moved_slot = capability::Slot::<SlowResource, SyncKind>::new(cspace.clone(), moved_id);
+        let moved_slot = Slot::<SlowResource>::new(cspace.clone(), moved_id);
         match moved_slot.invoke(json!({})) {
             Ok(_) => println!("    [unexpected] moved works (handler is 200ms, budget 1000ms)"),
             Err(e) => println!("    moved slot invoke: {e}"),
@@ -533,7 +486,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // 4) Revoke: drop the new strict slot.
         let _ = lite_slot.revoke();
-        let _ = capability::Slot::<EchoResource, SyncKind>::new(cspace.clone(), strict_id).revoke();
+        let _ = Slot::<EchoResource>::new(cspace.clone(), strict_id).revoke();
         println!("  revoke:   lite + strict slots cleared");
     }
 

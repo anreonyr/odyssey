@@ -1,20 +1,23 @@
-//! Capability factory — mints typed `Capability<R, K>` and installs them
-//! into a `CapabilitySpace` at a freshly allocated slot.
+//! Capability factory — mints typed `Capability<R>` and installs them
+//! into a `CapabilitySpace`.
 //!
-//! seL4 mapping: `CNode.Allocate` (the kernel alone creates slots).
-//! Here: only the factory creates and installs.
+//! The factory is the only place a capability can be created; this mirrors
+//! seL4's `CNode.Allocate`, which the kernel alone performs. The `kind`
+//! (sync / stream) is supplied by the caller since the host knows from
+//! the manifest whether the capability is streaming.
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::capability::{
     meta_from_decl, Capability, CapabilityBudget, CapabilityId, CapabilityMeta, CapabilitySpace,
-    StreamResource, SyncKind, SyncResource,
+    CapKind, Resource,
 };
 use crate::manifest::{CapabilityDecl, PluginId};
 
-/// Mints typed capability tokens and installs them into a `CapabilitySpace`.
-/// Cheap to clone; all clones share the same id counter and meta registry.
+/// Mints typed capability tokens and installs them into a
+/// `CapabilitySpace`. Cheap to clone; all clones share the same id
+/// counter and meta registry.
 #[derive(Clone)]
 pub struct CapabilityFactory {
     next_id: Arc<AtomicU64>,
@@ -36,71 +39,23 @@ impl CapabilityFactory {
         &self.space
     }
 
-    /// Mint a sync token, allocate a slot in the CSpace, install the cap,
-    /// and return the slot id.
-    pub fn mint_sync<R: SyncResource + 'static>(
+    /// Mint a typed token wrapping the resource, allocate a slot, install.
+    /// The `kind` is supplied by the caller (typically from the
+    /// manifest's `streaming` flag).
+    pub fn mint<R: Resource>(
         &self,
+        kind: CapKind,
         decl: &CapabilityDecl,
         plugin: &PluginId,
         budget: CapabilityBudget,
         handler: Arc<R>,
     ) -> crate::capability::SlotId {
-        self.mint_typed_sync::<R>(decl, plugin, budget, handler)
-    }
-
-    /// Mint a streaming token, allocate a slot, install, return slot id.
-    pub fn mint_stream<R: StreamResource + 'static>(
-        &self,
-        decl: &CapabilityDecl,
-        plugin: &PluginId,
-        budget: CapabilityBudget,
-        handler: Arc<R>,
-    ) -> crate::capability::SlotId {
-        self.mint_typed_stream::<R>(decl, plugin, budget, handler)
-    }
-
-    fn mint_typed_sync<R>(
-        &self,
-        decl: &CapabilityDecl,
-        plugin: &PluginId,
-        budget: CapabilityBudget,
-        handler: Arc<R>,
-    ) -> crate::capability::SlotId
-    where
-        R: SyncResource + 'static,
-    {
         let id = CapabilityId(self.next_id.fetch_add(1, Ordering::Relaxed));
         let budget = Arc::new(budget);
         let meta = meta_from_decl(id, decl, plugin, &budget);
-        let cap: Arc<Capability<R, SyncKind>> =
-            Arc::new(Capability::new_typed(meta.clone(), handler, budget));
-        let erased: Arc<dyn crate::capability::AnyCapability> = cap.clone();
-        let typed: Arc<dyn std::any::Any + Send + Sync> = cap;
+        let cap = Capability::new(meta.clone(), handler, budget, kind);
         let slot = self.space.allocate();
-        self.space.install(slot, erased, typed);
-        self.metas.lock().expect("factory poisoned").push(meta);
-        slot
-    }
-
-    fn mint_typed_stream<R>(
-        &self,
-        decl: &CapabilityDecl,
-        plugin: &PluginId,
-        budget: CapabilityBudget,
-        handler: Arc<R>,
-    ) -> crate::capability::SlotId
-    where
-        R: StreamResource + 'static,
-    {
-        let id = CapabilityId(self.next_id.fetch_add(1, Ordering::Relaxed));
-        let budget = Arc::new(budget);
-        let meta = meta_from_decl(id, decl, plugin, &budget);
-        let cap: Arc<Capability<R, crate::capability::StreamKind>> =
-            Arc::new(Capability::new_typed(meta.clone(), handler, budget));
-        let erased: Arc<dyn crate::capability::AnyCapability> = cap.clone();
-        let typed: Arc<dyn std::any::Any + Send + Sync> = cap;
-        let slot = self.space.allocate();
-        self.space.install(slot, erased, typed);
+        self.space.install(slot, Arc::new(cap));
         self.metas.lock().expect("factory poisoned").push(meta);
         slot
     }

@@ -1,16 +1,17 @@
-//! Echo plugin — possession of `Slot<EchoResource, SyncKind>`.
+//! Echo plugin — `EchoResource: Resource`. Sync only; `open` falls through
+//! to the trait's default "not a streaming capability" implementation.
 
 use std::sync::Arc;
 
 use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::Value;
 
-use crate::capability::{SyncKind, SyncResource};
+use crate::capability::{Resource, Slot};
 
 /// Echo is a pass-through: invoke returns its input unchanged.
 pub struct EchoResource;
 
-impl SyncResource for EchoResource {
+impl Resource for EchoResource {
     fn invoke(&self, input: Value) -> Result<Value, String> {
         Ok(input)
     }
@@ -25,7 +26,7 @@ pub fn echo_plugin() -> Arc<dyn Plugin> {
         "echo",
         vec![Injection::from("slot:echo")],
         |ctx: Context, _cfg: ()| async move {
-            let slot: Arc<crate::capability::Slot<EchoResource, SyncKind>> = ctx.require("slot:echo")?;
+            let slot: Arc<Slot<EchoResource>> = ctx.require("slot:echo")?;
             ctx.logger().log(
                 LogLevel::Info,
                 format!(
