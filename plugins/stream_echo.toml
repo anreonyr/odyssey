@@ -1,0 +1,23 @@
+# stream_echo plugin manifest — generator shape.
+
+[plugin]
+name    = "stream_echo"
+version = "0.1.0"
+
+[isolate]
+kind = "in_proc"
+
+[source]
+kind = "inline"
+
+[[exposes]]
+name      = "stream_echo"
+in_type   = "text"
+out_type  = "token"
+streaming = true
+
+[[host]]
+service = "dispatcher"
+
+[resources]
+timeout_ms = 30000

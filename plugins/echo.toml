@@ -1,0 +1,31 @@
+# Echo plugin manifest.
+#
+# This file describes WHAT echo is, not HOW it works. The plugin body
+# (in src/plugins/echo.rs) reads these fields and uses them to register
+# the capability. Change a field here, observe it in the dispatch table.
+
+[plugin]
+name    = "echo"
+version = "0.1.0"
+
+[isolate]
+kind = "in_proc"
+
+[source]
+kind = "inline"
+
+# Capabilities this plugin exposes.
+[[exposes]]
+name      = "echo"
+in_type   = "any"
+out_type  = "any"
+streaming = false
+
+# Host services we depend on. The kernel activates us only after these
+# are provided.
+[[host]]
+service = "dispatcher"
+
+# Resource hints — advisory, enforced later.
+[resources]
+timeout_ms = 5000

@@ -1,0 +1,20 @@
+# Sandbox plugin manifest — WASM-isolated execution.
+
+[plugin]
+name    = "sandbox"
+version = "0.1.0"
+
+[isolate]
+kind = "in_proc"
+
+[source]
+kind = "inline"
+
+[[exposes]]
+name      = "exec"
+in_type   = "object"
+out_type  = "object"
+streaming = false
+
+[[host]]
+service = "dispatcher"

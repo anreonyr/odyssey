@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [".", "echo-cdylib"]
+
+[package]
+name = "odyssey"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+cordis-rust = "0.2.1"
+semver = { version = "1", features = ["serde"] }
+thiserror = "2"
+toml = "0.8"
+tokio = { version = "1.50", features = ["full"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+wat = "1"
+wasmtime = "30"
+axum = "0.7"
+futures-core = "0.3"
+futures-util = "0.3"
+tokio-stream = { version = "0.1", features = ["sync"] }
+
+[[bin]]
+name = "odyssey"
+path = "src/main.rs"

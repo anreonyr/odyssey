@@ -1,0 +1,23 @@
+# Generator plugin manifest — LLM-shape streaming.
+
+[plugin]
+name    = "generator"
+version = "0.1.0"
+
+[isolate]
+kind = "in_proc"
+
+[source]
+kind = "inline"
+
+[[exposes]]
+name      = "generate"
+in_type   = "text"
+out_type  = "token"
+streaming = true
+
+[[host]]
+service = "dispatcher"
+
+[resources]
+timeout_ms = 30000

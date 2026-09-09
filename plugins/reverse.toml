@@ -1,0 +1,20 @@
+# Reverse plugin manifest — non-trivial capability for pipeline demos.
+
+[plugin]
+name    = "reverse"
+version = "0.1.0"
+
+[isolate]
+kind = "in_proc"
+
+[source]
+kind = "inline"
+
+[[exposes]]
+name      = "reverse"
+in_type   = "text"
+out_type  = "text"
+streaming = false
+
+[[host]]
+service = "dispatcher"

@@ -1,0 +1,26 @@
+# Echo plugin manifest — cdylib form.
+#
+# Same metadata as plugins/echo.toml, but isolation = wasm/Path
+# (we use the wasm variant to mean "external dynamic library" — the
+# distinction between WASM and cdylib is at the host adapter level).
+
+[plugin]
+name    = "echo-cdylib"
+version = "0.1.0"
+
+[isolate]
+kind = "wasm"
+path = "target/debug/libecho_cdylib.so"
+
+[source]
+kind = "path"
+path = "target/debug/libecho_cdylib.so"
+
+[[exposes]]
+name      = "echo_cdylib"
+in_type   = "any"
+out_type  = "any"
+streaming = false
+
+[[host]]
+service = "dispatcher"

@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>odyssey — kernel frontend</title>
+  <style>
+    body { font: 13px ui-monospace, monospace; background: #0d1117; color: #c9d1d9; margin: 24px; max-width: 920px; }
+    h1 { font-size: 16px; margin: 0 0 12px; color: #58a6ff; }
+    h2 { font-size: 13px; margin: 16px 0 8px; color: #8b949e; }
+    .cap { padding: 4px 8px; margin: 2px; border-radius: 4px; background: #161b22; display: inline-block; cursor: pointer; }
+    .cap:hover { background: #21262d; }
+    .cap.streaming { border-left: 3px solid #d29922; }
+    .cap.sync { border-left: 3px solid #3fb950; }
+    .row { display: flex; gap: 8px; align-items: flex-start; }
+    textarea { width: 100%; min-height: 80px; background: #161b22; color: #c9d1d9; border: 1px solid #30363d; border-radius: 4px; padding: 6px; font: inherit; }
+    button { background: #238636; color: white; border: none; border-radius: 4px; padding: 6px 12px; cursor: pointer; }
+    button:hover { background: #2ea043; }
+    pre { background: #161b22; padding: 8px; border-radius: 4px; overflow: auto; max-height: 240px; }
+    .stream-out { white-space: pre-wrap; min-height: 1.5em; }
+    .err { color: #f85149; }
+  </style>
+</head>
+<body>
+  <h1>odyssey — everything-is-a-plugin kernel, frontend view</h1>
+
+  <h2>registered capabilities</h2>
+  <div id="caps"></div>
+
+  <h2>single-value invoke</h2>
+  <div class="row">
+    <input id="single-cap" placeholder="capability name" style="flex: 0 0 200px; background:#161b22; color:#c9d1d9; border:1px solid #30363d; padding:6px;">
+    <textarea id="single-input" placeholder='{"any": "json"}'>{"hello": "world"}</textarea>
+    <button onclick="invokeSingle()">invoke</button>
+  </div>
+  <pre id="single-out"></pre>
+
+  <h2>streaming invoke (SSE)</h2>
+  <div class="row">
+    <input id="stream-cap" placeholder="capability name" value="stream_echo" style="flex: 0 0 200px; background:#161b22; color:#c9d1d9; border:1px solid #30363d; padding:6px;">
+    <textarea id="stream-input">streaming test</textarea>
+    <button onclick="invokeStream()">stream</button>
+  </div>
+  <pre id="stream-out" class="stream-out"></pre>
+
+  <script>
+    let caps = [];
+
+    async function refreshCaps() {
+      const r = await fetch('/api/caps');
+      caps = await r.json();
+      const el = document.getElementById('caps');
+      el.innerHTML = '';
+      for (const c of caps) {
+        const span = document.createElement('span');
+        span.className = 'cap ' + (c.streaming ? 'streaming' : 'sync');
+        span.textContent = c.name + (c.streaming ? ' ⏵' : '');
+        span.onclick = () => {
+          if (c.streaming) {
+            document.getElementById('stream-cap').value = c.name;
+          } else {
+            document.getElementById('single-cap').value = c.name;
+          }
+        };
+        el.appendChild(span);
+      }
+    }
+
+    async function invokeSingle() {
+      const cap = document.getElementById('single-cap').value;
+      let input;
+      try { input = JSON.parse(document.getElementById('single-input').value); }
+      catch (e) { document.getElementById('single-out').innerHTML = '<span class="err">invalid json: '+e+'</span>'; return; }
+      const r = await fetch('/api/invoke', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ capability: cap, input })
+      });
+      const out = document.getElementById('single-out');
+      if (r.ok) {
+        const body = await r.json();
+        out.textContent = JSON.stringify(body, null, 2);
+      } else {
+        const body = await r.json();
+        out.innerHTML = '<span class="err">'+body.error+'</span>';
+      }
+    }
+
+    async function invokeStream() {
+      const cap = document.getElementById('stream-cap').value;
+      const input = JSON.parse(document.getElementById('stream-input').value);
+      const out = document.getElementById('stream-out');
+      out.textContent = '';
+      const r = await fetch('/api/stream', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ capability: cap, input })
+      });
+      if (!r.ok) {
+        const body = await r.json();
+        out.innerHTML = '<span class="err">'+body.error+'</span>';
+        return;
+      }
+      const reader = r.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        // SSE frames are separated by blank lines; parse one at a time.
+        let idx;
+        while ((idx = buf.indexOf('\n\n')) !== -1) {
+          const frame = buf.slice(0, idx);
+          buf = buf.slice(idx + 2);
+          const ev = {};
+          for (const line of frame.split('\n')) {
+            if (line.startsWith('event:')) ev.event = line.slice(6).trim();
+            else if (line.startsWith('data:')) ev.data = (ev.data || '') + line.slice(5).trim();
+          }
+          if (ev.event === 'chunk') {
+            out.textContent += ev.data.replace(/^"|"$/g, '');
+          } else if (ev.event === 'done') {
+            out.textContent += '\n[done]';
+          } else if (ev.event === 'error') {
+            out.innerHTML = '<span class="err">'+ev.data+'</span>';
+          }
+        }
+      }
+    }
+
+    refreshCaps();
+  </script>
+</body>
+</html>

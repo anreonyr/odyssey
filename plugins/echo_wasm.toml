@@ -1,0 +1,22 @@
+# Echo plugin manifest — WASM (wasmtime) form.
+
+[plugin]
+name    = "echo-wasm"
+version = "0.1.0"
+
+[isolate]
+kind = "wasm"
+path = "plugins/echo.wat"
+
+[source]
+kind = "path"
+path = "plugins/echo.wat"
+
+[[exposes]]
+name      = "echo_wasm"
+in_type   = "any"
+out_type  = "any"
+streaming = false
+
+[[host]]
+service = "dispatcher"
