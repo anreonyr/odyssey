@@ -1,12 +1,10 @@
-//! Odyssey library — the shared module tree for both the legacy
-//! `odyssey` binary (`cargo run --bin odyssey`) and the Phase 1
-//! `lab` binary (`cargo run --bin lab -- <name>`).
+//! Odyssey library — the capability kernel + plugins.
 //!
-//! Splitting the modules behind a lib crate lets the labs skip the
-//! cordis boot, the HTTP bridge, and the full plugin set, while the
-//! main binary still exercises everything end-to-end.
+//! The single binary (`cargo run -- boot`) drives a 7-phase boot
+//! that mints typed `Capability<R>` tokens from every plugin manifest
+//! in `src/plugins/`, exercises them through the HTTP bridge, and
+//! exposes the layout via the `CapabilityGraph`.
 
 pub mod capability;
 pub mod host;
-pub mod lab;
 pub mod plugins;

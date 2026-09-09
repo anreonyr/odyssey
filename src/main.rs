@@ -1,49 +1,26 @@
-//! Odyssey entry point — single binary, subcommand dispatch.
+//! Odyssey entry point — single binary, 7-phase boot + HTTP bridge.
 //!
 //! ```text
-//! cargo run -- boot               # legacy 7-phase boot + HTTP bridge
-//! cargo run -- lab authority      # Phase 1+2 capability experiments
-//! cargo run -- lab multi_hop      # A → B → C delegation chain
+//! cargo run -- boot    # default; load manifests, mint caps, start HTTP server
+//! cargo run -- odyssey # alias for boot
 //! ```
 //!
-//! `cargo run` with no args prints usage. The lab commands are the
-//! primary Phase 1+2 surface; `boot` is preserved for the legacy
-//! 7-phase demo and the HTTP bridge.
+//! Without a subcommand the binary prints usage. The 10 Phase 1+2
+//! capability experiments that used to live at `cargo run -- lab <name>`
+//! are now exercised as `#[test]` functions under `tests/{alpha,beta,
+//! gamma,delta}/`; run them with `cargo test` (or `cargo test --
+//! --nocapture` for printed transcripts).
 
-use odyssey::{host::boot, lab};
+use odyssey::host::boot;
 
 const USAGE: &str = "usage:
   cargo run -- boot
-  cargo run -- lab <authority|delegation|revocation|composition|quota|namespace|graph|channel|agent|multi_hop>";
+  cargo run -- odyssey";
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let cmd = std::env::args().nth(1);
-    match cmd.as_deref() {
-        Some("boot") | Some("odyssey") => boot::run().await,
-        Some("lab") => run_lab(std::env::args().nth(2)),
-        _ => {
-            eprintln!("{USAGE}");
-            std::process::exit(2);
-        }
-    }
-}
-
-fn run_lab(name: Option<String>) -> Result<(), Box<dyn std::error::Error>> {
-    let name = name.unwrap_or_default();
-    match name.as_str() {
-        // Phase 1
-        "authority"   => lab::authority::run(),
-        "delegation"  => lab::delegation::run(),
-        "revocation"  => lab::revocation::run(),
-        "composition" => lab::composition::run(),
-        // Phase 2
-        "quota"       => lab::quota::run(),
-        "namespace"   => lab::namespace::run(),
-        "graph"       => lab::graph::run(),
-        "channel"     => lab::channel::run(),
-        "agent"       => lab::agent::run(),
-        "multi_hop"   => lab::multi_hop::run(),
+    match std::env::args().nth(1).as_deref() {
+        Some("boot") | Some("odyssey") | None => boot::run().await,
         _ => {
             eprintln!("{USAGE}");
             std::process::exit(2);
