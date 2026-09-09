@@ -442,7 +442,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let echo_slot = Slot::<EchoResource>::new(cspace.clone(), echo_remint_id);
 
         // 1) Grant: derive a new slot "echo_lite" with reduced timeout.
-        let lite_rights = crate::capability::CapabilityRights { timeout_ms: 100 };
+        let lite_rights = crate::capability::CapabilityRights::root(100);
         let lite_id = echo_slot.grant(lite_rights, "echo_lite".to_string())?;
         let lite_slot = Slot::<EchoResource>::new(cspace.clone(), lite_id);
         println!("  grant:    slot={lite_id} timeout=100ms (source preserved)");
@@ -452,20 +452,21 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
         let lite_cap = lite_slot.capability().expect("lite slot populated");
         println!(
-            "    lite cap timeout_ms={} id={}",
+            "    lite cap timeout_ms={} ops={:?} id={}",
             lite_cap.rights().timeout_ms,
+            lite_cap.operations(),
             lite_cap.id()
         );
 
         // 2) Restrict: same operation semantically, different intent.
-        let strict_rights = crate::capability::CapabilityRights { timeout_ms: 50 };
+        let strict_rights = crate::capability::CapabilityRights::root(50);
         let strict_id = echo_slot.restrict(strict_rights, "echo_strict".to_string())?;
         println!("  restrict: slot={strict_id} timeout=50ms");
 
         // 3) Transfer: move slow to a new slot "slow_moved" with new
         //    timeout. Source slot is cleared.
         let slow_slot = Slot::<SlowResource>::new(cspace.clone(), slow_id);
-        let moved_id = slow_slot.transfer(crate::capability::CapabilityRights { timeout_ms: 1000 })?;
+        let moved_id = slow_slot.transfer(crate::capability::CapabilityRights::root(1000))?;
         println!("  transfer: slot={moved_id} name=slow (source cleared)");
         match slow_slot.invoke(json!({})) {
             Ok(_) => println!("    [unexpected] source still works"),

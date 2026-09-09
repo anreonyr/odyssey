@@ -4,6 +4,7 @@
 use std::fmt;
 use std::num::NonZeroU64;
 
+use bitflags::bitflags;
 use serde_json::Value;
 
 use crate::host::manifest::PluginId;
@@ -97,25 +98,94 @@ impl CapabilityBudget {
 // Rights
 // ---------------------------------------------------------------------------
 
+bitflags! {
+    /// Per-call operations a capability permits. The kernel (CSpace) is
+    /// the only thing that *creates* these; `Capability::invoke` consults
+    /// the held rights at every call to reject an operation that was
+    /// dropped by `restrict`.
+    ///
+    /// This is Phase 1's first real "authority": a bit you can subtract,
+    /// bit you cannot expand, bit the resource can introspect.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+    pub struct OperationRights: u32 {
+        /// Read / observe the resource's state.
+        const READ      = 1 << 0;
+        /// Mutate the resource's state.
+        const WRITE     = 1 << 1;
+        /// Invoke an effect (start a computation, run an actor, ...).
+        const EXECUTE   = 1 << 2;
+        /// Lifecycle authority — re-grant, restrict, revoke.
+        const ADMIN     = 1 << 3;
+        /// Convenience: every bit set. Used when minting the root cap.
+        const ALL       = Self::READ.bits() | Self::WRITE.bits()
+                        | Self::EXECUTE.bits() | Self::ADMIN.bits();
+    }
+}
+
+impl Default for OperationRights {
+    fn default() -> Self {
+        Self::ALL
+    }
+}
+
 /// Rights attached to a capability. Supplied when deriving a child via
-/// `grant`, `transfer`, or `restrict`. Currently a single dimension
-/// (`timeout_ms`); extensible to rights bits later.
+/// `grant`, `transfer`, or `restrict`. Two dimensions:
+///
+/// - `operations` — what the holder may *do* (`READ`/`WRITE`/...).
+///   Attenuation (`restrict`) enforces `child ⊆ parent`.
+/// - `timeout_ms` — wall-clock budget per call.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CapabilityRights {
+    pub operations: OperationRights,
     pub timeout_ms: u32,
 }
 
 impl Default for CapabilityRights {
     fn default() -> Self {
-        Self { timeout_ms: 5000 }
+        Self {
+            operations: OperationRights::ALL,
+            timeout_ms: 5000,
+        }
     }
 }
 
 impl CapabilityRights {
+    /// Construct an "all authority, default timeout" rights bag — what
+    /// the host uses when minting a root capability.
+    pub fn root(timeout_ms: u32) -> Self {
+        Self {
+            operations: OperationRights::ALL,
+            timeout_ms,
+        }
+    }
+
     #[allow(dead_code)]
     pub fn with_timeout(mut self, ms: u32) -> Self {
         self.timeout_ms = ms;
         self
+    }
+
+    #[allow(dead_code)]
+    pub fn with_operations(mut self, ops: OperationRights) -> Self {
+        self.operations = ops;
+        self
+    }
+
+    /// `self ⊇ other` — every bit and every budget ceiling in `other`
+    /// is also present in `self`. The CSpace rejects any child whose
+    /// rights are *not* a subset of its parent's.
+    pub fn contains(&self, other: &CapabilityRights) -> bool {
+        self.operations.contains(other.operations) && self.timeout_ms >= other.timeout_ms
+    }
+
+    /// Return the largest rights that is ≤ `self` AND ≤ `other` —
+    /// i.e. the intersection. Used when `restrict` silently clamps a
+    /// caller that asks for more than it has.
+    pub fn intersect(&self, other: &CapabilityRights) -> CapabilityRights {
+        CapabilityRights {
+            operations: self.operations & other.operations,
+            timeout_ms: self.timeout_ms.min(other.timeout_ms),
+        }
     }
 }
 
@@ -140,6 +210,19 @@ pub enum CapabilityError {
     AlreadyExists(String),
     /// The slot was empty or revoked when an operation tried to read it.
     SlotEmpty(SlotId),
+    /// `restrict` (or `grant`) asked for rights the parent does not have.
+    /// This is the "you cannot amplify authority" invariant.
+    AttenuationViolation {
+        from: SlotId,
+        requested: OperationRights,
+        held: OperationRights,
+    },
+    /// The capability was invoked with an operation bit it does not hold.
+    OperationDenied {
+        name: String,
+        requested: OperationRights,
+        held: OperationRights,
+    },
 }
 
 impl fmt::Display for CapabilityError {
@@ -147,6 +230,19 @@ impl fmt::Display for CapabilityError {
         match self {
             Self::AlreadyExists(n) => write!(f, "capability already installed: {n}"),
             Self::SlotEmpty(s) => write!(f, "slot {} empty or revoked", s.raw()),
+            Self::AttenuationViolation { from, requested, held } => write!(
+                f,
+                "attenuation violation at slot {}: requested {:?} not subset of {:?}",
+                from.raw(),
+                requested,
+                held
+            ),
+            Self::OperationDenied { name, requested, held } => write!(
+                f,
+                "operation denied for capability \"{name}\": requested {:?} not in {:?}",
+                requested,
+                held
+            ),
         }
     }
 }

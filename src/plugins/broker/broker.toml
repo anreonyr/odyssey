@@ -1,0 +1,31 @@
+# Broker plugin manifest — inter-plugin capability delegation.
+#
+# The broker holds a Capability<CounterResource> at mint time and
+# exposes a single "broker" capability that takes `{"op":"describe"}`
+# or `{"op":"delegate","name":"...","ops":[...]}`. The host wires
+# `slot:counter` and `slot:broker` into the broker's plugin body.
+
+[plugin]
+name    = "broker"
+version = "0.1.0"
+
+[isolate]
+kind = "in_proc"
+
+[source]
+kind = "inline"
+
+[[exposes]]
+name      = "broker"
+in_type   = "object"
+out_type  = "object"
+streaming = false
+
+# Broker depends on the counter plugin.
+[[consumes]]
+plugin     = "counter"
+version    = "^0.1"
+capability = "counter"
+
+[resources]
+timeout_ms = 5000

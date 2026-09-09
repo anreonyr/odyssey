@@ -270,6 +270,10 @@ impl CapabilitySpace {
 
     /// **Grant**: derive a new slot with the given rights; source slot
     /// is unchanged. New slot is registered under `new_name`.
+    ///
+    /// Attenuation invariant: the requested rights must be a subset of
+    /// the source's rights — both the operation bits and the timeout
+    /// ceiling. You cannot amplify authority you don't have.
     pub fn grant<R: Resource>(
         &self,
         from: SlotId,
@@ -279,6 +283,14 @@ impl CapabilitySpace {
         let source: Arc<Capability<R>> = self
             .lookup_typed::<R>(from)
             .ok_or(CapabilityError::SlotEmpty(from))?;
+        let held = source.rights();
+        if !held.contains(&rights) {
+            return Err(CapabilityError::AttenuationViolation {
+                from,
+                requested: rights.operations,
+                held: held.operations,
+            });
+        }
         let new_id = self.next_derived_id();
         let derived = source.derive(rights, new_id);
         Ok(self.install_derived(derived, new_name))
@@ -286,6 +298,7 @@ impl CapabilitySpace {
 
     /// **Transfer**: move the capability to a fresh slot with the given
     /// rights. New slot takes the source's name. Source slot is cleared.
+    /// Attenuation is required — you can only transfer authority you hold.
     pub fn transfer<R: Resource>(
         &self,
         from: SlotId,
@@ -294,6 +307,14 @@ impl CapabilitySpace {
         let source: Arc<Capability<R>> = self
             .lookup_typed::<R>(from)
             .ok_or(CapabilityError::SlotEmpty(from))?;
+        let held = source.rights();
+        if !held.contains(&rights) {
+            return Err(CapabilityError::AttenuationViolation {
+                from,
+                requested: rights.operations,
+                held: held.operations,
+            });
+        }
         let source_name = source.name().to_string();
         let new_id = self.next_derived_id();
         let derived = source.derive(rights, new_id);
@@ -302,9 +323,16 @@ impl CapabilitySpace {
         Ok(new_slot)
     }
 
-    /// **Restrict**: same as `grant` — derive a new slot with reduced
-    /// rights, source preserved. Provided as a distinct method so the
-    /// call site documents intent.
+    /// **Restrict**: derive a new slot with rights that must be a strict
+    /// subset (or equal) of the parent's. Mechanically identical to
+    /// `grant`; provided as a distinct method so the call site
+    /// documents intent — "I am dropping authority" vs. "I am
+    /// propagating a peer view".
+    ///
+    /// Both `grant` and `restrict` enforce `rights(child) ⊆
+    /// rights(parent)`; the difference is the seL4-style mental model:
+    /// grant = minting a peer's view, restrict = dropping privileges on
+    /// yourself.
     pub fn restrict<R: Resource>(
         &self,
         from: SlotId,

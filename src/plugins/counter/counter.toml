@@ -1,0 +1,28 @@
+# Counter plugin manifest — Phase 1 keystone experimental capability.
+#
+# Authority comes from the OperationRights set at mint time:
+#   READ      → read the value
+#   WRITE     → increment
+#   ADMIN     → reset
+#
+# The kernel's job (cspace.restrict) is to enforce that a derived cap
+# cannot *gain* authority over what its parent holds.
+
+[plugin]
+name    = "counter"
+version = "0.1.0"
+
+[isolate]
+kind = "in_proc"
+
+[source]
+kind = "inline"
+
+[[exposes]]
+name      = "counter"
+in_type   = "object"
+out_type  = "object"
+streaming = false
+
+[resources]
+timeout_ms = 5000

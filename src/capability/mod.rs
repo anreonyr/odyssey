@@ -42,7 +42,7 @@ pub use cspace::{CapabilitySpace, Slot};
 pub use resource::Resource;
 pub use types::{
     CapabilityBudget, CapabilityChunk, CapabilityError, CapabilityId, CapabilityMeta,
-    CapabilityRights, CapKind, SlotId,
+    CapabilityRights, CapKind, OperationRights, SlotId,
 };
 #[allow(unused_imports)]
 use CapabilityError as _;

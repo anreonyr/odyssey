@@ -6,7 +6,43 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added
+### Added — Phase 1: Capability lab
+
+Phase 1 is the **capability experiment phase**: prove the model itself
+is real before building Agent / LLM / Embedder on top of it.
+
+- **`OperationRights` bitflags** (`src/capability/types.rs`):
+  `READ | WRITE | EXECUTE | ADMIN`. `Capability<R>` now carries the
+  full rights bag; `Capability::invoke_op(op, input)` is the kernel-
+  level guard that consults the bits at every call.
+- **Real attenuation in `restrict` / `grant` / `transfer`**: all three
+  now verify `rights(child) ⊆ rights(parent)` and return
+  `CapabilityError::AttenuationViolation` when violated. This is the
+  invariant the previous `restrict()` was missing.
+- **`CapabilityRights` extended** with `operations: OperationRights`
+  alongside `timeout_ms`. Helpers: `contains`, `intersect`, `root`.
+- **`CounterResource` plugin** (`src/plugins/counter/`): the keystone
+  experimental resource. One shared integer behind a `Mutex`, three
+  operations (`read`/`increment`/`reset`) gated by
+  `READ`/`WRITE`/`ADMIN` respectively.
+- **`BrokerResource` plugin** (`src/plugins/broker/`): the first
+  inter-plugin delegation. Holds a `Capability<CounterResource>` and
+  mints derived slots via `cspace.restrict` on `{"op":"delegate"}`.
+- **`SyncStage::from_slot(slot_id, cspace)`** (`src/host/pipeline.rs`):
+  slot-bound pipeline stage. Re-resolves on every `run`, so revocation
+  propagates without touching the pipeline. Existing
+  `SyncStage::new(cap)` is preserved as `Pinned` for the legacy demo.
+- **`PipelineError::SlotRevoked`** for the slot-bound failure path.
+- **`bin/lab.rs`** — `cargo run --bin lab -- <authority|delegation|
+  revocation|composition>` boots a fresh CSpace per experiment and
+  prints a self-explanatory transcript.
+- **Property tests** (`tests/capability_lab.rs`): the six properties
+  the brief calls out — authority, delegation, restrict-attenuation,
+  revocation, budget, composition — plus two bonus tests
+  (`grant_preserves_source_capability`, `transfer_moves_and_clears_
+  source`). All 8 pass.
+
+### Added (earlier, kept here)
 - **Possession model**: `CapabilitySpace` (seL4 CSpace analogue) +
   `Slot<R, K>` typed reference + `Capability<R, K>` occupant.
   Plugins hold `Slot<R, K>` references; the host can revoke slot
@@ -32,6 +68,9 @@ adheres to [Semantic Versioning](https://semver.org/).
   `log` function.
 
 ### Changed
+- **Library split**: `src/lib.rs` exposes the shared module tree so
+  `bin/odyssey` (full boot + HTTP) and `bin/lab` (Phase 1
+  experiments) can share `capability`, `host`, `plugins`, and `lab`.
 - **Arc-shared state**: `CapabilityService` and `CapabilityFactory`
   use `Arc<Mutex<...>>` / `Arc<AtomicU64>` so `Clone` shares inner
   state. Plugins, the service, and the HTTP bridge all see the

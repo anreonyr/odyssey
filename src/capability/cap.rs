@@ -8,7 +8,9 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 
 use super::resource::Resource;
-use super::types::{CapabilityChunk, CapabilityId, CapabilityMeta, CapabilityRights, CapKind};
+use super::types::{
+    CapabilityChunk, CapabilityId, CapabilityMeta, CapabilityRights, CapKind, OperationRights,
+};
 
 // ---------------------------------------------------------------------------
 // Capability<R> — typed capability handle
@@ -16,10 +18,19 @@ use super::types::{CapabilityChunk, CapabilityId, CapabilityMeta, CapabilityRigh
 
 /// Unforgeable capability object. Wraps an `Arc<R>` (the resource) with
 /// metadata, budget, and a runtime `CapKind`.
+///
+/// Beyond the per-call wall-clock budget, `Capability` also carries the
+/// `OperationRights` it was minted (or last restricted) with. `invoke_op`
+/// is the kernel-level guard that turns those bits into runtime
+/// authority: every call site must declare which operation it is
+/// performing and the capability rejects anything it doesn't hold.
 pub struct Capability<R: Resource> {
     meta: CapabilityMeta,
     handler: Arc<R>,
     budget: Arc<super::types::CapabilityBudget>,
+    /// Operations this cap was derived with. The kernel writes this
+    /// at mint time and clamps it at every `restrict`.
+    operations: OperationRights,
     kind: CapKind,
 }
 
@@ -30,7 +41,13 @@ impl<R: Resource> Capability<R> {
         budget: Arc<super::types::CapabilityBudget>,
         kind: CapKind,
     ) -> Self {
-        Self { meta, handler, budget, kind }
+        Self {
+            meta,
+            handler,
+            budget,
+            operations: OperationRights::ALL,
+            kind,
+        }
     }
 
     pub fn name(&self) -> &str {
@@ -47,13 +64,25 @@ impl<R: Resource> Capability<R> {
     pub fn kind(&self) -> CapKind {
         self.kind
     }
+
+    /// Operations currently held. Can only be a subset of the parent's.
+    pub fn operations(&self) -> OperationRights {
+        self.operations
+    }
+
+    /// Full rights bag — both axes.
     pub fn rights(&self) -> CapabilityRights {
-        CapabilityRights { timeout_ms: self.budget.timeout_ms }
+        CapabilityRights {
+            operations: self.operations,
+            timeout_ms: self.budget.timeout_ms,
+        }
     }
 
     /// Derive a new capability sharing the same handler `Arc<R>` with the
     /// source, with the given rights and a fresh `CapabilityId`. Kind is
-    /// preserved.
+    /// preserved. The CSpace is responsible for verifying the requested
+    /// rights are a subset of `self.operations` *before* calling derive;
+    /// derive itself just records what the CSpace asked for.
     pub fn derive(&self, rights: CapabilityRights, new_id: CapabilityId) -> Self {
         let new_budget = Arc::new(super::types::CapabilityBudget::new(rights.timeout_ms));
         let mut new_meta = self.meta.clone();
@@ -63,6 +92,7 @@ impl<R: Resource> Capability<R> {
             meta: new_meta,
             handler: self.handler.clone(),
             budget: new_budget,
+            operations: rights.operations,
             kind: self.kind,
         }
     }
@@ -74,20 +104,40 @@ impl<R: Resource> Clone for Capability<R> {
             meta: self.meta.clone(),
             handler: self.handler.clone(),
             budget: self.budget.clone(),
+            operations: self.operations,
             kind: self.kind,
         }
     }
 }
 
 impl<R: Resource> Capability<R> {
-    /// Invoke the resource. If elapsed wall-clock time exceeds the
-    /// token's `timeout_ms`, returns `Err` and the handler result is
-    /// dropped.
+    /// Invoke the resource **as if the caller held `EXECUTE`** — for
+    /// backward compatibility with existing plugins that don't yet know
+    /// about per-operation rights. New callers should use `invoke_op`
+    /// and pick the right bit.
+    ///
+    /// Returns `Err` if the held rights don't include `EXECUTE`, the
+    /// elapsed wall-clock time exceeds the token's `timeout_ms`, or
+    /// the cap is a stream.
     pub fn invoke(&self, input: Value) -> Result<Value, String> {
+        self.invoke_op(OperationRights::EXECUTE, input)
+    }
+
+    /// The kernel-level guard: invoke `input` only if `self.operations`
+    /// covers every bit in `requested`. The resource then runs under
+    /// the same wall-clock budget enforcement as before.
+    pub fn invoke_op(
+        &self,
+        requested: OperationRights,
+        input: Value,
+    ) -> Result<Value, String> {
         if self.kind != CapKind::Sync {
+            return Err(format!("{}: not a sync capability", self.meta.name));
+        }
+        if !self.operations.contains(requested) {
             return Err(format!(
-                "{}: not a sync capability",
-                self.meta.name
+                "{}: operation denied — requested {:?}, held {:?}",
+                self.meta.name, requested, self.operations
             ));
         }
         let start = Instant::now();
@@ -106,10 +156,7 @@ impl<R: Resource> Capability<R> {
     /// budget governs the open-to-last-chunk window for the caller.
     pub fn open(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
         if self.kind != CapKind::Stream {
-            return Err(format!(
-                "{}: not a streaming capability",
-                self.meta.name
-            ));
+            return Err(format!("{}: not a streaming capability", self.meta.name));
         }
         self.handler.open(input)
     }

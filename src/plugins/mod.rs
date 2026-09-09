@@ -5,6 +5,8 @@
 //! - `<name>.toml` — the manifest (data contract)
 //! - data files   — anything the plugin needs (e.g. `*.wat` for WASM)
 
+pub mod broker;
+pub mod counter;
 pub mod echo;
 pub mod echo_cdylib;
 pub mod echo_chain;

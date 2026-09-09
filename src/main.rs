@@ -1,11 +1,13 @@
-//! Odyssey entry point. All the boot orchestration lives in
-//! `host::boot::run`; this file just wires up the modules and calls it.
+//! Odyssey entry point — full 7-phase boot + HTTP bridge.
+//!
+//! Phase 1's primary experimental surface is the `lab` binary
+//! (`cargo run --bin lab -- <name>`). This binary keeps the legacy
+//! demo so the HTTP bridge, the full plugin set, and the rev/
+//! grant/transfer ops continue to work end-to-end.
 
-mod capability;
-mod host;
-mod plugins;
+use odyssey::host::boot;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    host::boot::run().await
+    boot::run().await
 }

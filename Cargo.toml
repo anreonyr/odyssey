@@ -27,6 +27,7 @@ axum = "0.7"
 futures-core = "0.3"
 futures-util = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
+bitflags = { version = "2", features = ["serde"] }
 
 [[bin]]
 name = "odyssey"
