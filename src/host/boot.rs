@@ -38,7 +38,7 @@ use crate::plugins::{
 use crate::host::registry::Registry;
 use serde_json::json;
 
-const MANIFEST_DIR: &str = "plugins";
+const MANIFEST_DIR: &str = "src/plugins";
 
 // ---------------------------------------------------------------------------
 // Streaming output helper
@@ -404,7 +404,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n[sandbox] exec via slot (fuel=1_000_000):");
     if let Some(sandbox_slot) = ctx.require::<Slot<SandboxResource>>("slot:exec").ok() {
         match sandbox_slot.invoke(json!({
-            "path": "plugins/sandbox_programs/hello.wat",
+            "path": "src/plugins/sandbox/sandbox_programs/hello.wat",
             "fuel": 1_000_000
         })) {
             Ok(v) => println!("  {}", serde_json::to_string_pretty(&v).unwrap()),
@@ -508,17 +508,23 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn load_manifests(dir: &str) -> Result<Vec<PluginManifest>, Box<dyn std::error::Error>> {
-    let mut out = Vec::new();
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.extension().and_then(|s| s.to_str()) != Some("toml") {
-            continue;
+    fn walk(p: &std::path::Path, out: &mut Vec<PluginManifest>) -> Result<(), Box<dyn std::error::Error>> {
+        for entry in std::fs::read_dir(p)? {
+            let entry = entry?;
+            let path = entry.path();
+            let ft = entry.file_type()?;
+            if ft.is_dir() {
+                walk(&path, out)?;
+            } else if path.extension().and_then(|s| s.to_str()) == Some("toml") {
+                let m = PluginManifest::from_path(&path)
+                    .map_err(|e| format!("{}: {e}", path.display()))?;
+                out.push(m);
+            }
         }
-        let m = PluginManifest::from_path(&path)
-            .map_err(|e| format!("{}: {e}", path.display()))?;
-        out.push(m);
+        Ok(())
     }
+    let mut out = Vec::new();
+    walk(std::path::Path::new(dir), &mut out)?;
     out.sort_by(|a, b| a.plugin.name.cmp(&b.plugin.name));
     Ok(out)
 }

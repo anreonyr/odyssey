@@ -6,11 +6,11 @@ version = "0.1.0"
 
 [isolate]
 kind = "wasm"
-path = "plugins/echo.wat"
+path = "echo.wat"
 
 [source]
 kind = "path"
-path = "plugins/echo.wat"
+path = "echo.wat"
 
 [[exposes]]
 name      = "echo_wasm"
