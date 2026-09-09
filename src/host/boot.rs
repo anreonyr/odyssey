@@ -465,8 +465,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
         // 3) Transfer: move slow to a new slot "slow_moved" with new
         //    timeout. Source slot is cleared.
+        //
+        //    The slow slot was minted from slow.toml with
+        //    `timeout_ms = 50`, so the transferred slot must use a
+        //    subset of that budget (real attenuation, enforced by
+        //    Phase 1's restrict/grant/transfer). 25ms is a valid
+        //    subset.
         let slow_slot = Slot::<SlowResource>::new(cspace.clone(), slow_id);
-        let moved_id = slow_slot.transfer(crate::capability::CapabilityRights::root(1000))?;
+        let moved_id = slow_slot.transfer(crate::capability::CapabilityRights::root(25))?;
         println!("  transfer: slot={moved_id} name=slow (source cleared)");
         match slow_slot.invoke(json!({})) {
             Ok(_) => println!("    [unexpected] source still works"),
