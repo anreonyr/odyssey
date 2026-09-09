@@ -1,4 +1,4 @@
-//! Generator plugin — mock LLM-style streaming generator.
+//! Generator — mock LLM-style streaming resource.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -7,14 +7,16 @@ use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
-use crate::capability::{CapabilityChunk, CapabilityService, CapabilityToken, StreamInvoke};
+use crate::capability::{
+    AnyCapability, Capability, CapabilityChunk, CapabilityService, StreamKind, StreamResource,
+};
 
 const TICK: Duration = Duration::from_millis(15);
 
-struct GeneratorHandler;
+pub struct GeneratorResource;
 
-impl StreamInvoke for GeneratorHandler {
-    fn stream(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
+impl StreamResource for GeneratorResource {
+    fn open(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
         let prompt = input
             .as_str()
             .ok_or_else(|| "generate: input must be a string".to_string())?
@@ -41,8 +43,8 @@ impl StreamInvoke for GeneratorHandler {
     }
 }
 
-pub fn handler() -> Arc<dyn StreamInvoke> {
-    Arc::new(GeneratorHandler)
+pub fn handler() -> Arc<GeneratorResource> {
+    Arc::new(GeneratorResource)
 }
 
 pub fn generator_plugin() -> Arc<dyn Plugin> {
@@ -53,14 +55,13 @@ pub fn generator_plugin() -> Arc<dyn Plugin> {
             Injection::from("capability_service"),
         ],
         |ctx: Context, _cfg: ()| async move {
-            let stream_token: Arc<CapabilityToken> = ctx.require("cap:generate")?;
+            let gen_cap: Arc<Capability<GeneratorResource, StreamKind>> = ctx.require("cap:generate")?;
             let cap_svc: Arc<CapabilityService> = ctx.require("capability_service")?;
-            cap_svc.register(stream_token)?;
-
             ctx.logger().log(
                 LogLevel::Info,
                 "generator plugin: streaming LLM-shape capability activated".into(),
             );
+            cap_svc.register(gen_cap as Arc<dyn AnyCapability>)?;
             Ok(())
         },
     )

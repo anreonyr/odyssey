@@ -1,21 +1,18 @@
-//! Echo-chain plugin — wraps the echo token, returns a chained envelope.
-//!
-//! The handler factory takes an `Arc<CapabilityToken>` for echo so the
-//! composite capability can delegate to its dependency at runtime. main.rs
-//! is responsible for minting echo first and passing it here.
+//! Echo-chain — compound resource that wraps a `Capability<EchoResource, SyncKind>`.
 
 use std::sync::Arc;
 
 use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::Value;
 
-use crate::capability::{CapabilityService, CapabilityToken, SyncInvoke};
+use crate::capability::{AnyCapability, Capability, CapabilityService, SyncKind, SyncResource};
+use crate::plugins::echo::EchoResource;
 
-struct EchoChainHandler {
-    echo: Arc<CapabilityToken>,
+pub struct EchoChainResource {
+    echo: Arc<Capability<EchoResource, SyncKind>>,
 }
 
-impl SyncInvoke for EchoChainHandler {
+impl SyncResource for EchoChainResource {
     fn invoke(&self, input: Value) -> Result<Value, String> {
         let inner = self.echo.invoke(input)?;
         Ok(serde_json::json!({
@@ -25,10 +22,8 @@ impl SyncInvoke for EchoChainHandler {
     }
 }
 
-/// Build the chain handler. `echo` must be a valid (already-minted) token;
-/// main.rs guarantees ordering.
-pub fn handler(echo: Arc<CapabilityToken>) -> Arc<dyn SyncInvoke> {
-    Arc::new(EchoChainHandler { echo })
+pub fn handler(echo: Arc<Capability<EchoResource, SyncKind>>) -> Arc<EchoChainResource> {
+    Arc::new(EchoChainResource { echo })
 }
 
 pub fn echo_chain_plugin() -> Arc<dyn Plugin> {
@@ -40,11 +35,9 @@ pub fn echo_chain_plugin() -> Arc<dyn Plugin> {
             Injection::from("capability_service"),
         ],
         |ctx: Context, _cfg: ()| async move {
-            let echo_cap: Arc<CapabilityToken> = ctx.require("cap:echo")?;
-            let chain_token: Arc<CapabilityToken> = ctx.require("cap:echo_chain")?;
+            let echo_cap: Arc<Capability<EchoResource, SyncKind>> = ctx.require("cap:echo")?;
+            let chain_cap: Arc<Capability<EchoChainResource, SyncKind>> = ctx.require("cap:echo_chain")?;
             let cap_svc: Arc<CapabilityService> = ctx.require("capability_service")?;
-            cap_svc.register(chain_token)?;
-
             ctx.logger().log(
                 LogLevel::Info,
                 format!(
@@ -53,6 +46,7 @@ pub fn echo_chain_plugin() -> Arc<dyn Plugin> {
                 )
                 .into(),
             );
+            cap_svc.register(chain_cap as Arc<dyn AnyCapability>)?;
             Ok(())
         },
     )

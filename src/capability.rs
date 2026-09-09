@@ -1,23 +1,35 @@
-//! Capability model — seL4-inspired.
+//! Capability model — seL4-inspired, typed by resource and kind.
 //!
-//! A `CapabilityToken` is an unforgeable handle to a piece of compute, scoped
-//! by a wall-clock timeout. Tokens are minted by [`CapabilityFactory`] (only
-//! the factory can produce them — same role as `CNode.Allocate` in seL4) and
-//! handed to plugins via cordis. Tokens are shared via `Arc` so a clone
-//! refers to the same underlying state.
+//! ## Two axes of typing
+//!
+//! 1. **Resource** (`R`) — what the plugin module declared. `R: SyncResource`
+//!    for sync capabilities, `R: StreamResource` for streaming.
+//!
+//! 2. **Kind** (`K`) — `SyncKind` or `StreamKind`. The kind is encoded as a
+//!    `PhantomData` parameter so the type system distinguishes sync and
+//!    streaming capabilities, and `AnyCapability` can have non-overlapping
+//!    impls for each.
+//!
+//! Together: `Capability<EchoResource, SyncKind>` vs
+//! `Capability<StreamEchoResource, StreamKind>`. Each is its own concrete
+//! type — the compiler will not let you accidentally treat one as the
+//! other, and `AnyCapability` is implemented once per kind so no
+//! coherence conflict arises.
 //!
 //! ## seL4 mapping
 //!
-//!   CNode.Allocate           → factory.mint_sync / mint_stream
-//!   CNode capability (handle)→ CapabilityToken (Arc)
-//!   endpoint.send            → token.invoke / token.stream
-//!   resource badge           → CapabilityBudget.timeout_ms (per-call wall clock)
+//!   CNode slot           → Capability<R, K>
+//!   Kernel object        → R (the resource, allocated by the plugin)
+//!   seL4_Send            → Capability::invoke (K=SyncKind) / open (K=StreamKind)
+//!   Resource badge       → CapabilityBudget.timeout_ms (per-call wall clock)
 //!
-//! The timeout is enforced on every `invoke` call: if the handler runs
-//! longer than the budget, the call returns an error and never silently
-//! succeeds. There is no accounting of remaining budget — single-call is the
-//! only dimension we enforce here.
+//! ## Type erasure
+//!
+//! The shared `CapabilityService` registry holds `Arc<dyn AnyCapability>`
+//! so capabilities of different resource types can coexist. The HTTP
+//! bridge and pipeline use this erased interface.
 
+use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -26,8 +38,32 @@ use tokio::sync::mpsc;
 
 use crate::manifest::{CapabilityDecl, PluginId};
 
-/// Unforgeable capability identifier. Two tokens minted at different times
-/// always have distinct ids, even if they wrap the same handler.
+// ---------------------------------------------------------------------------
+// Kinds — type-level distinction between sync and streaming capabilities
+// ---------------------------------------------------------------------------
+
+/// Marker for sync capabilities.
+pub struct SyncKind;
+/// Marker for streaming capabilities.
+pub struct StreamKind;
+
+/// Capability-kind metadata: streaming bit at the type level.
+pub trait CapabilityKind: Send + Sync + 'static {
+    #[allow(dead_code)]
+    const STREAMING: bool;
+}
+impl CapabilityKind for SyncKind {
+    const STREAMING: bool = false;
+}
+impl CapabilityKind for StreamKind {
+    const STREAMING: bool = true;
+}
+
+// ---------------------------------------------------------------------------
+// Basic types
+// ---------------------------------------------------------------------------
+
+/// Unforgeable capability identifier.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct CapabilityId(pub u64);
 
@@ -37,8 +73,6 @@ impl std::fmt::Display for CapabilityId {
     }
 }
 
-/// Static description of a capability. Carried inside every token; surfaces
-/// to the HTTP bridge for enumeration.
 #[derive(Clone, Debug)]
 pub struct CapabilityMeta {
     pub id: CapabilityId,
@@ -50,8 +84,6 @@ pub struct CapabilityMeta {
     pub timeout_ms: u32,
 }
 
-/// Single-call wall-clock budget. Held inside every token via `Arc`, which
-/// lets multiple clones enforce the same limit consistently.
 #[derive(Clone, Debug)]
 pub struct CapabilityBudget {
     pub timeout_ms: u32,
@@ -63,87 +95,37 @@ impl CapabilityBudget {
     }
 }
 
-/// One chunk in a streaming capability response.
 #[derive(Debug)]
 pub enum CapabilityChunk<T = Value> {
     Item(T),
     Done,
 }
 
-/// Sync invocation handler — what `CapabilityToken.invoke()` dispatches to.
-pub trait SyncInvoke: Send + Sync {
+/// SyncKind resource: the body of a sync capability.
+pub trait SyncResource: Send + Sync + 'static {
     fn invoke(&self, input: Value) -> Result<Value, String>;
 }
 
-/// Streaming invocation handler — what `CapabilityToken.stream()` dispatches to.
-pub trait StreamInvoke: Send + Sync {
-    fn stream(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String>;
+/// Streaming resource: the body of a streaming capability.
+pub trait StreamResource: Send + Sync + 'static {
+    fn open(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String>;
 }
 
 // ---------------------------------------------------------------------------
-// CapabilityToken
+// Capability<R, K> — typed capability handle
 // ---------------------------------------------------------------------------
 
-/// An unforgeable capability handle. Plugins receive `Arc<CapabilityToken>`
-/// at activation time; they never look up capabilities by string name at
-/// runtime. All resource constraints live on the token itself.
-#[derive(Clone)]
-pub struct CapabilityToken {
+/// Unforgeable capability handle, generic over the resource type `R` and
+/// the kind `K` (`SyncKind` or `StreamKind`). The kind is encoded as
+/// `PhantomData` so it carries no runtime cost.
+pub struct Capability<R: Send + Sync + 'static, K: CapabilityKind = SyncKind> {
     meta: CapabilityMeta,
+    handler: Arc<R>,
     budget: Arc<CapabilityBudget>,
-    invoke: Option<Arc<dyn SyncInvoke>>,
-    stream: Option<Arc<dyn StreamInvoke>>,
+    _kind: PhantomData<K>,
 }
 
-impl CapabilityToken {
-    /// Mint a sync token wrapping a `SyncInvoke` handler.
-    pub fn new_sync(
-        decl: &CapabilityDecl,
-        plugin: &PluginId,
-        id: CapabilityId,
-        budget: Arc<CapabilityBudget>,
-        handler: Arc<dyn SyncInvoke>,
-    ) -> Self {
-        Self {
-            meta: CapabilityMeta {
-                id,
-                name: decl.name.clone(),
-                plugin: plugin.clone(),
-                in_type: decl.in_type.clone(),
-                out_type: decl.out_type.clone(),
-                streaming: decl.streaming,
-                timeout_ms: budget.timeout_ms,
-            },
-            budget,
-            invoke: Some(handler),
-            stream: None,
-        }
-    }
-
-    /// Mint a streaming token wrapping a `StreamInvoke` handler.
-    pub fn new_stream(
-        decl: &CapabilityDecl,
-        plugin: &PluginId,
-        id: CapabilityId,
-        budget: Arc<CapabilityBudget>,
-        handler: Arc<dyn StreamInvoke>,
-    ) -> Self {
-        Self {
-            meta: CapabilityMeta {
-                id,
-                name: decl.name.clone(),
-                plugin: plugin.clone(),
-                in_type: decl.in_type.clone(),
-                out_type: decl.out_type.clone(),
-                streaming: decl.streaming,
-                timeout_ms: budget.timeout_ms,
-            },
-            budget,
-            invoke: None,
-            stream: Some(handler),
-        }
-    }
-
+impl<R: Send + Sync + 'static, K: CapabilityKind> Capability<R, K> {
     pub fn meta(&self) -> &CapabilityMeta {
         &self.meta
     }
@@ -156,51 +138,105 @@ impl CapabilityToken {
         self.meta.id.clone()
     }
 
-    /// Invoke the wrapped handler. If elapsed wall-clock time exceeds the
+    /// Internal constructor used by the factory. Crate-internal.
+    pub(crate) fn new_typed(
+        meta: CapabilityMeta,
+        handler: Arc<R>,
+        budget: Arc<CapabilityBudget>,
+    ) -> Self {
+        Self { meta, handler, budget, _kind: PhantomData }
+    }
+}
+
+impl<R: Send + Sync + 'static, K: CapabilityKind> Clone for Capability<R, K> {
+    fn clone(&self) -> Self {
+        Self {
+            meta: self.meta.clone(),
+            handler: self.handler.clone(),
+            budget: self.budget.clone(),
+            _kind: PhantomData,
+        }
+    }
+}
+
+impl<R: SyncResource + 'static> Capability<R, SyncKind> {
+    /// Invoke the resource. If elapsed wall-clock time exceeds the
     /// token's `timeout_ms`, returns `Err` and the handler result is dropped.
-    /// This is the **only** budget enforcement; there is no cumulative
-    /// accounting, no remaining-ns counter, and no drop-side compensation.
     pub fn invoke(&self, input: Value) -> Result<Value, String> {
-        let handler = self.invoke.as_ref().ok_or_else(|| {
-            format!("capability {} is streaming; use stream()", self.meta.name)
-        })?;
         let start = Instant::now();
-        let result = handler.invoke(input);
+        let result = self.handler.invoke(input);
         let elapsed_ms = start.elapsed().as_millis() as u64;
         if elapsed_ms > self.budget.timeout_ms as u64 {
             return Err(format!(
-                "capability {}: timeout {}ms exceeded budget {}ms",
+                "{}: timeout {}ms exceeded budget {}ms",
                 self.meta.name, elapsed_ms, self.budget.timeout_ms
             ));
         }
         result
     }
+}
 
-    /// Open a streaming channel. The token's timeout_ms still bounds the
-    /// total stream duration as recorded by `invoke`-style wall clock when
-    /// the receiver is consumed; per-chunk delivery is the handler's job.
-    /// Stream semantics here are intentionally simple — the handler owns
-    /// pacing.
-    pub fn stream(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
-        let handler = self.stream.as_ref().ok_or_else(|| {
-            format!("capability {} is sync; use invoke()", self.meta.name)
-        })?;
-        handler.stream(input)
+impl<R: StreamResource + 'static> Capability<R, StreamKind> {
+    /// Open the stream. Per-chunk delivery is the resource's job; the
+    /// budget governs the open-to-last-chunk window for the caller.
+    pub fn open(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
+        self.handler.open(input)
     }
 }
 
 // ---------------------------------------------------------------------------
-// CapabilityService — the cordis-visible registry the HTTP bridge enumerates
+// Type-erased view — for CapabilityService, HTTP bridge, pipeline
 // ---------------------------------------------------------------------------
 
-/// Shared registry of every capability token. `Clone` is cheap and shares
-/// state, so the same registry is visible to main, to plugins via cordis
-/// inject, and to the HTTP bridge — they all see the same registrations.
-///
-/// Provided as the `capability_service` cordis service.
+/// Erased capability: lets heterogeneous `Capability<R, K>` values
+/// coexist in a single registry.
+pub trait AnyCapability: Send + Sync {
+    fn meta(&self) -> &CapabilityMeta;
+    fn is_streaming(&self) -> bool;
+    fn invoke_dyn(&self, input: Value) -> Result<Value, String>;
+    fn open_dyn(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String>;
+}
+
+impl<R: SyncResource + 'static> AnyCapability for Capability<R, SyncKind> {
+    fn meta(&self) -> &CapabilityMeta {
+        &self.meta
+    }
+    fn is_streaming(&self) -> bool {
+        false
+    }
+    fn invoke_dyn(&self, input: Value) -> Result<Value, String> {
+        self.invoke(input)
+    }
+    fn open_dyn(&self, _: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
+        Err(format!("{} is sync; use invoke", self.meta.name))
+    }
+}
+
+impl<R: StreamResource + 'static> AnyCapability for Capability<R, StreamKind> {
+    fn meta(&self) -> &CapabilityMeta {
+        &self.meta
+    }
+    fn is_streaming(&self) -> bool {
+        true
+    }
+    fn invoke_dyn(&self, _: Value) -> Result<Value, String> {
+        Err(format!("{} is streaming; use open", self.meta.name))
+    }
+    fn open_dyn(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
+        self.open(input)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CapabilityService — shared registry, Arc-shared
+// ---------------------------------------------------------------------------
+
+/// Shared registry of every registered capability. Cloning is cheap and
+/// shares state, so main, plugins via cordis inject, and the HTTP bridge
+/// all see the same registrations.
 #[derive(Clone, Default)]
 pub struct CapabilityService {
-    by_name: Arc<Mutex<Vec<Arc<CapabilityToken>>>>,
+    by_name: Arc<Mutex<Vec<Arc<dyn AnyCapability>>>>,
 }
 
 impl CapabilityService {
@@ -208,27 +244,33 @@ impl CapabilityService {
         Self::default()
     }
 
-    /// Register a token. Re-registering the same name is rejected — manifests
-    /// must declare unique capability names.
-    pub fn register(&self, token: Arc<CapabilityToken>) -> Result<(), CapabilityError> {
+    pub fn register(&self, cap: Arc<dyn AnyCapability>) -> Result<(), CapabilityError> {
         let mut by_name = self.by_name.lock().expect("capability service poisoned");
-        if by_name.iter().any(|t| t.name() == token.name()) {
-            return Err(CapabilityError::AlreadyExists(token.name().to_string()));
+        let name = cap.meta().name.clone();
+        if by_name.iter().any(|c| c.meta().name == name) {
+            return Err(CapabilityError::AlreadyExists(name));
         }
-        by_name.push(token);
+        by_name.push(cap);
         Ok(())
     }
 
-    /// Look up a token by name.
-    pub fn get(&self, name: &str) -> Option<Arc<CapabilityToken>> {
-        let by_name = self.by_name.lock().expect("capability service poisoned");
-        by_name.iter().find(|t| t.name() == name).cloned()
+    pub fn get(&self, name: &str) -> Option<Arc<dyn AnyCapability>> {
+        self.by_name
+            .lock()
+            .expect("capability service poisoned")
+            .iter()
+            .find(|c| c.meta().name == name)
+            .cloned()
     }
 
-    /// Snapshot of every registered token's metadata, sorted by name.
     pub fn enumerate(&self) -> Vec<CapabilityMeta> {
-        let by_name = self.by_name.lock().expect("capability service poisoned");
-        let mut metas: Vec<_> = by_name.iter().map(|t| t.meta().clone()).collect();
+        let mut metas: Vec<_> = self
+            .by_name
+            .lock()
+            .expect("capability service poisoned")
+            .iter()
+            .map(|c| c.meta().clone())
+            .collect();
         metas.sort_by(|a, b| a.name.cmp(&b.name));
         metas
     }
@@ -252,5 +294,26 @@ impl std::error::Error for CapabilityError {}
 impl From<CapabilityError> for cordis::Error {
     fn from(e: CapabilityError) -> Self {
         cordis::Error::msg(e.to_string())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Manifest → Meta helper — used by the factory
+// ---------------------------------------------------------------------------
+
+pub fn meta_from_decl(
+    id: CapabilityId,
+    decl: &CapabilityDecl,
+    plugin: &PluginId,
+    budget: &CapabilityBudget,
+) -> CapabilityMeta {
+    CapabilityMeta {
+        id,
+        name: decl.name.clone(),
+        plugin: plugin.clone(),
+        in_type: decl.in_type.clone(),
+        out_type: decl.out_type.clone(),
+        streaming: decl.streaming,
+        timeout_ms: budget.timeout_ms,
     }
 }

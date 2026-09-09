@@ -1,7 +1,6 @@
 //! HTTP bridge — enumerates registered capabilities and routes invocations
-//! through their tokens. The bridge looks up tokens by name from the
-//! shared `CapabilityService`, then calls them directly — no global string
-//! table, just the service's capability registry.
+//! through their tokens. Uses the shared `CapabilityService` (Arc-clone of
+//! state) so what plugins register is what the bridge sees.
 //!
 //!   GET  /api/caps    →  enumerate capabilities
 //!   POST /api/invoke  →  invoke a sync capability
@@ -96,20 +95,17 @@ async fn invoke(
     State(state): State<AppState>,
     Json(req): Json<InvokeReq>,
 ) -> Result<Json<InvokeResp>, Json<ErrorResp>> {
-    let token = state
-        .cap_svc
-        .get(&req.capability)
-        .ok_or_else(|| {
-            Json(ErrorResp { error: format!("capability not found: {}", req.capability) })
-        })?;
+    let cap = state.cap_svc.get(&req.capability).ok_or_else(|| {
+        Json(ErrorResp { error: format!("capability not found: {}", req.capability) })
+    })?;
 
-    if token.meta().streaming {
+    if cap.is_streaming() {
         return Err(Json(ErrorResp {
             error: format!("{} is streaming; use /api/stream", req.capability),
         }));
     }
 
-    match token.invoke(req.input) {
+    match cap.invoke_dyn(req.input) {
         Ok(value) => Ok(Json(InvokeResp { capability: req.capability, value })),
         Err(e) => Err(Json(ErrorResp { error: e })),
     }
@@ -119,12 +115,12 @@ async fn stream(
     State(state): State<AppState>,
     Json(req): Json<InvokeReq>,
 ) -> Sse<impl futures_core::Stream<Item = Result<Event, Infallible>>> {
-    let token = state.cap_svc.get(&req.capability);
+    let cap = state.cap_svc.get(&req.capability);
 
     let (event_tx, event_rx) = mpsc::channel::<Result<Event, Infallible>>(16);
 
-    match token {
-        Some(tok) if tok.meta().streaming => match tok.stream(req.input) {
+    match cap {
+        Some(c) if c.is_streaming() => match c.open_dyn(req.input) {
             Ok(rx) => {
                 tokio::spawn(async move {
                     let mut stream = tokio_stream::wrappers::ReceiverStream::new(rx);

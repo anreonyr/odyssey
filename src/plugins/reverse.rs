@@ -1,15 +1,15 @@
-//! Reverse plugin — string reversal capability.
+//! Reverse — typed resource `ReverseResource: SyncResource`.
 
 use std::sync::Arc;
 
 use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::Value;
 
-use crate::capability::{CapabilityService, CapabilityToken, SyncInvoke};
+use crate::capability::{AnyCapability, Capability, CapabilityService, SyncKind, SyncResource};
 
-struct ReverseHandler;
+pub struct ReverseResource;
 
-impl SyncInvoke for ReverseHandler {
+impl SyncResource for ReverseResource {
     fn invoke(&self, input: Value) -> Result<Value, String> {
         let s = input
             .as_str()
@@ -18,8 +18,8 @@ impl SyncInvoke for ReverseHandler {
     }
 }
 
-pub fn handler() -> Arc<dyn SyncInvoke> {
-    Arc::new(ReverseHandler)
+pub fn handler() -> Arc<ReverseResource> {
+    Arc::new(ReverseResource)
 }
 
 pub fn reverse_plugin() -> Arc<dyn Plugin> {
@@ -30,14 +30,13 @@ pub fn reverse_plugin() -> Arc<dyn Plugin> {
             Injection::from("capability_service"),
         ],
         |ctx: Context, _cfg: ()| async move {
-            let reverse_token: Arc<CapabilityToken> = ctx.require("cap:reverse")?;
+            let rev_cap: Arc<Capability<ReverseResource, SyncKind>> = ctx.require("cap:reverse")?;
             let cap_svc: Arc<CapabilityService> = ctx.require("capability_service")?;
-            cap_svc.register(reverse_token.clone())?;
-
             ctx.logger().log(
                 LogLevel::Info,
-                format!("reverse plugin: activated cap id={}", reverse_token.id()).into(),
+                format!("reverse plugin: activated cap id={}", rev_cap.id()).into(),
             );
+            cap_svc.register(rev_cap as Arc<dyn AnyCapability>)?;
             Ok(())
         },
     )

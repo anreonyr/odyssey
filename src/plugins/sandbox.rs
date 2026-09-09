@@ -1,4 +1,4 @@
-//! Sandbox plugin — WASM-isolated execution with fuel.
+//! Sandbox — WASM-isolated execution with fuel.
 
 use std::sync::Arc;
 
@@ -6,7 +6,7 @@ use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::{json, Value};
 use wasmtime::{Caller, Config, Engine, Linker, Module, Store};
 
-use crate::capability::{CapabilityService, CapabilityToken, SyncInvoke};
+use crate::capability::{AnyCapability, Capability, CapabilityService, SyncKind, SyncResource};
 
 const DEFAULT_FUEL: u64 = 1_000_000;
 
@@ -14,9 +14,9 @@ pub struct SandboxState {
     pub stdout: String,
 }
 
-struct SandboxHandler;
+pub struct SandboxResource;
 
-impl SyncInvoke for SandboxHandler {
+impl SyncResource for SandboxResource {
     fn invoke(&self, input: Value) -> Result<Value, String> {
         let path = input
             .get("path")
@@ -92,8 +92,8 @@ impl SyncInvoke for SandboxHandler {
     }
 }
 
-pub fn handler() -> Arc<dyn SyncInvoke> {
-    Arc::new(SandboxHandler)
+pub fn handler() -> Arc<SandboxResource> {
+    Arc::new(SandboxResource)
 }
 
 pub fn sandbox_plugin() -> Arc<dyn Plugin> {
@@ -104,14 +104,13 @@ pub fn sandbox_plugin() -> Arc<dyn Plugin> {
             Injection::from("capability_service"),
         ],
         |ctx: Context, _cfg: ()| async move {
-            let exec_token: Arc<CapabilityToken> = ctx.require("cap:exec")?;
+            let exec_cap: Arc<Capability<SandboxResource, SyncKind>> = ctx.require("cap:exec")?;
             let cap_svc: Arc<CapabilityService> = ctx.require("capability_service")?;
-            cap_svc.register(exec_token)?;
-
             ctx.logger().log(
                 LogLevel::Info,
                 "sandbox plugin: WASM execution capability activated".into(),
             );
+            cap_svc.register(exec_cap as Arc<dyn AnyCapability>)?;
             Ok(())
         },
     )

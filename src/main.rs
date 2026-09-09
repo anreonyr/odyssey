@@ -1,19 +1,11 @@
 //! Odyssey — seL4-style capability kernel, manifest-driven boot.
 //!
-//! ## Boot order
-//!
-//!   Phase 1  Parse manifests       → collect metadata only
-//!   Phase 2  Provide core services  → ctx.provide(factory, cap_svc, registry)
-//!   Phase 3  Mint all tokens        → factory.mint_* per capability, in dependency order
-//!   Phase 4  Provide tokens         → ctx.provide("cap:{name}", token)
-//!   Phase 5  Validate graph         → fail-fast on any missing provider
-//!   Phase 6  Start plugins          → ctx.plugin(...); cordis resolves inject
-//!   Phase 7  Demo harness           → call capabilities via tokens
-//!   Phase 8  HTTP bridge            → serves capability_service enumerate
-//!
-//! The ordering in Phase 3–4 (mint then provide, before plugin start) is
-//! critical: cordis fibers will stay PENDING until every `inject` dep has
-//! been provided. Without Phase 4 ahead of Phase 6, plugins never activate.
+//! Capability is generic over the resource type the plugin module declared:
+//! `Capability<EchoResource>`, `Capability<ReverseResource>`, etc. The
+//! type system enforces that a plugin only invokes capabilities it was
+//! handed. Main holds typed tokens for the demo harness; cordis injects
+//! pass them through to plugins; the shared `CapabilityService` registry
+//! holds type-erased `Arc<dyn AnyCapability>` views for the HTTP bridge.
 
 mod capability;
 mod dispatcher;
@@ -23,18 +15,25 @@ mod pipeline;
 mod plugins;
 mod registry;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::io::Write as _;
 use std::sync::Arc;
 
-use capability::{CapabilityBudget, CapabilityService, CapabilityToken, StreamInvoke, SyncInvoke};
+use capability::{
+    AnyCapability, Capability, CapabilityBudget, CapabilityService, StreamKind, StreamResource,
+    SyncKind, SyncResource,
+};
 use dispatcher::CapabilityFactory;
 use http_bridge::serve;
-use manifest::PluginManifest;
+use manifest::{CapabilityDecl, PluginId, PluginManifest};
 use plugins::{
-    echo::echo_plugin, echo_chain::echo_chain_plugin, generator::generator_plugin,
-    reverse::reverse_plugin, sandbox::sandbox_plugin, slow::slow_plugin,
-    stream_echo::stream_echo_plugin,
+    echo::{EchoResource, echo_plugin},
+    echo_chain::{EchoChainResource, echo_chain_plugin},
+    generator::{GeneratorResource, generator_plugin},
+    reverse::{ReverseResource, reverse_plugin},
+    sandbox::{SandboxResource, sandbox_plugin},
+    slow::{SlowResource, slow_plugin},
+    stream_echo::{StreamEchoResource, stream_echo_plugin},
 };
 use registry::Registry;
 use serde_json::json;
@@ -42,42 +41,9 @@ use serde_json::json;
 const MANIFEST_DIR: &str = "plugins";
 
 // ---------------------------------------------------------------------------
-// Handler dispatch — main orchestrates, plugins own implementations
+// Streaming output helper
 // ---------------------------------------------------------------------------
 
-/// Build a sync handler for a plugin by name. Token dependencies are
-/// resolved from `tokens_by_plugin` (caller must have minted them already).
-fn build_sync_handler(
-    plugin_name: &str,
-    tokens_by_plugin: &HashMap<String, Vec<Arc<CapabilityToken>>>,
-) -> Result<Arc<dyn SyncInvoke>, String> {
-    match plugin_name {
-        "echo" => Ok(plugins::echo::handler()),
-        "reverse" => Ok(plugins::reverse::handler()),
-        "slow" => Ok(plugins::slow::handler()),
-        "sandbox" => Ok(plugins::sandbox::handler()),
-        "echo-chain" => {
-            // echo-chain wraps echo: must find the already-minted echo token.
-            let echo = tokens_by_plugin
-                .get("echo")
-                .and_then(|v| v.first())
-                .ok_or_else(|| "echo-chain requires echo token to be minted first".to_string())?;
-            Ok(plugins::echo_chain::handler(echo.clone()))
-        }
-        "echo-cdylib" | "echo-wasm" => Err(format!("{plugin_name}: deferred")),
-        other => Err(format!("no sync handler for plugin '{other}'")),
-    }
-}
-
-fn build_stream_handler(plugin_name: &str) -> Result<Arc<dyn StreamInvoke>, String> {
-    match plugin_name {
-        "stream_echo" => Ok(plugins::stream_echo::handler()),
-        "generator" => Ok(plugins::generator::handler()),
-        other => Err(format!("no stream handler for plugin '{other}'")),
-    }
-}
-
-/// Print a streaming capability's output. Stops at `Done`.
 async fn print_stream(mut rx: tokio::sync::mpsc::Receiver<capability::CapabilityChunk>) {
     while let Some(chunk) = rx.recv().await {
         match chunk {
@@ -91,6 +57,54 @@ async fn print_stream(mut rx: tokio::sync::mpsc::Receiver<capability::Capability
             }
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// Mint helpers — pull handler from a plugin module, mint typed token.
+// ---------------------------------------------------------------------------
+
+fn mint_sync<R, F>(
+    factory: &CapabilityFactory,
+    manifests: &[PluginManifest],
+    plugin_name: &str,
+    handler_for: F,
+) -> Result<Option<Arc<Capability<R, SyncKind>>>, Box<dyn std::error::Error>>
+where
+    R: SyncResource + 'static,
+    F: FnOnce(&CapabilityDecl, &PluginId) -> Arc<R>,
+{
+    let Some(m) = manifests.iter().find(|m| m.plugin.name == plugin_name) else {
+        return Ok(None);
+    };
+    let decl = m
+        .exposes
+        .first()
+        .ok_or_else(|| format!("{plugin_name}: manifest must expose at least one capability"))?;
+    let budget = CapabilityBudget::new(m.resources.timeout_ms.unwrap_or(5000));
+    let handler = handler_for(decl, &m.plugin);
+    Ok(Some(factory.mint_sync::<R>(decl, &m.plugin, budget, handler)))
+}
+
+fn mint_stream<R, F>(
+    factory: &CapabilityFactory,
+    manifests: &[PluginManifest],
+    plugin_name: &str,
+    handler_for: F,
+) -> Result<Option<Arc<Capability<R, StreamKind>>>, Box<dyn std::error::Error>>
+where
+    R: StreamResource + 'static,
+    F: FnOnce(&CapabilityDecl, &PluginId) -> Arc<R>,
+{
+    let Some(m) = manifests.iter().find(|m| m.plugin.name == plugin_name) else {
+        return Ok(None);
+    };
+    let decl = m
+        .exposes
+        .first()
+        .ok_or_else(|| format!("{plugin_name}: manifest must expose at least one capability"))?;
+    let budget = CapabilityBudget::new(m.resources.timeout_ms.unwrap_or(5000));
+    let handler = handler_for(decl, &m.plugin);
+    Ok(Some(factory.mint_stream::<R>(decl, &m.plugin, budget, handler)))
 }
 
 // ---------------------------------------------------------------------------
@@ -118,74 +132,114 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cap_svc = Arc::new(CapabilityService::new());
     let registry = Arc::new(Registry::default());
 
-    // factory.clone() shares inner Arc state; cap_svc/registry similarly.
     ctx.provide("capability_factory", factory.clone()).await?;
     ctx.provide("capability_service", (*cap_svc).clone()).await?;
     ctx.provide("registry", registry.clone()).await?;
     println!("[main] core services provided");
 
-    // Phase 3: Mint tokens for every declared capability, in manifest order.
-    //          Plugin modules own the handler implementations; main only
-    //          asks for them by plugin name.
+    // Phase 3 + 4: Mint typed tokens, provide to cordis, register in service.
     println!("\n[mint] capability tokens:");
-    let mut tokens_by_plugin: HashMap<String, Vec<Arc<CapabilityToken>>> = HashMap::new();
 
-    for m in &manifests {
-        let plugin_id = m.plugin.clone();
-        let timeout_ms = m.resources.timeout_ms.unwrap_or(5000);
-
-        for cap_decl in &m.exposes {
-            let budget = CapabilityBudget::new(timeout_ms);
-            let token = if cap_decl.streaming {
-                let handler = match build_stream_handler(&m.plugin.name) {
-                    Ok(h) => h,
-                    Err(e) => {
-                        eprintln!("[skip] {e}");
-                        continue;
-                    }
-                };
-                factory.mint_stream(cap_decl, &plugin_id, budget, handler)
-            } else {
-                let handler = match build_sync_handler(&m.plugin.name, &tokens_by_plugin) {
-                    Ok(h) => h,
-                    Err(e) => {
-                        eprintln!("[skip] {e}");
-                        continue;
-                    }
-                };
-                factory.mint_sync(cap_decl, &plugin_id, budget, handler)
-            };
-
-            println!(
-                "  {}  →  id={}  timeout={}ms",
-                cap_decl.name,
-                token.id(),
-                token.meta().timeout_ms
-            );
-
-            // Phase 4: Provide token into context so cordis inject can find it.
-            // (*token).clone() = inner CapabilityToken clone (the type V
-            // cordis requires). Arc<dyn SyncInvoke> inside means the clone
-            // shares the actual handler; only meta + budget Arc are copied.
-            let cap_key = format!("cap:{}", cap_decl.name);
-            ctx.provide(cap_key.as_str(), (*token).clone()).await?;
-
-            tokens_by_plugin
-                .entry(m.plugin.name.clone())
-                .or_default()
-                .push(token);
-        }
-
-        registry.register(m.clone())?;
+    // Echo — sync, no deps.
+    let echo_token = mint_sync::<EchoResource, _>(&factory, &manifests, "echo", |_, _| {
+        plugins::echo::handler()
+    })?;
+    if let Some(t) = &echo_token {
+        ctx.provide("cap:echo", (*t.as_ref()).clone()).await?;
+        cap_svc.register(t.clone() as Arc<dyn AnyCapability>)?;
+        println!("  echo  →  id={}  timeout={}ms", t.id(), t.meta().timeout_ms);
     }
 
-    // Phase 5: Validate that every "consumes" capability has a provider.
-    //          Fail-fast: abort boot before starting plugins.
-    println!("\n[graph] validating capability dependencies:");
-    let provided_caps: HashSet<String> = tokens_by_plugin
-        .values()
-        .flat_map(|tokens| tokens.iter().map(|t| t.name().to_string()))
+    // Reverse — sync, no deps.
+    let reverse_token = mint_sync::<ReverseResource, _>(&factory, &manifests, "reverse", |_, _| {
+        plugins::reverse::handler()
+    })?;
+    if let Some(t) = &reverse_token {
+        ctx.provide("cap:reverse", (*t.as_ref()).clone()).await?;
+        cap_svc.register(t.clone() as Arc<dyn AnyCapability>)?;
+        println!("  reverse  →  id={}  timeout={}ms", t.id(), t.meta().timeout_ms);
+    }
+
+    // Slow — sync, no deps.
+    let slow_token = mint_sync::<SlowResource, _>(&factory, &manifests, "slow", |_, _| {
+        plugins::slow::handler()
+    })?;
+    if let Some(t) = &slow_token {
+        ctx.provide("cap:slow", (*t.as_ref()).clone()).await?;
+        cap_svc.register(t.clone() as Arc<dyn AnyCapability>)?;
+        println!("  slow  →  id={}  timeout={}ms", t.id(), t.meta().timeout_ms);
+    }
+
+    // Sandbox — sync, no deps.
+    let sandbox_token = mint_sync::<SandboxResource, _>(&factory, &manifests, "sandbox", |_, _| {
+        plugins::sandbox::handler()
+    })?;
+    if let Some(t) = &sandbox_token {
+        ctx.provide("cap:exec", (*t.as_ref()).clone()).await?;
+        cap_svc.register(t.clone() as Arc<dyn AnyCapability>)?;
+        println!("  exec  →  id={}  timeout={}ms", t.id(), t.meta().timeout_ms);
+    }
+
+    // Echo-chain — sync, depends on echo.
+    let chain_token =
+        if let (Some(echo_t), Some(m)) = (
+            echo_token.as_ref(),
+            manifests.iter().find(|m| m.plugin.name == "echo-chain"),
+        ) {
+            let decl = m.exposes.first().unwrap();
+            let budget = CapabilityBudget::new(m.resources.timeout_ms.unwrap_or(5000));
+            let t = factory.mint_sync::<EchoChainResource>(
+                decl,
+                &m.plugin,
+                budget,
+                plugins::echo_chain::handler(echo_t.clone()),
+            );
+            ctx.provide("cap:echo_chain", (*t.as_ref()).clone()).await?;
+            cap_svc.register(t.clone() as Arc<dyn AnyCapability>)?;
+            println!(
+                "  echo_chain  →  id={}  timeout={}ms",
+                t.id(),
+                t.meta().timeout_ms
+            );
+            Some(t)
+        } else {
+            None
+        };
+
+    // Stream_echo — stream, no deps.
+    let stream_echo_token =
+        mint_stream::<StreamEchoResource, _>(&factory, &manifests, "stream_echo", |_, _| {
+            plugins::stream_echo::handler()
+        })?;
+    if let Some(t) = &stream_echo_token {
+        ctx.provide("cap:stream_echo", (*t.as_ref()).clone()).await?;
+        cap_svc.register(t.clone() as Arc<dyn AnyCapability>)?;
+        println!(
+            "  stream_echo  →  id={}  timeout={}ms",
+            t.id(),
+            t.meta().timeout_ms
+        );
+    }
+
+    // Generator — stream, no deps.
+    let gen_token = mint_stream::<GeneratorResource, _>(&factory, &manifests, "generator", |_, _| {
+        plugins::generator::handler()
+    })?;
+    if let Some(t) = &gen_token {
+        ctx.provide("cap:generate", (*t.as_ref()).clone()).await?;
+        cap_svc.register(t.clone() as Arc<dyn AnyCapability>)?;
+        println!("  generate  →  id={}  timeout={}ms", t.id(), t.meta().timeout_ms);
+    }
+
+    // Track which manifests have all their capabilities provided.
+    let provided_caps: HashSet<String> = manifests
+        .iter()
+        .filter(|m| !matches!(m.plugin.name.as_str(), "echo-cdylib" | "echo-wasm"))
+        .flat_map(|m| m.exposes.iter().map(|c| c.name.clone()))
         .collect();
+
+    // Phase 5: Validate graph.
+    println!("\n[graph] validating capability dependencies:");
     let mut missing: Vec<(String, String, String)> = Vec::new();
     for m in &manifests {
         for dep in &m.consumes {
@@ -218,6 +272,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .into());
     }
 
+    // Register manifests.
+    for m in &manifests {
+        registry.register(m.clone())?;
+    }
+
     // Phase 6: Start plugins.
     println!("\n[plugins] activating:");
     let plugin_list: Vec<(&str, Arc<dyn cordis::Plugin>)> = vec![
@@ -229,9 +288,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("echo-chain", echo_chain_plugin()),
         ("sandbox", sandbox_plugin()),
     ];
-    let plugin_fibers: Vec<_> = plugin_list
+    let active_plugins: Vec<_> = plugin_list
+        .into_iter()
+        .filter(|(name, _)| {
+            manifests.iter().any(|m| {
+                m.plugin.name == *name
+                    && m.exposes.iter().all(|c| provided_caps.contains(&c.name))
+            })
+        })
+        .collect();
+    let plugin_fibers: Vec<_> = active_plugins
         .iter()
-        .filter(|(name, _)| tokens_by_plugin.contains_key(*name))
         .map(|(name, plugin)| (*name, ctx.plugin(plugin.clone(), None)))
         .collect();
 
@@ -242,38 +309,40 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Phase 7: Demo harness — call capabilities via tokens, no string lookup.
+    // Phase 7: Demo — typed invocation directly on the mint result.
     println!("\n[demo] capability invocations:");
 
-    let echo_token: Arc<CapabilityToken> = ctx.require("cap:echo")?;
-    let reverse_token: Arc<CapabilityToken> = ctx.require("cap:reverse")?;
-    let slow_token: Arc<CapabilityToken> = ctx.require("cap:slow")?;
-
-    match echo_token.invoke(json!({"message": "hello", "n": 42})) {
-        Ok(v) => println!("  echo: {v}"),
-        Err(e) => println!("  echo error: {e}"),
+    if let Some(echo_cap) = &echo_token {
+        match echo_cap.invoke(json!({"message": "hello", "n": 42})) {
+            Ok(v) => println!("  echo: {v}"),
+            Err(e) => println!("  echo error: {e}"),
+        }
     }
-
-    match reverse_token.invoke(json!("pipeline")) {
-        Ok(v) => println!("  reverse: {v}"),
-        Err(e) => println!("  reverse error: {e}"),
+    if let Some(rev_cap) = &reverse_token {
+        match rev_cap.invoke(json!("pipeline")) {
+            Ok(v) => println!("  reverse: {v}"),
+            Err(e) => println!("  reverse error: {e}"),
+        }
     }
-
-    // Streaming via token.
-    if let Ok(rx) = ctx
-        .require::<CapabilityToken>("cap:stream_echo")?
-        .stream(json!("hello world from stream_echo"))
-    {
-        println!("  stream_echo:");
-        print!("   ");
-        print_stream(rx).await;
+    if let Some(stream_cap) = &stream_echo_token {
+        match stream_cap.open(json!("hello world from stream_echo")) {
+            Ok(rx) => {
+                println!("  stream_echo:");
+                print!("   ");
+                print_stream(rx).await;
+            }
+            Err(e) => println!("  stream_echo error: {e}"),
+        }
     }
-
-    // Slow token: handler sleeps 200ms with budget 50ms — must reject.
-    println!("\n  slow token (timeout={}ms, will timeout):", slow_token.meta().timeout_ms);
-    match slow_token.invoke(json!({"hi": "limiter"})) {
-        Ok(v) => println!("  [unexpected success] {v}"),
-        Err(e) => println!("  [expected timeout] {e}"),
+    if let Some(slow_cap) = &slow_token {
+        println!(
+            "\n  slow token (timeout={}ms, will timeout):",
+            slow_cap.meta().timeout_ms
+        );
+        match slow_cap.invoke(json!({"hi": "limiter"})) {
+            Ok(v) => println!("  [unexpected success] {v}"),
+            Err(e) => println!("  [expected timeout] {e}"),
+        }
     }
 
     // Factory mint snapshots.
@@ -285,44 +354,45 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    // Pipeline via tokens.
+    // Pipeline via erased capability view.
     println!("\n[pipeline] token-based composition:");
-    let reverse_tok: Arc<CapabilityToken> = ctx.require("cap:reverse")?;
-    let echo_tok: Arc<CapabilityToken> = ctx.require("cap:echo")?;
-    let p = pipeline::Pipeline::new(vec![
-        pipeline::SyncStage::invoke(reverse_tok),
-        pipeline::SyncStage::invoke(echo_tok),
-    ]);
-    match p.run(json!("hello")) {
-        Ok(v) => println!("  reverse(echo(\"hello\")) = {v}"),
-        Err(e) => println!("  [pipeline error] {e}"),
+    if let (Some(rev_cap), Some(echo_cap)) = (&reverse_token, &echo_token) {
+        let stages = vec![
+            pipeline::SyncStage::new(rev_cap.clone() as Arc<dyn AnyCapability>)?,
+            pipeline::SyncStage::new(echo_cap.clone() as Arc<dyn AnyCapability>)?,
+        ];
+        let p = pipeline::Pipeline::new(stages);
+        match p.run(json!("hello")) {
+            Ok(v) => println!("  reverse(echo(\"hello\")) = {v}"),
+            Err(e) => println!("  [pipeline error] {e}"),
+        }
     }
 
     // Generator streaming.
-    if let Ok(rx) = ctx
-        .require::<CapabilityToken>("cap:generate")?
-        .stream(json!("hello there"))
-    {
-        println!("  generate streaming:");
-        print!("   ");
-        print_stream(rx).await;
+    if let Some(gen_cap) = &gen_token {
+        match gen_cap.open(json!("hello there")) {
+            Ok(rx) => {
+                println!("  generate streaming:");
+                print!("   ");
+                print_stream(rx).await;
+            }
+            Err(e) => println!("  generate error: {e}"),
+        }
     }
 
-    // Sandbox via token.
+    // Sandbox via typed token.
     println!("\n[sandbox] exec via token (fuel=1_000_000):");
-    let sandbox_token: Arc<CapabilityToken> = ctx.require("cap:exec")?;
-    match sandbox_token.invoke(json!({
-        "path": "plugins/sandbox_programs/hello.wat",
-        "fuel": 1_000_000
-    })) {
-        Ok(v) => println!("  {}", serde_json::to_string_pretty(&v).unwrap()),
-        Err(e) => println!("  error: {e}"),
+    if let Some(sandbox_cap) = &sandbox_token {
+        match sandbox_cap.invoke(json!({
+            "path": "plugins/sandbox_programs/hello.wat",
+            "fuel": 1_000_000
+        })) {
+            Ok(v) => println!("  {}", serde_json::to_string_pretty(&v).unwrap()),
+            Err(e) => println!("  error: {e}"),
+        }
     }
 
-    // Phase 8: HTTP bridge. The shutdown future is consumed by axum's
-    // graceful-shutdown path; the server task then completes, and we await
-    // it to know when shutdown finished. We do NOT register a separate
-    // ctrl_c handler in main — the server owns it.
+    // Phase 8: HTTP bridge.
     let ctx_clone = ctx.clone();
     let cap_svc_clone = cap_svc.clone();
     let server_handle = tokio::spawn(async move {
@@ -342,6 +412,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = server_handle.await;
     eprintln!("[main] shutting down");
     ctx.stop().await;
+
+    // Touch chain_token to keep lint happy when echo-chain wasn't built.
+    let _ = chain_token;
 
     Ok(())
 }
