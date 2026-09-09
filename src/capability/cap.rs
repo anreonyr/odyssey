@@ -117,15 +117,17 @@ impl<R: Resource> Capability<R> {
     /// and pick the right bit.
     ///
     /// Returns `Err` if the held rights don't include `EXECUTE`, the
-    /// elapsed wall-clock time exceeds the token's `timeout_ms`, or
-    /// the cap is a stream.
+    /// elapsed wall-clock time exceeds the token's `timeout_ms`, the
+    /// rate-limit quota (`calls_per_minute`) is exhausted, or the cap
+    /// is a stream.
     pub fn invoke(&self, input: Value) -> Result<Value, String> {
         self.invoke_op(OperationRights::EXECUTE, input)
     }
 
     /// The kernel-level guard: invoke `input` only if `self.operations`
     /// covers every bit in `requested`. The resource then runs under
-    /// the same wall-clock budget enforcement as before.
+    /// the same wall-clock budget enforcement as before, plus the
+    /// rate-limit quota check at the head.
     pub fn invoke_op(
         &self,
         requested: OperationRights,
@@ -140,9 +142,23 @@ impl<R: Resource> Capability<R> {
                 self.meta.name, requested, self.operations
             ));
         }
+        // Quota check at the kernel level. QuotaState is shared via
+        // Arc with the parent cap, so this deducts from the parent
+        // bucket — which is the correct attenuation semantics.
+        if let Err(kind) = self.budget.quota_state.try_call() {
+            return Err(format!(
+                "{}: quota exhausted ({}); used this minute = {:?}",
+                self.meta.name,
+                kind,
+                self.budget.quota_state.snapshot()
+            ));
+        }
         let start = Instant::now();
         let result = self.handler.invoke(input);
         let elapsed_ms = start.elapsed().as_millis() as u64;
+        self.budget
+            .wall_clock_total_ms
+            .fetch_add(elapsed_ms, std::sync::atomic::Ordering::Relaxed);
         if elapsed_ms > self.budget.timeout_ms as u64 {
             return Err(format!(
                 "{}: timeout {}ms exceeded budget {}ms",
@@ -154,9 +170,21 @@ impl<R: Resource> Capability<R> {
 
     /// Open the stream. Per-chunk delivery is the resource's job; the
     /// budget governs the open-to-last-chunk window for the caller.
+    ///
+    /// Phase 2: the call quota is debited on `open`; per-chunk token
+    /// accounting happens at the resource layer (the resource's
+    /// `open` returns the receiver and the caller pushes chunks;
+    /// resources that want their output counted should report tokens
+    /// via the meta or via a helper on the open path).
     pub fn open(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
         if self.kind != CapKind::Stream {
             return Err(format!("{}: not a streaming capability", self.meta.name));
+        }
+        if let Err(kind) = self.budget.quota_state.try_call() {
+            return Err(format!(
+                "{}: quota exhausted on open ({})",
+                self.meta.name, kind
+            ));
         }
         self.handler.open(input)
     }
@@ -173,7 +201,13 @@ impl<R: Resource> Capability<R> {
 pub trait AnyCapability: Any + Send + Sync {
     fn meta(&self) -> &CapabilityMeta;
     fn is_streaming(&self) -> bool;
+    fn operations(&self) -> OperationRights;
     fn invoke_dyn(&self, input: Value) -> Result<Value, String>;
+    fn invoke_op_dyn(
+        &self,
+        op: OperationRights,
+        input: Value,
+    ) -> Result<Value, String>;
     fn open_dyn(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String>;
     fn as_any(&self) -> &dyn Any;
 }
@@ -185,8 +219,18 @@ impl<R: Resource> AnyCapability for Capability<R> {
     fn is_streaming(&self) -> bool {
         self.kind == CapKind::Stream
     }
+    fn operations(&self) -> OperationRights {
+        self.operations
+    }
     fn invoke_dyn(&self, input: Value) -> Result<Value, String> {
         self.invoke(input)
+    }
+    fn invoke_op_dyn(
+        &self,
+        op: OperationRights,
+        input: Value,
+    ) -> Result<Value, String> {
+        self.invoke_op(op, input)
     }
     fn open_dyn(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
         self.open(input)

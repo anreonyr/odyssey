@@ -8,6 +8,19 @@ use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
+/// True when `namespace` is filed under `prefix` in the hierarchical
+/// namespace tree. The empty prefix matches everything; a non-empty
+/// prefix matches its own node and every descendant.
+fn namespace_prefix_matches(namespace: &str, prefix: &str) -> bool {
+    if prefix.is_empty() || prefix == "." {
+        return true;
+    }
+    if namespace == prefix {
+        return true;
+    }
+    namespace.starts_with(&format!("{prefix}."))
+}
+
 use serde_json::Value;
 use tokio::sync::mpsc;
 
@@ -68,6 +81,19 @@ impl<R: Resource> Slot<R> {
         cap.invoke(input)
     }
 
+    /// Operation-aware invocation via the slot. Resolves the slot
+    /// then defers to `Capability::invoke_op`.
+    pub fn invoke_op(
+        &self,
+        op: super::types::OperationRights,
+        input: Value,
+    ) -> Result<Value, String> {
+        let cap = self
+            .capability()
+            .ok_or_else(|| format!("slot {} empty or revoked", self.id.raw()))?;
+        cap.invoke_op(op, input)
+    }
+
     /// Direct stream open via the slot.
     pub fn open(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
         let cap = self
@@ -106,6 +132,12 @@ impl<R: Resource> Slot<R> {
     pub fn revoke(&self) -> bool {
         self.space.revoke(self.id)
     }
+
+    /// **Revoke tree**: clear this slot and every descendant.
+    /// Phase 2 P3 — multi-hop revocation propagation.
+    pub fn revoke_tree(&self) -> usize {
+        self.space.revoke_tree(self.id)
+    }
 }
 
 impl<R: Resource> Clone for Slot<R> {
@@ -131,6 +163,9 @@ pub struct CapabilitySpace {
 struct CSpaceInner {
     slots: RwLock<HashMap<SlotId, SlotEntry>>,
     names: RwLock<HashMap<String, SlotId>>,
+    /// Parent pointer for every derived slot — used by `revoke_tree`
+    /// to recursively sever the entire subtree. `None` for roots.
+    parents: RwLock<HashMap<SlotId, SlotId>>,
     next: AtomicU64,
     next_derived: AtomicU64,
 }
@@ -147,6 +182,7 @@ impl CapabilitySpace {
             inner: Arc::new(CSpaceInner {
                 slots: RwLock::new(HashMap::new()),
                 names: RwLock::new(HashMap::new()),
+                parents: RwLock::new(HashMap::new()),
                 next: AtomicU64::new(0),
                 next_derived: AtomicU64::new(0),
             }),
@@ -230,6 +266,45 @@ impl CapabilitySpace {
         metas
     }
 
+    /// Phase 2: enumerate capabilities whose namespace starts with
+    /// `prefix`. The dot-separated hierarchical match returns every
+    /// capability filed under `prefix` and its descendants. Pass an
+    /// empty prefix (or `"."`) for the whole space.
+    pub fn enumerate_namespace(&self, prefix: &str) -> Vec<CapabilityMeta> {
+        let slots = self.inner.slots.read().expect("cspace poisoned");
+        let mut metas: Vec<_> = slots
+            .values()
+            .map(|e| e.cap.meta().clone())
+            .filter(|m| namespace_prefix_matches(&m.namespace, prefix))
+            .collect();
+        metas.sort_by(|a, b| a.namespace.cmp(&b.namespace));
+        metas
+    }
+
+    /// Phase 2: every distinct direct child of `prefix` in the
+    /// namespace tree, with the count of capabilities under it. The
+    /// HTTP bridge and the lab graph walker use this to render the
+    /// tree.
+    pub fn namespace_children(&self, prefix: &str) -> Vec<(String, usize)> {
+        let all = self.enumerate_namespace(prefix);
+        let mut out: std::collections::BTreeMap<String, usize> =
+            std::collections::BTreeMap::new();
+        let base = if prefix.is_empty() {
+            String::new()
+        } else {
+            format!("{prefix}.")
+        };
+        for m in all {
+            let rest = m.namespace.strip_prefix(&base).unwrap_or(&m.namespace);
+            let head = rest.split('.').next().unwrap_or("").to_string();
+            if head.is_empty() {
+                continue;
+            }
+            *out.entry(head).or_default() += 1;
+        }
+        out.into_iter().collect()
+    }
+
     // -----------------------------------------------------------------------
     // Capability operations: grant / transfer / restrict / revoke
     //
@@ -249,6 +324,7 @@ impl CapabilitySpace {
 
     fn install_derived<R: Resource>(
         &self,
+        parent: SlotId,
         new_cap: Capability<R>,
         new_name: String,
     ) -> SlotId
@@ -265,6 +341,14 @@ impl CapabilitySpace {
             drop(prev_entry);
         }
         names.insert(new_name, new_slot);
+        drop(names);
+        drop(slots);
+        // Record parent so `revoke_tree` can sever the subtree.
+        self.inner
+            .parents
+            .write()
+            .expect("cspace poisoned")
+            .insert(new_slot, parent);
         new_slot
     }
 
@@ -293,7 +377,7 @@ impl CapabilitySpace {
         }
         let new_id = self.next_derived_id();
         let derived = source.derive(rights, new_id);
-        Ok(self.install_derived(derived, new_name))
+        Ok(self.install_derived(from, derived, new_name))
     }
 
     /// **Transfer**: move the capability to a fresh slot with the given
@@ -318,7 +402,7 @@ impl CapabilitySpace {
         let source_name = source.name().to_string();
         let new_id = self.next_derived_id();
         let derived = source.derive(rights, new_id);
-        let new_slot = self.install_derived(derived, source_name);
+        let new_slot = self.install_derived(from, derived, source_name);
         self.revoke(from);
         Ok(new_slot)
     }
@@ -351,9 +435,57 @@ impl CapabilitySpace {
         if removed.is_some() {
             let mut names = self.inner.names.write().expect("cspace poisoned");
             names.retain(|_, s| *s != slot);
+            let mut parents = self.inner.parents.write().expect("cspace poisoned");
+            parents.remove(&slot);
             true
         } else {
             false
         }
+    }
+
+    /// **Revoke tree** (Phase 2 P3): revoke a slot and every
+    /// descendant slot derived from it. Returns the count of slots
+    /// removed. This makes revocation propagate down multi-hop
+    /// delegation chains (Broker A → Broker B → ...) so that an
+    /// intermediate revocation severs every downstream authority.
+    pub fn revoke_tree(&self, root: SlotId) -> usize {
+        let mut removed = 0usize;
+        let mut frontier = vec![root];
+        while let Some(slot) = frontier.pop() {
+            // Find children (slots whose parent == slot).
+            let children: Vec<SlotId> = {
+                let parents = self.inner.parents.read().expect("cspace poisoned");
+                parents
+                    .iter()
+                    .filter_map(|(child, parent)| if *parent == slot { Some(*child) } else { None })
+                    .collect()
+            };
+            // Recurse into children first so we don't drop the parent
+            // pointer while still walking the tree.
+            for c in children {
+                frontier.push(c);
+            }
+            // Now revoke this slot.
+            if self.revoke(slot) {
+                removed += 1;
+            }
+        }
+        removed
+    }
+
+    /// Total number of populated slots — useful for graph assertions.
+    pub fn len(&self) -> usize {
+        self.inner.slots.read().expect("cspace poisoned").len()
+    }
+
+    /// Phase 2 P6: every slot whose recorded parent is `parent`.
+    pub fn children_of(&self, parent: SlotId) -> Vec<SlotId> {
+        self.inner
+            .parents
+            .read()
+            .expect("cspace poisoned")
+            .iter()
+            .filter_map(|(child, p)| if *p == parent { Some(*child) } else { None })
+            .collect()
     }
 }

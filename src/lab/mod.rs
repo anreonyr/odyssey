@@ -18,14 +18,19 @@
 //! The main `odyssey` bin still runs the legacy 7-phase demo so the
 //! HTTP bridge and full plugin set keep working.
 
+pub mod agent;
 pub mod authority;
+pub mod channel;
 pub mod composition;
 pub mod delegation;
+pub mod graph;
+pub mod multi_hop;
+pub mod namespace;
+pub mod quota;
 pub mod revocation;
 
 use crate::capability::{
-    Capability, CapabilityBudget, CapabilityMeta, CapabilitySpace, CapKind, OperationRights,
-    Slot, SlotId,
+    Capability, CapabilityBudget, CapabilitySpace, CapKind, OperationRights, Slot, SlotId,
 };
 use crate::host::factory::CapabilityFactory;
 use crate::plugins::counter::{counter_plugin, CounterResource};
@@ -45,19 +50,8 @@ pub(crate) fn boot_counter() -> Harness {
     let cspace = CapabilitySpace::new();
     let factory = CapabilityFactory::new(cspace.clone());
 
-    // Mint a counter with full authority.
-    let counter_meta = CapabilityMeta {
-        id: crate::capability::CapabilityId(0), // overwritten by factory
-        name: "counter".into(),
-        plugin: crate::host::manifest::PluginId {
-            name: "counter".into(),
-            version: "0.1.0".into(),
-        },
-        in_type: "object".into(),
-        out_type: "object".into(),
-        streaming: false,
-        timeout_ms: 5000,
-    };
+    // Mint a counter with full authority. (CapabilityMeta itself
+    // is constructed by the factory; we don't need to build one here.)
     let decl = crate::host::manifest::CapabilityDecl {
         name: "counter".into(),
         in_type: "object".into(),
@@ -75,7 +69,6 @@ pub(crate) fn boot_counter() -> Harness {
         CapabilityBudget::new(5000),
         crate::plugins::counter::handler(),
     );
-    let _ = counter_meta; // silence unused
     Harness {
         cspace,
         factory,

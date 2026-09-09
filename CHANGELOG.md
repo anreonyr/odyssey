@@ -6,6 +6,60 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Phase 2: Capability-Native Composition
+
+Phase 2 builds on Phase 1's authority model and asks: **can a system
+where every authority-bearing component is a Capability-bearing Plugin
+form a complete computation model?** The completion criteria are six
+properties P1–P6, with P4 (Channel), P5 (Same Program Different
+Authority), and P6 (Capability Graph) being new in Phase 2.
+
+- **Quota system** (`src/capability/types.rs`): `CapabilityBudget`
+  gains `QuotaState { calls_per_minute, tokens_per_minute,
+  bytes_per_minute }` enforced via sliding-window timestamps.
+  `Capability::invoke_op` rejects with `QuotaExceeded` after the
+  limit. `CapabilityError::QuotaExceeded { name, kind }` added.
+- **Typed contracts** (`src/capability/types.rs`):
+  `CapabilityContract { input_schema, output_schema, description }`
+  carried inside `CapabilityMeta`. Surfaced via the HTTP bridge
+  in a later Phase.
+- **Hierarchical namespacing** (`src/capability/cspace.rs`):
+  `CapabilityMeta.namespace`, `enumerate_namespace(prefix)`,
+  `namespace_children(prefix)`. Names like `odyssey.model.llama3`
+  are first-class.
+- **Channel plugin** (`src/plugins/channel/`): producer/consumer
+  pair wrapped as `Capability<ChannelResource>` and
+  `Capability<ConsumerResource>`. P4 — capability-controlled
+  communication; revoke(channel) severs the send path.
+- **Capability Graph** (`src/capability/graph.rs`): `CapabilityGraph`
+  exposes the namespace tree + parent→child relationships via
+  `children_of(slot)`. P6 — composition is observable.
+- **RuleAgent plugin** (`src/plugins/agent/`): type-agnostic
+  orchestrator that introspects capabilities via `AnyCapability::
+  operations()` and dispatches via `invoke_op_dyn`. P5 — same
+  program, different capabilities → different reachable world.
+- **Multi-hop revocation** (`src/capability/cspace.rs`):
+  `cspace.revoke_tree(slot)` severs every descendant slot.
+  Combined with the new `parents` map in `CSpaceInner`, this makes
+  revoking an intermediate link in a Broker A → Broker B chain
+  kill every downstream cap.
+- **AnyCapability introspection** (`src/capability/cap.rs`):
+  `operations()` and `invoke_op_dyn(op, input)` added so erased
+  callers (Agent, Pipeline) can read and exercise per-operation
+  authority without a typed `R`.
+- **`Slot<R>::invoke_op` and `revoke_tree`** — convenience on the
+  typed slot reference.
+- **Six new labs** (`src/lab/`):
+  `quota`, `namespace`, `graph`, `channel`, `agent`, `multi_hop`.
+  Wired through `cargo run --bin lab -- <name>`.
+- **Seven new property tests** (`tests/capability_phase2.rs`):
+  `p3_revoke_tree_severs_descendants`, `p4_capability_channel_severs_on_revoke`,
+  `p5_same_agent_different_caps_different_behavior`,
+  `p6_graph_exposes_attenuation_tree`,
+  `quota_blocks_after_per_minute_limit`,
+  `p2_multihop_attenuation_holds_at_each_hop`,
+  `contract_survives_mint`. All pass.
+
 ### Added — Phase 1: Capability lab
 
 Phase 1 is the **capability experiment phase**: prove the model itself

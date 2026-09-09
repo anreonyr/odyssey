@@ -1,0 +1,31 @@
+# Channel plugin manifest — Phase 2 P4.
+#
+# The plugin exposes two capabilities: the producer side (channel_a)
+# and the consumer side (consumer_a). They are wired together at
+# boot time by the host, which calls channel_pair() and installs each
+# half at a distinct slot under the corresponding name.
+
+[plugin]
+name    = "channel"
+version = "0.1.0"
+
+[isolate]
+kind = "in_proc"
+
+[source]
+kind = "inline"
+
+[[exposes]]
+name      = "channel_a"
+in_type   = "object"
+out_type  = "object"
+streaming = false
+
+[[exposes]]
+name      = "consumer_a"
+in_type   = "null"
+out_type  = "object"
+streaming = false
+
+[resources]
+timeout_ms = 1000

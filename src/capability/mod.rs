@@ -34,6 +34,7 @@
 
 pub mod cap;
 pub mod cspace;
+pub mod graph;
 pub mod resource;
 pub mod types;
 
@@ -41,8 +42,9 @@ pub use cap::{AnyCapability, Capability};
 pub use cspace::{CapabilitySpace, Slot};
 pub use resource::Resource;
 pub use types::{
-    CapabilityBudget, CapabilityChunk, CapabilityError, CapabilityId, CapabilityMeta,
-    CapabilityRights, CapKind, OperationRights, SlotId,
+    CapabilityBudget, CapabilityChunk, CapabilityContract, CapabilityError, CapabilityId,
+    CapabilityMeta, CapabilityRights, CapKind, OperationRights, QuotaKind, QuotaSnapshot,
+    QuotaSpec, QuotaState, SlotId,
 };
 #[allow(unused_imports)]
 use CapabilityError as _;
@@ -54,6 +56,11 @@ use crate::host::manifest::{CapabilityDecl, PluginId};
 
 /// Construct a `CapabilityMeta` from a manifest declaration + budget.
 /// Used by the factory at mint time.
+///
+/// Phase 2: namespace defaults to the plugin's FQDN-style name (or the
+/// declaration name if the plugin has no namespace). The contract is
+/// read from the manifest's `[[contracts]]` table by the factory, not
+/// here — `meta_from_decl` is the simple path used by tests and labs.
 pub fn meta_from_decl(
     id: CapabilityId,
     decl: &CapabilityDecl,
@@ -63,11 +70,28 @@ pub fn meta_from_decl(
     CapabilityMeta {
         id,
         name: decl.name.clone(),
+        namespace: namespace_for(plugin, &decl.name),
         plugin: plugin.clone(),
         in_type: decl.in_type.clone(),
         out_type: decl.out_type.clone(),
         streaming: decl.streaming,
         timeout_ms: budget.timeout_ms,
+        quota: budget.quota_state.spec(),
+        contract: CapabilityContract::empty(),
+    }
+}
+
+/// Compute the hierarchical namespace a capability belongs to. For a
+/// plugin named `odyssey.model.llama3` exposing `generate`, the
+/// namespace is `odyssey.model.llama3.generate`. For a flat name
+/// like `counter` under plugin `counter`, it stays `counter`.
+pub fn namespace_for(plugin: &PluginId, cap_name: &str) -> String {
+    if plugin.name.is_empty() {
+        cap_name.to_string()
+    } else if cap_name.is_empty() || cap_name == plugin.name {
+        plugin.name.clone()
+    } else {
+        format!("{}.{}", plugin.name, cap_name)
     }
 }
 
