@@ -68,7 +68,7 @@ pub fn router(ctx: Context, cspace: CapabilitySpace) -> Router {
 }
 
 async fn index() -> impl IntoResponse {
-    Html(include_str!("../frontend/index.html"))
+    Html(include_str!("../../frontend/index.html"))
 }
 
 async fn list_caps(State(state): State<AppState>) -> Json<Vec<CapInfo>> {

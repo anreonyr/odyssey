@@ -41,7 +41,7 @@ use std::time::Instant;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-use crate::manifest::{CapabilityDecl, PluginId};
+use crate::host::manifest::{CapabilityDecl, PluginId};
 
 // ---------------------------------------------------------------------------
 // Kinds
