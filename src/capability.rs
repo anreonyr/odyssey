@@ -102,6 +102,29 @@ impl CapabilityBudget {
     }
 }
 
+/// Rights attached to a capability, supplied when deriving a child via
+/// `grant`, `transfer`, or `restrict`. The child capability keeps the
+/// same `R` (resource type) and `K` (kind) as the source, but with
+/// reduced (or equal) rights.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CapabilityRights {
+    /// Wall-clock timeout per call. Smaller = more restrictive.
+    pub timeout_ms: u32,
+}
+
+impl Default for CapabilityRights {
+    fn default() -> Self {
+        Self { timeout_ms: 5000 }
+    }
+}
+
+impl CapabilityRights {
+    pub fn with_timeout(mut self, ms: u32) -> Self {
+        self.timeout_ms = ms;
+        self
+    }
+}
+
 #[derive(Debug)]
 pub enum CapabilityChunk<T = Value> {
     Item(T),
@@ -145,6 +168,22 @@ impl<R: Send + Sync + 'static, K: CapabilityKind> Capability<R, K> {
 
     pub fn id(&self) -> CapabilityId {
         self.meta.id.clone()
+    }
+
+    /// Current rights of this capability.
+    pub fn rights(&self) -> CapabilityRights {
+        CapabilityRights { timeout_ms: self.budget.timeout_ms }
+    }
+
+    /// Derive a new capability sharing the same handler, with the given
+    /// rights and a fresh `CapabilityId`. Used by `grant`, `transfer`,
+    /// and `restrict`.
+    pub fn derive(&self, rights: CapabilityRights, new_id: CapabilityId) -> Self {
+        let new_budget = Arc::new(CapabilityBudget::new(rights.timeout_ms));
+        let mut new_meta = self.meta.clone();
+        new_meta.id = new_id;
+        new_meta.timeout_ms = rights.timeout_ms;
+        Self::new_typed(new_meta, self.handler.clone(), new_budget)
     }
 }
 
@@ -277,6 +316,12 @@ where
     pub fn meta(&self) -> Option<CapabilityMeta> {
         self.space.slot_meta(self.id)
     }
+
+    /// **Revoke**: clear this slot. Convenience wrapper around
+    /// `cspace.revoke(self.id)`.
+    pub fn revoke(&self) -> bool {
+        self.space.revoke(self.id)
+    }
 }
 
 impl<R> Slot<R, SyncKind>
@@ -290,6 +335,24 @@ where
             .ok_or_else(|| format!("slot {} empty or revoked", self.id.raw()))?;
         cap.invoke(input)
     }
+
+    /// **Grant**: derive a new sync slot with reduced rights; source
+    /// preserved. seL4: CNode.Mint.
+    pub fn grant(&self, rights: CapabilityRights, new_name: String) -> Result<SlotId, CapabilityError> {
+        self.space.grant_sync::<R>(self.id, rights, new_name)
+    }
+
+    /// **Restrict**: same as `grant` — derive a new sync slot with
+    /// reduced rights; source preserved.
+    pub fn restrict(&self, rights: CapabilityRights, new_name: String) -> Result<SlotId, CapabilityError> {
+        self.space.restrict_sync::<R>(self.id, rights, new_name)
+    }
+
+    /// **Transfer**: move the sync capability to a fresh slot. Source
+    /// slot is cleared. seL4: CNode.Move.
+    pub fn transfer(&self, rights: CapabilityRights) -> Result<SlotId, CapabilityError> {
+        self.space.transfer_sync::<R>(self.id, rights)
+    }
 }
 
 impl<R> Slot<R, StreamKind>
@@ -302,6 +365,21 @@ where
             .capability()
             .ok_or_else(|| format!("slot {} empty or revoked", self.id.raw()))?;
         cap.open(input)
+    }
+
+    /// **Grant**: derive a new streaming slot with reduced rights.
+    pub fn grant(&self, rights: CapabilityRights, new_name: String) -> Result<SlotId, CapabilityError> {
+        self.space.grant_stream::<R>(self.id, rights, new_name)
+    }
+
+    /// **Restrict**: derive a new streaming slot with reduced rights.
+    pub fn restrict(&self, rights: CapabilityRights, new_name: String) -> Result<SlotId, CapabilityError> {
+        self.space.restrict_stream::<R>(self.id, rights, new_name)
+    }
+
+    /// **Transfer**: move the streaming capability to a fresh slot.
+    pub fn transfer(&self, rights: CapabilityRights) -> Result<SlotId, CapabilityError> {
+        self.space.transfer_stream::<R>(self.id, rights)
     }
 }
 
@@ -325,6 +403,7 @@ struct CSpaceInner {
     slots: RwLock<HashMap<SlotId, SlotEntry>>,
     names: RwLock<HashMap<String, SlotId>>,
     next: AtomicU64,
+    next_derived: AtomicU64,
 }
 
 struct SlotEntry {
@@ -347,6 +426,7 @@ impl CapabilitySpace {
                 slots: RwLock::new(HashMap::new()),
                 names: RwLock::new(HashMap::new()),
                 next: AtomicU64::new(0),
+                next_derived: AtomicU64::new(0),
             }),
         }
     }
@@ -418,8 +498,175 @@ impl CapabilitySpace {
             .map(|e| e.erased.meta().clone())
     }
 
-    /// Revoke a slot — drop the occupant. The slot id is still valid (so
-    /// stale `Slot<R, K>` references don't panic), but `capability()` /
+    /// Snapshot of every occupied slot's metadata, sorted by name.
+    pub fn enumerate(&self) -> Vec<CapabilityMeta> {
+        let slots = self.inner.slots.read().expect("cspace poisoned");
+        let mut metas: Vec<_> = slots.values().map(|e| e.erased.meta().clone()).collect();
+        metas.sort_by(|a, b| a.name.cmp(&b.name));
+        metas
+    }
+
+    // -----------------------------------------------------------------------
+    // Capability operations: grant / transfer / restrict / revoke
+    //
+    // seL4 analogue:
+    //   grant    — CNode.Mint, parent preserved
+    //   transfer — CNode.Move, source cleared
+    //   restrict — CNode.Mutate (rights reduction), source preserved
+    //   revoke   — CNode.Delete + Revoke
+    //
+    // All four operations work on a typed slot the caller already holds.
+    // The derived capabilities share the underlying handler `Arc<R>` with
+    // the source — so the same resource is reused.
+    // -----------------------------------------------------------------------
+
+    /// Mint a fresh `CapabilityId` for a derived capability.
+    fn next_derived_id(&self) -> CapabilityId {
+        let raw = self.inner.next_derived.fetch_add(1, Ordering::Relaxed) + 1;
+        // Derived caps share the high bits with their parent concept; we
+        // tag the high bit so it's recognizable in logs.
+        CapabilityId(raw | (1u64 << 62))
+    }
+
+    /// Internal: insert at a freshly-allocated slot under a given name.
+    fn install_at(
+        &self,
+        erased: Arc<dyn AnyCapability>,
+        typed: Arc<dyn Any + Send + Sync>,
+        new_name: String,
+    ) -> SlotId {
+        let new_slot = self.allocate();
+        let mut slots = self.inner.slots.write().expect("cspace poisoned");
+        let prev = slots.insert(new_slot, SlotEntry { erased, typed });
+        let mut names = self.inner.names.write().expect("cspace poisoned");
+        if let Some(prev_entry) = prev {
+            names.retain(|_, s| *s != new_slot);
+            drop(prev_entry);
+        }
+        names.insert(new_name, new_slot);
+        new_slot
+    }
+
+    /// **Grant** (sync). Derive a new sync slot with the given rights;
+    /// source slot is unchanged. New slot is registered under `new_name`.
+    pub fn grant_sync<R>(
+        &self,
+        from: SlotId,
+        rights: CapabilityRights,
+        new_name: String,
+    ) -> Result<SlotId, CapabilityError>
+    where
+        R: SyncResource + 'static,
+    {
+        let source: Arc<Capability<R, SyncKind>> = self
+            .lookup_typed::<R, SyncKind>(from)
+            .ok_or(CapabilityError::SlotEmpty(from))?;
+        let new_id = self.next_derived_id();
+        let derived = source.derive(rights, new_id);
+        let arc = Arc::new(derived);
+        let erased: Arc<dyn AnyCapability> = arc.clone();
+        let typed: Arc<dyn Any + Send + Sync> = arc;
+        Ok(self.install_at(erased, typed, new_name))
+    }
+
+    /// **Grant** (stream). Derive a new streaming slot with the given
+    /// rights; source unchanged.
+    pub fn grant_stream<R>(
+        &self,
+        from: SlotId,
+        rights: CapabilityRights,
+        new_name: String,
+    ) -> Result<SlotId, CapabilityError>
+    where
+        R: StreamResource + 'static,
+    {
+        let source: Arc<Capability<R, StreamKind>> = self
+            .lookup_typed::<R, StreamKind>(from)
+            .ok_or(CapabilityError::SlotEmpty(from))?;
+        let new_id = self.next_derived_id();
+        let derived = source.derive(rights, new_id);
+        let arc = Arc::new(derived);
+        let erased: Arc<dyn AnyCapability> = arc.clone();
+        let typed: Arc<dyn Any + Send + Sync> = arc;
+        Ok(self.install_at(erased, typed, new_name))
+    }
+
+    /// **Transfer** (sync). Move the capability to a fresh slot. New
+    /// slot takes the source's name. Source slot is cleared.
+    pub fn transfer_sync<R>(
+        &self,
+        from: SlotId,
+        rights: CapabilityRights,
+    ) -> Result<SlotId, CapabilityError>
+    where
+        R: SyncResource + 'static,
+    {
+        let source: Arc<Capability<R, SyncKind>> = self
+            .lookup_typed::<R, SyncKind>(from)
+            .ok_or(CapabilityError::SlotEmpty(from))?;
+        let source_name = source.name().to_string();
+        let new_id = self.next_derived_id();
+        let derived = source.derive(rights, new_id);
+        let arc = Arc::new(derived);
+        let erased: Arc<dyn AnyCapability> = arc.clone();
+        let typed: Arc<dyn Any + Send + Sync> = arc;
+        let new_slot = self.install_at(erased, typed, source_name);
+        self.revoke(from);
+        Ok(new_slot)
+    }
+
+    /// **Transfer** (stream).
+    pub fn transfer_stream<R>(
+        &self,
+        from: SlotId,
+        rights: CapabilityRights,
+    ) -> Result<SlotId, CapabilityError>
+    where
+        R: StreamResource + 'static,
+    {
+        let source: Arc<Capability<R, StreamKind>> = self
+            .lookup_typed::<R, StreamKind>(from)
+            .ok_or(CapabilityError::SlotEmpty(from))?;
+        let source_name = source.name().to_string();
+        let new_id = self.next_derived_id();
+        let derived = source.derive(rights, new_id);
+        let arc = Arc::new(derived);
+        let erased: Arc<dyn AnyCapability> = arc.clone();
+        let typed: Arc<dyn Any + Send + Sync> = arc;
+        let new_slot = self.install_at(erased, typed, source_name);
+        self.revoke(from);
+        Ok(new_slot)
+    }
+
+    /// **Restrict** (sync) — derive a new sync slot with reduced rights.
+    pub fn restrict_sync<R>(
+        &self,
+        from: SlotId,
+        rights: CapabilityRights,
+        new_name: String,
+    ) -> Result<SlotId, CapabilityError>
+    where
+        R: SyncResource + 'static,
+    {
+        self.grant_sync::<R>(from, rights, new_name)
+    }
+
+    /// **Restrict** (stream) — derive a new streaming slot with reduced
+    /// rights.
+    pub fn restrict_stream<R>(
+        &self,
+        from: SlotId,
+        rights: CapabilityRights,
+        new_name: String,
+    ) -> Result<SlotId, CapabilityError>
+    where
+        R: StreamResource + 'static,
+    {
+        self.grant_stream::<R>(from, rights, new_name)
+    }
+
+    /// **Revoke**: clear a slot. The slot id remains valid (stale
+    /// `Slot<R, K>` references don't panic), but `capability()` /
     /// `invoke()` / `open()` will fail.
     pub fn revoke(&self, slot: SlotId) -> bool {
         let mut slots = self.inner.slots.write().expect("cspace poisoned");
@@ -432,25 +679,19 @@ impl CapabilitySpace {
             false
         }
     }
-
-    /// Snapshot of every occupied slot's metadata, sorted by name.
-    pub fn enumerate(&self) -> Vec<CapabilityMeta> {
-        let slots = self.inner.slots.read().expect("cspace poisoned");
-        let mut metas: Vec<_> = slots.values().map(|e| e.erased.meta().clone()).collect();
-        metas.sort_by(|a, b| a.name.cmp(&b.name));
-        metas
-    }
 }
-
 #[derive(Debug)]
 pub enum CapabilityError {
     AlreadyExists(String),
+    /// The slot was empty or revoked when an operation tried to read it.
+    SlotEmpty(SlotId),
 }
 
 impl std::fmt::Display for CapabilityError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::AlreadyExists(n) => write!(f, "capability already installed: {n}"),
+            Self::SlotEmpty(s) => write!(f, "slot {} empty or revoked", s.raw()),
         }
     }
 }

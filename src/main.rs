@@ -473,6 +473,70 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    // Demonstrate the four capability operations: grant / transfer /
+    // restrict / revoke. Operates on the typed `Slot<R, K>` references
+    // already in scope.
+    println!("\n[ops] grant / transfer / restrict / revoke:");
+
+    if let (Some(echo_id), Some(slow_id)) = (echo_slot_id, slow_slot_id) {
+        // Re-mint echo for the demo since the slot above was just revoked.
+        let echo_remint_id = factory.mint_sync::<EchoResource>(
+            manifests.iter().find(|m| m.plugin.name == "echo").unwrap().exposes.first().unwrap(),
+            &manifests.iter().find(|m| m.plugin.name == "echo").unwrap().plugin,
+            CapabilityBudget::new(5000),
+            plugins::echo::handler(),
+        );
+        let _ = echo_id;
+        let echo_slot = capability::Slot::<EchoResource, SyncKind>::new(cspace.clone(), echo_remint_id);
+
+        // 1) Grant: derive a new slot "echo_lite" with reduced timeout.
+        let lite_rights = capability::CapabilityRights { timeout_ms: 100 };
+        let lite_id = echo_slot.grant(lite_rights, "echo_lite".to_string())?;
+        let lite_slot = capability::Slot::<EchoResource, SyncKind>::new(cspace.clone(), lite_id);
+        println!("  grant:    slot={lite_id} timeout=100ms (source preserved)");
+        // Source still works with original budget.
+        match echo_slot.invoke(json!({"via": "source"})) {
+            Ok(_) => println!("    source echo still works"),
+            Err(e) => println!("    source echo error: {e}"),
+        }
+        // Derived slot enforces the smaller budget; we just demonstrate
+        // that it exists, not that the budget trips on a fast call.
+        let lite_cap = lite_slot.capability().expect("lite slot populated");
+        println!(
+            "    lite cap timeout_ms={} id={}",
+            lite_cap.rights().timeout_ms,
+            lite_cap.id()
+        );
+
+        // 2) Restrict: same operation semantically, different intent.
+        // Derive "echo_strict" with even smaller timeout. Source unchanged.
+        let strict_rights = capability::CapabilityRights { timeout_ms: 50 };
+        let strict_id = echo_slot.restrict(strict_rights, "echo_strict".to_string())?;
+        println!("  restrict: slot={strict_id} timeout=50ms");
+
+        // 3) Transfer: move slow to a new slot "slow_moved" with new
+        //    timeout. Source slot is cleared.
+        let slow_slot = capability::Slot::<SlowResource, SyncKind>::new(cspace.clone(), slow_id);
+        let moved_id = slow_slot.transfer(capability::CapabilityRights { timeout_ms: 1000 })?;
+        println!("  transfer: slot={moved_id} name=slow (source cleared)");
+        // Source is empty — invoke should fail.
+        match slow_slot.invoke(json!({})) {
+            Ok(_) => println!("    [unexpected] source still works"),
+            Err(e) => println!("    [expected] source empty: {e}"),
+        }
+        // Target is at the new slot, name "slow" (taken from source).
+        let moved_slot = capability::Slot::<SlowResource, SyncKind>::new(cspace.clone(), moved_id);
+        match moved_slot.invoke(json!({})) {
+            Ok(_) => println!("    [unexpected] moved works (handler is 200ms, budget 1000ms)"),
+            Err(e) => println!("    moved slot invoke: {e}"),
+        }
+
+        // 4) Revoke: drop the new strict slot.
+        let _ = lite_slot.revoke();
+        let _ = capability::Slot::<EchoResource, SyncKind>::new(cspace.clone(), strict_id).revoke();
+        println!("  revoke:   lite + strict slots cleared");
+    }
+
     // Phase 7: HTTP bridge.
     let ctx_clone = ctx.clone();
     let cspace_clone = cspace.clone();
