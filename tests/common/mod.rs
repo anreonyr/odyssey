@@ -23,7 +23,7 @@ use odyssey::capability::{
     OperationRights, QuotaSpec, SlotId,
 };
 use odyssey::host::factory::CapabilityFactory;
-use odyssey::host::manifest::{CapabilityDecl, PluginId};
+use odyssey::host::manifest::{CapabilityDecl, PluginId, PluginManifest};
 use odyssey::plugins::broker::{handler as broker_handler, BrokerResource};
 use odyssey::plugins::counter::CounterResource;
 
@@ -32,6 +32,16 @@ use odyssey::plugins::counter::CounterResource;
 /// not so loose that an obviously-wrong invocation takes forever to
 /// fail.
 pub const DEFAULT_TIMEOUT_MS: u32 = 5000;
+
+/// Read the counter's manifest from disk. Used by [`mint_counter`]
+/// so every test gets the same contract the runtime counter has —
+/// including the action → OperationRights table that the
+/// `RuleAgent` consults.
+fn load_counter_manifest() -> PluginManifest {
+    let toml_src = std::fs::read_to_string("src/plugins/counter/counter.toml")
+        .expect("counter.toml present at src/plugins/counter/counter.toml");
+    PluginManifest::from_toml_str(&toml_src).expect("counter.toml parses")
+}
 
 /// Fresh CSpace + Factory. Every test should boot its own — no shared
 /// state across tests, so failures localise.
@@ -76,13 +86,17 @@ pub fn all_rights() -> CapabilityRights {
 }
 
 /// Mint a `Capability<CounterResource>` with full authority into the
-/// given factory. The handler is `odyssey::plugins::counter::handler()`.
+/// given factory. Reads the canonical counter manifest so the
+/// minted cap carries the real contract (including the
+/// `actions` table that the `RuleAgent` reads); this matches what
+/// `cargo run -- boot` produces for the runtime counter.
 #[allow(dead_code)]
 pub fn mint_counter(factory: &CapabilityFactory) -> SlotId {
+    let m = load_counter_manifest();
     factory.mint::<CounterResource>(
         CapKind::Sync,
-        &counter_decl("counter"),
-        &counter_pid(),
+        &m.exposes[0],
+        &m.plugin,
         CapabilityBudget::new(DEFAULT_TIMEOUT_MS),
         odyssey::plugins::counter::handler(),
     )

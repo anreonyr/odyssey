@@ -26,13 +26,25 @@ streaming = false
 
 # Capability contract — JSON Schema for input / output, surfaced by
 # the HTTP bridge and any type-aware caller. The `actions` field
-# documents which `op` strings the handler accepts; an agent that
-# reads the contract can map `op` → OperationRights without
-# hardcoding the vocabulary.
+# publishes the action → OperationRights vocabulary that the
+# RuleAgent (and any other type-agnostic orchestrator) reads to
+# dispatch without hardcoding the mapping.
 [exposes.contract]
 description = "Shared integer behind a mutex. Three actions: read, increment, reset."
 input_schema = { type = "object", required = ["op"], properties = { op = { type = "string", enum = ["read", "increment", "reset"] } } }
 output_schema = { type = "object", required = ["value"], properties = { value = { type = "integer" } } }
+
+[[exposes.contract.actions]]
+name      = "read"
+operation = "READ"
+
+[[exposes.contract.actions]]
+name      = "increment"
+operation = "WRITE"
+
+[[exposes.contract.actions]]
+name      = "reset"
+operation = "ADMIN"
 
 [resources]
 timeout_ms = 5000

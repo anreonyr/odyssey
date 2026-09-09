@@ -19,6 +19,7 @@
 mod p2_multihop;
 mod p3_revoke_tree;
 mod p4_channel;
+mod p4_channel_stream;
 mod p5_agent;
 
 // `common/` lives at tests/common/, not tests/beta/common/, so

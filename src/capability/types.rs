@@ -103,6 +103,34 @@ pub struct CapabilityMeta {
 /// render a typed form, lets discovery answer "what does this cap
 /// accept?", and lets future versions of `Resource` become generic
 /// over `R + Contract`.
+/// One entry in a capability's published action vocabulary. A
+/// cap that wants type-agnostic callers (e.g. `RuleAgent`) to
+/// dispatch to it publishes the list of action verbs it accepts
+/// along with the `OperationRights` bit a caller must hold to
+/// perform each one. The `operation` field is a string ("READ",
+/// "WRITE", "EXECUTE", "ADMIN") rather than the bitflag itself
+/// so the contract stays JSON-Schema-friendly and the bitflag's
+/// object-map serde shape doesn't leak into manifests.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CapabilityAction {
+    pub name: String,
+    pub operation: String,
+}
+
+/// JSON-Schema-style contract for a capability's input and output.
+/// Stored as `serde_json::Value` so any schema dialect can ride along.
+///
+/// The contract is *descriptive*, not enforced at runtime — `Resource`
+/// stays the runtime shape. But the contract lets the HTTP bridge
+/// render a typed form, lets discovery answer "what does this cap
+/// accept?", and lets future versions of `Resource` become generic
+/// over `R + Contract`.
+///
+/// The `actions` field is the per-capability RPC vocabulary: the
+/// list of action verbs a caller may invoke, each tagged with the
+/// `OperationRights` bit the caller must hold. Type-agnostic
+/// orchestrators (the `RuleAgent` plugin in particular) read this
+/// instead of guessing the action → bit mapping themselves.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CapabilityContract {
     /// JSON Schema (or similar) for the input object.
@@ -114,6 +142,12 @@ pub struct CapabilityContract {
     /// Optional one-line description, surfaced by the HTTP bridge.
     #[serde(default)]
     pub description: String,
+    /// Per-capability RPC vocabulary. Empty means "no enumerable
+    /// action surface" — callers must already know how to talk to
+    /// the cap, or the type-agnostic dispatcher will refuse to
+    /// route to it.
+    #[serde(default)]
+    pub actions: Vec<CapabilityAction>,
 }
 
 impl CapabilityContract {
@@ -134,6 +168,26 @@ impl CapabilityContract {
     pub fn with_description(mut self, desc: impl Into<String>) -> Self {
         self.description = desc.into();
         self
+    }
+
+    /// Append an action to the vocabulary.
+    pub fn with_action(mut self, name: impl Into<String>, operation: impl Into<String>) -> Self {
+        self.actions.push(CapabilityAction {
+            name: name.into(),
+            operation: operation.into(),
+        });
+        self
+    }
+
+    /// Look up the operation bit string published for `action`. Returns
+    /// `None` if the action isn't in the cap's vocabulary — callers
+    /// (e.g. the type-agnostic `RuleAgent`) treat that as a
+    /// "no such method" error.
+    pub fn operation_for(&self, action: &str) -> Option<&str> {
+        self.actions
+            .iter()
+            .find(|a| a.name == action)
+            .map(|a| a.operation.as_str())
     }
 }
 

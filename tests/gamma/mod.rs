@@ -20,6 +20,7 @@
 //!   `CapabilityMeta` → `slot_meta(slot)`. The contract that lives
 //!   on disk is the contract that's observable on the slot.
 
+mod contract_actions;
 mod contract_default;
 mod contract_end_to_end;
 mod contract_factory;

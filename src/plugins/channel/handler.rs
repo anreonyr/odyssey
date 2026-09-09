@@ -5,10 +5,18 @@
 //! which returns two `Arc`s that the host installs at distinct slots
 //! under different capability names.
 //!
-//! The two halves share a `mpsc::channel`. The sender is wrapped in
-//! `ChannelResource` and the receiver in `ConsumerResource`. This
-//! keeps the kernel-level contract uniform — every interaction with
-//! either side is just a `Resource::invoke` on a typed capability.
+//! The two halves share a `mpsc::channel`. The producer side is a
+//! sync capability — `invoke` forwards a JSON message. The consumer
+//! side is a streaming capability — `open` returns a
+//! `Receiver<CapabilityChunk>` that yields each incoming message
+//! and a final `Done` chunk when the producer drops. The two
+//! shapes are deliberately different: sending is request/response,
+//! subscribing is a stream. Both are `Resource` implementations so
+//! the kernel treats them uniformly.
+//!
+//! Both sides are revoked uniformly — `cspace.revoke(slot)` on either
+//! half severs the connection (the producer's `invoke` then errors,
+//! the consumer's open stream terminates).
 
 use std::sync::Arc;
 
@@ -18,8 +26,8 @@ use tokio::sync::mpsc;
 
 use crate::capability::{CapabilityChunk, Resource, Slot};
 
-/// Producer-side resource. Holds the sender; calling `invoke` sends a
-/// message. EXECUTE-gated via the holding capability.
+/// Producer-side resource. Holds the sender; calling `invoke`
+/// sends a message. EXECUTE-gated via the holding capability.
 pub struct ChannelResource {
     name: String,
     tx: mpsc::Sender<Value>,
@@ -45,43 +53,71 @@ impl Resource for ChannelResource {
     }
 }
 
-/// Consumer-side resource. Holds the receiver; calling `invoke` reads
-/// the next message. READ-gated via the holding capability.
+/// Consumer-side resource. Holds the receiver; calling `open`
+/// returns a stream of `CapabilityChunk` items — one per incoming
+/// message, plus a terminal `Done` when the producer drops. READ-
+/// gated via the holding capability.
 pub struct ConsumerResource {
     name: String,
     rx: Arc<tokio::sync::Mutex<mpsc::Receiver<Value>>>,
 }
 
 impl Resource for ConsumerResource {
-    fn invoke(&self, _input: Value) -> Result<Value, String> {
-        // Synchronous Resource::invoke can't await. Use blocking
-        // try_recv — for the Phase 2 lab a single message is enough.
-        // Phase 3 will replace this with a streaming variant.
-        let mut g = self.rx.try_lock().map_err(|_| {
-            format!("{}: consumer is busy in another call", self.name)
-        })?;
-        match g.try_recv() {
-            Ok(v) => Ok(v),
-            Err(mpsc::error::TryRecvError::Empty) => Err(format!(
-                "{}: no message available",
-                self.name
-            )),
-            Err(mpsc::error::TryRecvError::Disconnected) => Err(format!(
-                "{}: producer dropped",
-                self.name
-            )),
-        }
-    }
-
-    fn open(&self, _input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
-        // Phase 2 surfaces the underlying tokio receiver as a stream
-        // so callers can subscribe to a channel with `Capability::open`.
-        // We hand out the receiver wrapped — the inner channel lives
-        // until either side drops.
-        Err(format!(
-            "{}: streaming consumer not wired in Phase 2; use invoke",
-            self.name
-        ))
+    /// The consumer is a streaming capability. `invoke` is intentionally
+    /// not implemented — a `Resource` must override one or the other
+    /// (sync or stream); the consumer has no meaningful synchronous
+    /// shape.
+    fn open(
+        &self,
+        _input: Value,
+    ) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
+        // Wire a fresh mpsc::channel<CapabilityChunk> and spawn a
+        // background task that pulls from the source receiver and
+        // forwards each Value as a CapabilityChunk::Item. When the
+        // source returns Disconnected (producer dropped or revoked),
+        // we send Done and exit.
+        //
+        // The new mpsc::channel lives as long as either side holds a
+        // reference. We drop the local sender at task end; callers
+        // hold the receiver.
+        let (out_tx, out_rx) = mpsc::channel::<CapabilityChunk>(16);
+        let rx = Arc::clone(&self.rx);
+        let name = self.name.clone();
+        tokio::spawn(async move {
+            loop {
+                // Acquire the source receiver briefly, pull one
+                // message, release. This is the streaming shape:
+                // each pull awaits; if the source is in another pull
+                // (some other `open` call), the lock waits too.
+                let msg = {
+                    let mut g = match rx.try_lock() {
+                        Ok(g) => g,
+                        Err(_) => {
+                            let _ = out_tx
+                                .send(CapabilityChunk::Item(json!({
+                                    "channel": name,
+                                    "error": "consumer busy in another call"
+                                })))
+                                .await;
+                            return;
+                        }
+                    };
+                    g.recv().await
+                };
+                match msg {
+                    Some(v) => {
+                        if out_tx.send(CapabilityChunk::Item(v)).await.is_err() {
+                            return;
+                        }
+                    }
+                    None => {
+                        let _ = out_tx.send(CapabilityChunk::Done).await;
+                        return;
+                    }
+                }
+            }
+        });
+        Ok(out_rx)
     }
 }
 

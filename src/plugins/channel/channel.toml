@@ -4,6 +4,11 @@
 # and the consumer side (consumer_a). They are wired together at
 # boot time by the host, which calls channel_pair() and installs each
 # half at a distinct slot under the corresponding name.
+#
+# The two halves are different shapes on purpose: the producer is
+# sync (sending is request/response) and the consumer is a stream
+# (subscribing is a series of items until the producer drops). The
+# kernel treats both uniformly as `Resource` instances.
 
 [plugin]
 name    = "channel"
@@ -21,11 +26,28 @@ in_type   = "object"
 out_type  = "object"
 streaming = false
 
+[exposes.contract]
+description = "Producer side of an in-process channel; sends a JSON message on invoke."
+input_schema = { type = "object", required = ["message"] }
+output_schema = { type = "object", required = ["channel", "status"] }
+
+[[exposes.contract.actions]]
+name      = "send"
+operation = "EXECUTE"
+
 [[exposes]]
 name      = "consumer_a"
 in_type   = "null"
 out_type  = "object"
-streaming = false
+streaming = true
+
+[exposes.contract]
+description = "Consumer side of an in-process channel; open returns a stream of incoming messages."
+output_schema = { type = "object" }
+
+[[exposes.contract.actions]]
+name      = "subscribe"
+operation = "READ"
 
 [resources]
 timeout_ms = 1000
