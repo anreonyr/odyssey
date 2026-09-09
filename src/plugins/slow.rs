@@ -6,7 +6,7 @@ use std::time::Duration;
 use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::Value;
 
-use crate::capability::{AnyCapability, Capability, CapabilityService, SyncKind, SyncResource};
+use crate::capability::{SyncKind, SyncResource};
 
 const SLEEP: Duration = Duration::from_millis(200);
 
@@ -26,23 +26,21 @@ pub fn handler() -> Arc<SlowResource> {
 pub fn slow_plugin() -> Arc<dyn Plugin> {
     plugin_with(
         "slow",
-        vec![
-            Injection::from("cap:slow"),
-            Injection::from("capability_service"),
-        ],
+        vec![Injection::from("slot:slow")],
         |ctx: Context, _cfg: ()| async move {
-            let slow_cap: Arc<Capability<SlowResource, SyncKind>> = ctx.require("cap:slow")?;
-            let cap_svc: Arc<CapabilityService> = ctx.require("capability_service")?;
+            let slot: Arc<crate::capability::Slot<SlowResource, SyncKind>> = ctx.require("slot:slow")?;
             ctx.logger().log(
                 LogLevel::Info,
                 format!(
-                    "slow plugin: activated cap id={} timeout={}ms",
-                    slow_cap.id(),
-                    slow_cap.meta().timeout_ms
+                    "slow plugin: slot={} cap_id={} timeout={}ms",
+                    slot.id().raw(),
+                    slot.capability()
+                        .map(|c| c.id().to_string())
+                        .unwrap_or_else(|| "(empty)".to_string()),
+                    slot.meta().map(|m| m.timeout_ms).unwrap_or(0),
                 )
                 .into(),
             );
-            cap_svc.register(slow_cap as Arc<dyn AnyCapability>)?;
             Ok(())
         },
     )

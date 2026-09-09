@@ -1,4 +1,4 @@
-//! stream_echo — typed resource `StreamEchoResource: StreamResource`.
+//! stream_echo — possession of `Slot<StreamEchoResource, StreamKind>`.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use crate::capability::{
-    AnyCapability, Capability, CapabilityChunk, CapabilityService, StreamKind, StreamResource,
+    CapabilityChunk, StreamKind, StreamResource,
 };
 
 const CHANNEL_CAPACITY: usize = 8;
@@ -44,19 +44,21 @@ pub fn handler() -> Arc<StreamEchoResource> {
 pub fn stream_echo_plugin() -> Arc<dyn Plugin> {
     plugin_with(
         "stream_echo",
-        vec![
-            Injection::from("cap:stream_echo"),
-            Injection::from("capability_service"),
-        ],
+        vec![Injection::from("slot:stream_echo")],
         |ctx: Context, _cfg: ()| async move {
-            let stream_cap: Arc<Capability<StreamEchoResource, StreamKind>> =
-                ctx.require("cap:stream_echo")?;
-            let cap_svc: Arc<CapabilityService> = ctx.require("capability_service")?;
+            let slot: Arc<crate::capability::Slot<StreamEchoResource, StreamKind>> =
+                ctx.require("slot:stream_echo")?;
             ctx.logger().log(
                 LogLevel::Info,
-                "stream_echo plugin: streaming capability activated".into(),
+                format!(
+                    "stream_echo plugin: slot={} cap_id={}",
+                    slot.id().raw(),
+                    slot.capability()
+                        .map(|c| c.id().to_string())
+                        .unwrap_or_else(|| "(empty)".to_string()),
+                )
+                .into(),
             );
-            cap_svc.register(stream_cap as Arc<dyn AnyCapability>)?;
             Ok(())
         },
     )

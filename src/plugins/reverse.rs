@@ -1,11 +1,11 @@
-//! Reverse — typed resource `ReverseResource: SyncResource`.
+//! Reverse — possession of `Slot<ReverseResource, SyncKind>`.
 
 use std::sync::Arc;
 
 use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::Value;
 
-use crate::capability::{AnyCapability, Capability, CapabilityService, SyncKind, SyncResource};
+use crate::capability::{SyncKind, SyncResource};
 
 pub struct ReverseResource;
 
@@ -25,18 +25,20 @@ pub fn handler() -> Arc<ReverseResource> {
 pub fn reverse_plugin() -> Arc<dyn Plugin> {
     plugin_with(
         "reverse",
-        vec![
-            Injection::from("cap:reverse"),
-            Injection::from("capability_service"),
-        ],
+        vec![Injection::from("slot:reverse")],
         |ctx: Context, _cfg: ()| async move {
-            let rev_cap: Arc<Capability<ReverseResource, SyncKind>> = ctx.require("cap:reverse")?;
-            let cap_svc: Arc<CapabilityService> = ctx.require("capability_service")?;
+            let slot: Arc<crate::capability::Slot<ReverseResource, SyncKind>> = ctx.require("slot:reverse")?;
             ctx.logger().log(
                 LogLevel::Info,
-                format!("reverse plugin: activated cap id={}", rev_cap.id()).into(),
+                format!(
+                    "reverse plugin: slot={} cap_id={}",
+                    slot.id().raw(),
+                    slot.capability()
+                        .map(|c| c.id().to_string())
+                        .unwrap_or_else(|| "(empty)".to_string()),
+                )
+                .into(),
             );
-            cap_svc.register(rev_cap as Arc<dyn AnyCapability>)?;
             Ok(())
         },
     )

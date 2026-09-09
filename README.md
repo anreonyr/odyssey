@@ -1,53 +1,138 @@
 # odyssey
 
-A seL4-style capability kernel implemented in Rust, with manifest-driven
-plugin loading. Plugins declare the capabilities they expose and consume;
-the host mints unforgeable `CapabilityToken`s, provides them into the cordis
-DI context, and validates the dependency graph before any plugin activates.
+A seL4-style capability kernel implemented in Rust. Plugins are manifest-
+driven: each plugin module declares a typed resource and exposes a
+capability; the host mints unforgeable `Capability<R, K>` tokens into a
+`CapabilitySpace`, installs them at fresh `SlotId` positions, and hands
+plugin bodies the typed `Slot<R, K>` reference. The host can revoke a
+slot's contents without invalidating the plugin's slot reference — the
+plugin's `invoke` / `open` / `capability` then fails closed.
 
-## Layers
+## Possession model
 
-| seL4                      | odyssey                                              |
-| ------------------------- | ---------------------------------------------------- |
-| `CNode.Allocate`          | `CapabilityFactory::mint_sync` / `mint_stream`       |
-| CNode capability (handle) | `CapabilityToken` (`Arc<CapabilityToken>`)           |
-| `endpoint.send`           | `token.invoke()` / `token.stream()`                  |
-| resource badge            | `CapabilityBudget.timeout_ms` (per-call wall clock)  |
+```
+CapabilitySpace                ← seL4 CSpace (host owns)
+└── SlotId                     ← stable position in the space
+    └── Slot<R, K>             ← typed, unforgeable reference (unit of possession)
+        └── Capability<R, K>   ← what occupies the slot
+            ├── meta: CapabilityMeta       (id, name, types, timeout_ms)
+            ├── budget: Arc<CapabilityBudget>  (per-call wall-clock cap)
+            └── handler: Arc<R>             (the resource)
+```
+
+Plugins never look up capabilities by string name at runtime. They hold
+`Slot<R, K>` references minted at activation time and dispatch through
+the typed capability.
+
+## seL4 mapping
+
+| seL4                          | odyssey                                                       |
+| ----------------------------- | ------------------------------------------------------------- |
+| `CNode.Allocate`              | `CapabilityFactory::mint_sync` / `mint_stream`                |
+| CNode capability (handle)     | `Capability<R, K>` (`Arc`)                                    |
+| CNode slot                    | `SlotId` + `Slot<R, K>` reference                             |
+| CSpace                        | `CapabilitySpace`                                             |
+| `endpoint.send`               | `token.invoke()` / `token.open()` / `slot.invoke()`           |
+| Resource badge                | `CapabilityBudget.timeout_ms` (per-call wall clock)           |
+| Slot revocation               | `cspace.revoke(slot_id)` — slot ref stays valid, lookup fails |
+
+## Type axes
+
+- `R` (resource type) — what the plugin module declared
+  (`EchoResource`, `ReverseResource`, `GeneratorResource`, ...).
+- `K` (kind) — `SyncKind` or `StreamKind`, encoded via `PhantomData`
+  so the type system distinguishes sync vs streaming capabilities.
+
+```rust
+let slot: Slot<EchoResource, SyncKind>        = ctx.require("slot:echo")?;
+let stream: Slot<GeneratorResource, StreamKind> = ctx.require("slot:generate")?;
+
+slot.invoke(json!({"hello": "world"}))?;     // sync — wall-clock budget enforced
+stream.open(json!("hi"))?;                   // returns Receiver<CapabilityChunk>
+```
 
 ## Boot order
 
 1. Parse manifests
-2. Provide core services (`factory`, `capability_service`, `registry`)
-3. Mint all tokens, in dependency order
-4. Provide tokens (`ctx.provide("cap:{name}", token)`)
-5. **Fail-fast** dependency check — abort boot if any `consumes` is missing
-6. Start plugin fibers — cordis resolves `inject` declarations
-7. Demo harness — invoke via tokens
-8. HTTP bridge on `127.0.0.1:3030`
+2. Provide core services (`capability_space`, `capability_factory`, `registry`)
+3. Mint typed tokens, allocate slots, install + provide slots to cordis
+4. **Fail-fast** dependency check — abort boot if any `consumes` is missing
+5. Start plugin fibers — cordis resolves `slot:<name>` inject declarations
+6. Demo harness — invoke via typed slots
+7. HTTP bridge on `127.0.0.1:3030`
 
 ## HTTP bridge
 
 ```
-GET  /api/caps    →  enumerate registered capabilities
-POST /api/invoke  →  invoke a sync capability
-POST /api/stream  →  open a streaming capability (SSE)
+GET  /api/caps    →  enumerate occupied slots (CapabilityMeta snapshot)
+POST /api/invoke  →  invoke a sync capability by name
+POST /api/stream  →  open a streaming capability by name (SSE)
 ```
 
-## Plugins
+## Layout
 
-Each plugin lives in `src/plugins/<name>.rs` and exports:
-- `pub fn handler() -> Arc<dyn SyncInvoke>` (or `Arc<dyn StreamInvoke>`)
-- `pub fn <name>_plugin() -> Arc<dyn Plugin>`
+```
+src/
+├── capability.rs        — CapabilitySpace, Slot<R, K>, Capability<R, K>, types
+├── dispatcher.rs        — CapabilityFactory (mint + install into CSpace)
+├── http_bridge.rs       — axum HTTP server (enumeration + invocation)
+├── main.rs              — 7-phase boot, demo harness
+├── manifest.rs          — TOML plugin descriptor
+├── pipeline.rs          — linear composition of typed stages
+├── registry.rs          — manifest dedup
+└── plugins/             — one file per plugin (resource + handler + plugin())
+    ├── echo.rs
+    ├── echo_chain.rs    — wraps Capability<EchoResource, SyncKind>
+    ├── generator.rs
+    ├── reverse.rs
+    ├── sandbox.rs       — WASM-isolated execution with fuel
+    ├── slow.rs          — exceeds its budget to exercise timeout
+    └── stream_echo.rs
 
-The plugin manifest lives in `plugins/<name>.toml` and declares identity,
-isolation, exposed capabilities, dependencies, host services, and resource
-hints. The host reads the manifest, dispatches to the right plugin module
-by name, mints a token wrapping the plugin's handler, and provides it into
-the cordis context.
+plugins/                 — one TOML manifest per plugin
+├── echo.toml
+├── echo_chain.toml
+├── generator.toml
+├── reverse.toml
+├── sandbox.toml
+├── sandbox_programs/    — WAT source for the WASM sandbox
+│   └── hello.wat
+├── slow.toml
+└── stream_echo.toml
+
+echo-cdylib/             — workspace member; cdylib loader deferred
+frontend/index.html      — minimal HTTP bridge UI
+```
 
 ## Build
 
 ```sh
 cargo build
 cargo run
+```
+
+## Plugin contract
+
+Each plugin module in `src/plugins/<name>.rs` exports:
+
+```rust
+pub struct <Name>Resource;                          // the resource type
+
+impl SyncResource for <Name>Resource { ... }        // or StreamResource
+
+pub fn handler() -> Arc<<Name>Resource>;           // the handler factory
+pub fn <name>_plugin() -> Arc<dyn Plugin>;          // the cordis plugin fiber
+```
+
+The host reads `plugins/<name>.toml`, mints a typed token wrapping the
+plugin's handler, allocates a fresh slot, installs the token there, and
+provides a `Slot<R, K>` reference to cordis under the key `slot:<name>`.
+The plugin's body injects this slot via:
+
+```rust
+plugin_with("<name>", vec![Injection::from("slot:<name>")], |ctx, _| async move {
+    let slot: Arc<Slot<<Name>Resource, SyncKind>> = ctx.require("slot:<name>")?;
+    slot.invoke(json!({...}))?;  // or slot.open(...) for streams
+    Ok(())
+})
 ```

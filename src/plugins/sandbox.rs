@@ -6,7 +6,7 @@ use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::{json, Value};
 use wasmtime::{Caller, Config, Engine, Linker, Module, Store};
 
-use crate::capability::{AnyCapability, Capability, CapabilityService, SyncKind, SyncResource};
+use crate::capability::{SyncKind, SyncResource};
 
 const DEFAULT_FUEL: u64 = 1_000_000;
 
@@ -99,18 +99,20 @@ pub fn handler() -> Arc<SandboxResource> {
 pub fn sandbox_plugin() -> Arc<dyn Plugin> {
     plugin_with(
         "sandbox",
-        vec![
-            Injection::from("cap:exec"),
-            Injection::from("capability_service"),
-        ],
+        vec![Injection::from("slot:exec")],
         |ctx: Context, _cfg: ()| async move {
-            let exec_cap: Arc<Capability<SandboxResource, SyncKind>> = ctx.require("cap:exec")?;
-            let cap_svc: Arc<CapabilityService> = ctx.require("capability_service")?;
+            let slot: Arc<crate::capability::Slot<SandboxResource, SyncKind>> = ctx.require("slot:exec")?;
             ctx.logger().log(
                 LogLevel::Info,
-                "sandbox plugin: WASM execution capability activated".into(),
+                format!(
+                    "sandbox plugin: slot={} cap_id={}",
+                    slot.id().raw(),
+                    slot.capability()
+                        .map(|c| c.id().to_string())
+                        .unwrap_or_else(|| "(empty)".to_string()),
+                )
+                .into(),
             );
-            cap_svc.register(exec_cap as Arc<dyn AnyCapability>)?;
             Ok(())
         },
     )

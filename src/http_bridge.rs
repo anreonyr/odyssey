@@ -1,6 +1,5 @@
-//! HTTP bridge — enumerates registered capabilities and routes invocations
-//! through their tokens. Uses the shared `CapabilityService` (Arc-clone of
-//! state) so what plugins register is what the bridge sees.
+//! HTTP bridge — enumerates registered capabilities from the
+//! `CapabilitySpace` and routes invocations through them.
 //!
 //!   GET  /api/caps    →  enumerate capabilities
 //!   POST /api/invoke  →  invoke a sync capability
@@ -9,7 +8,6 @@
 use std::convert::Infallible;
 use std::future::Future;
 use std::net::SocketAddr;
-use std::sync::Arc;
 
 use axum::{
     extract::State,
@@ -20,7 +18,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use crate::capability::{CapabilityChunk, CapabilityService};
+use crate::capability::{CapabilityChunk, CapabilitySpace};
 use cordis::Context;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -29,7 +27,7 @@ use tokio::sync::mpsc;
 
 #[derive(Clone)]
 struct AppState {
-    cap_svc: Arc<CapabilityService>,
+    cspace: CapabilitySpace,
 }
 
 #[derive(Serialize)]
@@ -59,14 +57,14 @@ struct ErrorResp {
     error: String,
 }
 
-pub fn router(ctx: Context, cap_svc: Arc<CapabilityService>) -> Router {
+pub fn router(ctx: Context, cspace: CapabilitySpace) -> Router {
     let _ = ctx;
     Router::new()
         .route("/", get(index))
         .route("/api/caps", get(list_caps))
         .route("/api/invoke", post(invoke))
         .route("/api/stream", post(stream))
-        .with_state(AppState { cap_svc })
+        .with_state(AppState { cspace })
 }
 
 async fn index() -> impl IntoResponse {
@@ -76,7 +74,7 @@ async fn index() -> impl IntoResponse {
 async fn list_caps(State(state): State<AppState>) -> Json<Vec<CapInfo>> {
     Json(
         state
-            .cap_svc
+            .cspace
             .enumerate()
             .into_iter()
             .map(|m| CapInfo {
@@ -95,7 +93,7 @@ async fn invoke(
     State(state): State<AppState>,
     Json(req): Json<InvokeReq>,
 ) -> Result<Json<InvokeResp>, Json<ErrorResp>> {
-    let cap = state.cap_svc.get(&req.capability).ok_or_else(|| {
+    let cap = state.cspace.lookup_by_name(&req.capability).ok_or_else(|| {
         Json(ErrorResp { error: format!("capability not found: {}", req.capability) })
     })?;
 
@@ -115,7 +113,7 @@ async fn stream(
     State(state): State<AppState>,
     Json(req): Json<InvokeReq>,
 ) -> Sse<impl futures_core::Stream<Item = Result<Event, Infallible>>> {
-    let cap = state.cap_svc.get(&req.capability);
+    let cap = state.cspace.lookup_by_name(&req.capability);
 
     let (event_tx, event_rx) = mpsc::channel::<Result<Event, Infallible>>(16);
 
@@ -173,10 +171,10 @@ async fn stream(
 pub async fn serve(
     addr: SocketAddr,
     ctx: Context,
-    cap_svc: Arc<CapabilityService>,
+    cspace: CapabilitySpace,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) {
-    let app = router(ctx, cap_svc);
+    let app = router(ctx, cspace);
     let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
     eprintln!("[http] listening on http://{addr}");
     axum::serve(listener, app)

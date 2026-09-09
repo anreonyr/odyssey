@@ -16,5 +16,4 @@
 *.so
 *.dylib
 *.dll
-
-# Local-only manifests (host-side glue, not plugin code)
+*.wasm

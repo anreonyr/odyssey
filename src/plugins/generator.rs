@@ -7,9 +7,7 @@ use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
-use crate::capability::{
-    AnyCapability, Capability, CapabilityChunk, CapabilityService, StreamKind, StreamResource,
-};
+use crate::capability::{CapabilityChunk, StreamKind, StreamResource};
 
 const TICK: Duration = Duration::from_millis(15);
 
@@ -50,18 +48,21 @@ pub fn handler() -> Arc<GeneratorResource> {
 pub fn generator_plugin() -> Arc<dyn Plugin> {
     plugin_with(
         "generator",
-        vec![
-            Injection::from("cap:generate"),
-            Injection::from("capability_service"),
-        ],
+        vec![Injection::from("slot:generate")],
         |ctx: Context, _cfg: ()| async move {
-            let gen_cap: Arc<Capability<GeneratorResource, StreamKind>> = ctx.require("cap:generate")?;
-            let cap_svc: Arc<CapabilityService> = ctx.require("capability_service")?;
+            let slot: Arc<crate::capability::Slot<GeneratorResource, StreamKind>> =
+                ctx.require("slot:generate")?;
             ctx.logger().log(
                 LogLevel::Info,
-                "generator plugin: streaming LLM-shape capability activated".into(),
+                format!(
+                    "generator plugin: slot={} cap_id={}",
+                    slot.id().raw(),
+                    slot.capability()
+                        .map(|c| c.id().to_string())
+                        .unwrap_or_else(|| "(empty)".to_string()),
+                )
+                .into(),
             );
-            cap_svc.register(gen_cap as Arc<dyn AnyCapability>)?;
             Ok(())
         },
     )

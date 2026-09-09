@@ -6,6 +6,12 @@ members = [".", "echo-cdylib"]
 name = "odyssey"
 version = "0.1.0"
 edition = "2024"
+description = "seL4-style capability kernel: manifest-driven plugins with typed Capability<R, K> minted into a CapabilitySpace and possessed via unforgeable Slot references."
+license = "MIT"
+authors = ["anreonyr <anreonyr@gmail.com>"]
+repository = "https://github.com/anreonyr/odyssey"
+keywords = ["kernel", "capability", "sel4", "plugin", "manifest"]
+categories = ["os", "development-tools::plugins"]
 
 [dependencies]
 cordis-rust = "0.2.1"

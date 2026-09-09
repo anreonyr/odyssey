@@ -1,11 +1,25 @@
 //! Odyssey — seL4-style capability kernel, manifest-driven boot.
 //!
-//! Capability is generic over the resource type the plugin module declared:
-//! `Capability<EchoResource>`, `Capability<ReverseResource>`, etc. The
-//! type system enforces that a plugin only invokes capabilities it was
-//! handed. Main holds typed tokens for the demo harness; cordis injects
-//! pass them through to plugins; the shared `CapabilityService` registry
-//! holds type-erased `Arc<dyn AnyCapability>` views for the HTTP bridge.
+//! ## Possession model
+//!
+//! - The host owns the `CapabilitySpace` (seL4 CSpace).
+//! - The factory mints typed `Capability<R, K>` and installs them at fresh
+//!   slot ids.
+//! - Plugins receive `Slot<R, K>` references via cordis inject — these are
+//!   unforgeable handles to specific positions in the CSpace. The slot
+//!   reference is stable; the host can revoke the slot contents without
+//!   invalidating the plugin's reference (the plugin's lookup / invoke
+//!   will then fail).
+//!
+//! ## Boot order
+//!
+//!   Phase 1  Parse manifests
+//!   Phase 2  Provide core services (capability_space, registry)
+//!   Phase 3  Mint typed tokens, allocate slots, install + provide slots
+//!   Phase 4  Validate graph — fail-fast on missing providers
+//!   Phase 5  Start plugins — cordis resolves slot inject declarations
+//!   Phase 6  Demo harness — invoke via typed slots
+//!   Phase 7  HTTP bridge — enumerates via CSpace
 
 mod capability;
 mod dispatcher;
@@ -20,8 +34,7 @@ use std::io::Write as _;
 use std::sync::Arc;
 
 use capability::{
-    AnyCapability, Capability, CapabilityBudget, CapabilityService, StreamKind, StreamResource,
-    SyncKind, SyncResource,
+    Capability, CapabilityBudget, CapabilitySpace, StreamKind, SyncKind,
 };
 use dispatcher::CapabilityFactory;
 use http_bridge::serve;
@@ -60,51 +73,65 @@ async fn print_stream(mut rx: tokio::sync::mpsc::Receiver<capability::Capability
 }
 
 // ---------------------------------------------------------------------------
-// Mint helpers — pull handler from a plugin module, mint typed token.
+// Mint helpers — allocate slot + install + provide to cordis
 // ---------------------------------------------------------------------------
 
-fn mint_sync<R, F>(
+/// Mint a sync token at a fresh slot, install into the CSpace, and provide
+/// a `Slot<R, SyncKind>` handle to cordis. Returns the slot id.
+async fn mint_and_provide_sync<R, F>(
+    ctx: &cordis::Context,
     factory: &CapabilityFactory,
     manifests: &[PluginManifest],
     plugin_name: &str,
+    slot_key: &str,
     handler_for: F,
-) -> Result<Option<Arc<Capability<R, SyncKind>>>, Box<dyn std::error::Error>>
+) -> Result<Option<capability::SlotId>, Box<dyn std::error::Error>>
 where
-    R: SyncResource + 'static,
+    R: capability::SyncResource + 'static,
     F: FnOnce(&CapabilityDecl, &PluginId) -> Arc<R>,
 {
     let Some(m) = manifests.iter().find(|m| m.plugin.name == plugin_name) else {
         return Ok(None);
     };
-    let decl = m
-        .exposes
-        .first()
-        .ok_or_else(|| format!("{plugin_name}: manifest must expose at least one capability"))?;
+    let decl = m.exposes.first().ok_or_else(|| {
+        format!("{plugin_name}: manifest must expose at least one capability")
+    })?;
     let budget = CapabilityBudget::new(m.resources.timeout_ms.unwrap_or(5000));
     let handler = handler_for(decl, &m.plugin);
-    Ok(Some(factory.mint_sync::<R>(decl, &m.plugin, budget, handler)))
+    let slot_id = factory.mint_sync::<R>(decl, &m.plugin, budget, handler);
+    let slot = capability::Slot::<R, SyncKind>::new(factory.space().clone(), slot_id);
+    // Provide the Slot struct to cordis — plugin bodies inject Slot<R, K>.
+    // cordis wraps in Arc; require returns Arc<Slot<R, K>>.
+    ctx.provide(slot_key, slot).await
+        .map_err(|e| format!("provide {slot_key}: {e}"))?;
+    Ok(Some(slot_id))
 }
 
-fn mint_stream<R, F>(
+async fn mint_and_provide_stream<R, F>(
+    ctx: &cordis::Context,
     factory: &CapabilityFactory,
     manifests: &[PluginManifest],
     plugin_name: &str,
+    slot_key: &str,
     handler_for: F,
-) -> Result<Option<Arc<Capability<R, StreamKind>>>, Box<dyn std::error::Error>>
+) -> Result<Option<capability::SlotId>, Box<dyn std::error::Error>>
 where
-    R: StreamResource + 'static,
+    R: capability::StreamResource + 'static,
     F: FnOnce(&CapabilityDecl, &PluginId) -> Arc<R>,
 {
     let Some(m) = manifests.iter().find(|m| m.plugin.name == plugin_name) else {
         return Ok(None);
     };
-    let decl = m
-        .exposes
-        .first()
-        .ok_or_else(|| format!("{plugin_name}: manifest must expose at least one capability"))?;
+    let decl = m.exposes.first().ok_or_else(|| {
+        format!("{plugin_name}: manifest must expose at least one capability")
+    })?;
     let budget = CapabilityBudget::new(m.resources.timeout_ms.unwrap_or(5000));
     let handler = handler_for(decl, &m.plugin);
-    Ok(Some(factory.mint_stream::<R>(decl, &m.plugin, budget, handler)))
+    let slot_id = factory.mint_stream::<R>(decl, &m.plugin, budget, handler);
+    let slot = capability::Slot::<R, StreamKind>::new(factory.space().clone(), slot_id);
+    ctx.provide(slot_key, slot).await
+        .map_err(|e| format!("provide {slot_key}: {e}"))?;
+    Ok(Some(slot_id))
 }
 
 // ---------------------------------------------------------------------------
@@ -128,117 +155,127 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Phase 2: Provide core services.
     let ctx = cordis::Context::new();
-    let factory = CapabilityFactory::new();
-    let cap_svc = Arc::new(CapabilityService::new());
+    let cspace = CapabilitySpace::new();
+    let factory = CapabilityFactory::new(cspace.clone());
     let registry = Arc::new(Registry::default());
 
+    ctx.provide("capability_space", cspace.clone()).await?;
     ctx.provide("capability_factory", factory.clone()).await?;
-    ctx.provide("capability_service", (*cap_svc).clone()).await?;
     ctx.provide("registry", registry.clone()).await?;
     println!("[main] core services provided");
 
-    // Phase 3 + 4: Mint typed tokens, provide to cordis, register in service.
+    // Phase 3: Mint typed tokens, allocate slots, install + provide to cordis.
     println!("\n[mint] capability tokens:");
 
-    // Echo — sync, no deps.
-    let echo_token = mint_sync::<EchoResource, _>(&factory, &manifests, "echo", |_, _| {
-        plugins::echo::handler()
-    })?;
-    if let Some(t) = &echo_token {
-        ctx.provide("cap:echo", (*t.as_ref()).clone()).await?;
-        cap_svc.register(t.clone() as Arc<dyn AnyCapability>)?;
-        println!("  echo  →  id={}  timeout={}ms", t.id(), t.meta().timeout_ms);
+    let echo_slot_id = mint_and_provide_sync::<EchoResource, _>(
+        &ctx,
+        &factory,
+        &manifests,
+        "echo",
+        "slot:echo",
+        |_, _| plugins::echo::handler(),
+    )
+    .await?;
+    if let Some(id) = echo_slot_id {
+        println!("  echo  →  slot={id}");
     }
 
-    // Reverse — sync, no deps.
-    let reverse_token = mint_sync::<ReverseResource, _>(&factory, &manifests, "reverse", |_, _| {
-        plugins::reverse::handler()
-    })?;
-    if let Some(t) = &reverse_token {
-        ctx.provide("cap:reverse", (*t.as_ref()).clone()).await?;
-        cap_svc.register(t.clone() as Arc<dyn AnyCapability>)?;
-        println!("  reverse  →  id={}  timeout={}ms", t.id(), t.meta().timeout_ms);
+    let reverse_slot_id = mint_and_provide_sync::<ReverseResource, _>(
+        &ctx,
+        &factory,
+        &manifests,
+        "reverse",
+        "slot:reverse",
+        |_, _| plugins::reverse::handler(),
+    )
+    .await?;
+    if let Some(id) = reverse_slot_id {
+        println!("  reverse  →  slot={id}");
     }
 
-    // Slow — sync, no deps.
-    let slow_token = mint_sync::<SlowResource, _>(&factory, &manifests, "slow", |_, _| {
-        plugins::slow::handler()
-    })?;
-    if let Some(t) = &slow_token {
-        ctx.provide("cap:slow", (*t.as_ref()).clone()).await?;
-        cap_svc.register(t.clone() as Arc<dyn AnyCapability>)?;
-        println!("  slow  →  id={}  timeout={}ms", t.id(), t.meta().timeout_ms);
+    let slow_slot_id = mint_and_provide_sync::<SlowResource, _>(
+        &ctx,
+        &factory,
+        &manifests,
+        "slow",
+        "slot:slow",
+        |_, _| plugins::slow::handler(),
+    )
+    .await?;
+    if let Some(id) = slow_slot_id {
+        println!("  slow  →  slot={id}");
     }
 
-    // Sandbox — sync, no deps.
-    let sandbox_token = mint_sync::<SandboxResource, _>(&factory, &manifests, "sandbox", |_, _| {
-        plugins::sandbox::handler()
-    })?;
-    if let Some(t) = &sandbox_token {
-        ctx.provide("cap:exec", (*t.as_ref()).clone()).await?;
-        cap_svc.register(t.clone() as Arc<dyn AnyCapability>)?;
-        println!("  exec  →  id={}  timeout={}ms", t.id(), t.meta().timeout_ms);
+    let sandbox_slot_id = mint_and_provide_sync::<SandboxResource, _>(
+        &ctx,
+        &factory,
+        &manifests,
+        "sandbox",
+        "slot:exec",
+        |_, _| plugins::sandbox::handler(),
+    )
+    .await?;
+    if let Some(id) = sandbox_slot_id {
+        println!("  exec  →  slot={id}");
     }
 
-    // Echo-chain — sync, depends on echo.
-    let chain_token =
-        if let (Some(echo_t), Some(m)) = (
-            echo_token.as_ref(),
-            manifests.iter().find(|m| m.plugin.name == "echo-chain"),
-        ) {
-            let decl = m.exposes.first().unwrap();
-            let budget = CapabilityBudget::new(m.resources.timeout_ms.unwrap_or(5000));
-            let t = factory.mint_sync::<EchoChainResource>(
-                decl,
-                &m.plugin,
-                budget,
-                plugins::echo_chain::handler(echo_t.clone()),
-            );
-            ctx.provide("cap:echo_chain", (*t.as_ref()).clone()).await?;
-            cap_svc.register(t.clone() as Arc<dyn AnyCapability>)?;
-            println!(
-                "  echo_chain  →  id={}  timeout={}ms",
-                t.id(),
-                t.meta().timeout_ms
-            );
-            Some(t)
-        } else {
-            None
-        };
-
-    // Stream_echo — stream, no deps.
-    let stream_echo_token =
-        mint_stream::<StreamEchoResource, _>(&factory, &manifests, "stream_echo", |_, _| {
-            plugins::stream_echo::handler()
-        })?;
-    if let Some(t) = &stream_echo_token {
-        ctx.provide("cap:stream_echo", (*t.as_ref()).clone()).await?;
-        cap_svc.register(t.clone() as Arc<dyn AnyCapability>)?;
-        println!(
-            "  stream_echo  →  id={}  timeout={}ms",
-            t.id(),
-            t.meta().timeout_ms
+    // Echo-chain — depends on the typed Capability<EchoResource, SyncKind>.
+    if let (Some(_echo_id), Some(m)) = (
+        echo_slot_id,
+        manifests.iter().find(|m| m.plugin.name == "echo-chain"),
+    ) {
+        let decl = m.exposes.first().unwrap();
+        let budget = CapabilityBudget::new(m.resources.timeout_ms.unwrap_or(5000));
+        // Acquire the typed echo capability from the CSpace (lookup_typed
+        // downcasts via Arc::downcast).
+        let echo_cap = cspace
+            .lookup_typed::<EchoResource, SyncKind>(echo_slot_id.unwrap())
+            .ok_or_else(|| "echo-chain: typed echo capability missing")?;
+        let slot_id = factory.mint_sync::<EchoChainResource>(
+            decl,
+            &m.plugin,
+            budget,
+            plugins::echo_chain::handler(echo_cap),
         );
+        let slot = capability::Slot::<EchoChainResource, SyncKind>::new(cspace.clone(), slot_id);
+        ctx.provide("slot:echo_chain", slot).await?;
+        println!("  echo_chain  →  slot={slot_id}");
     }
 
-    // Generator — stream, no deps.
-    let gen_token = mint_stream::<GeneratorResource, _>(&factory, &manifests, "generator", |_, _| {
-        plugins::generator::handler()
-    })?;
-    if let Some(t) = &gen_token {
-        ctx.provide("cap:generate", (*t.as_ref()).clone()).await?;
-        cap_svc.register(t.clone() as Arc<dyn AnyCapability>)?;
-        println!("  generate  →  id={}  timeout={}ms", t.id(), t.meta().timeout_ms);
+    let stream_echo_slot_id = mint_and_provide_stream::<StreamEchoResource, _>(
+        &ctx,
+        &factory,
+        &manifests,
+        "stream_echo",
+        "slot:stream_echo",
+        |_, _| plugins::stream_echo::handler(),
+    )
+    .await?;
+    if let Some(id) = stream_echo_slot_id {
+        println!("  stream_echo  →  slot={id}");
     }
 
-    // Track which manifests have all their capabilities provided.
+    let gen_slot_id = mint_and_provide_stream::<GeneratorResource, _>(
+        &ctx,
+        &factory,
+        &manifests,
+        "generator",
+        "slot:generate",
+        |_, _| plugins::generator::handler(),
+    )
+    .await?;
+    if let Some(id) = gen_slot_id {
+        println!("  generate  →  slot={id}");
+    }
+
+    // Track which capabilities ended up installed.
     let provided_caps: HashSet<String> = manifests
         .iter()
         .filter(|m| !matches!(m.plugin.name.as_str(), "echo-cdylib" | "echo-wasm"))
         .flat_map(|m| m.exposes.iter().map(|c| c.name.clone()))
         .collect();
 
-    // Phase 5: Validate graph.
+    // Phase 4: Validate graph.
     println!("\n[graph] validating capability dependencies:");
     let mut missing: Vec<(String, String, String)> = Vec::new();
     for m in &manifests {
@@ -277,7 +314,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         registry.register(m.clone())?;
     }
 
-    // Phase 6: Start plugins.
+    // Phase 5: Start plugins.
     println!("\n[plugins] activating:");
     let plugin_list: Vec<(&str, Arc<dyn cordis::Plugin>)> = vec![
         ("echo", echo_plugin()),
@@ -309,23 +346,32 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Phase 7: Demo — typed invocation directly on the mint result.
+    // Phase 6: Demo — typed invocation via Slot.
     println!("\n[demo] capability invocations:");
 
-    if let Some(echo_cap) = &echo_token {
-        match echo_cap.invoke(json!({"message": "hello", "n": 42})) {
+    if let Some(echo_slot) = ctx
+        .require::<capability::Slot<EchoResource, SyncKind>>("slot:echo")
+        .ok()
+    {
+        match echo_slot.invoke(json!({"message": "hello", "n": 42})) {
             Ok(v) => println!("  echo: {v}"),
             Err(e) => println!("  echo error: {e}"),
         }
     }
-    if let Some(rev_cap) = &reverse_token {
-        match rev_cap.invoke(json!("pipeline")) {
+    if let Some(rev_slot) = ctx
+        .require::<capability::Slot<ReverseResource, SyncKind>>("slot:reverse")
+        .ok()
+    {
+        match rev_slot.invoke(json!("pipeline")) {
             Ok(v) => println!("  reverse: {v}"),
             Err(e) => println!("  reverse error: {e}"),
         }
     }
-    if let Some(stream_cap) = &stream_echo_token {
-        match stream_cap.open(json!("hello world from stream_echo")) {
+    if let Some(stream_slot) = ctx
+        .require::<capability::Slot<StreamEchoResource, StreamKind>>("slot:stream_echo")
+        .ok()
+    {
+        match stream_slot.open(json!("hello world from stream_echo")) {
             Ok(rx) => {
                 println!("  stream_echo:");
                 print!("   ");
@@ -334,12 +380,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             Err(e) => println!("  stream_echo error: {e}"),
         }
     }
-    if let Some(slow_cap) = &slow_token {
+    if let Some(slow_slot) = ctx
+        .require::<capability::Slot<SlowResource, SyncKind>>("slot:slow")
+        .ok()
+    {
         println!(
-            "\n  slow token (timeout={}ms, will timeout):",
-            slow_cap.meta().timeout_ms
+            "\n  slow slot (timeout={}ms, will timeout):",
+            slow_slot.meta().map(|m| m.timeout_ms).unwrap_or(0)
         );
-        match slow_cap.invoke(json!({"hi": "limiter"})) {
+        match slow_slot.invoke(json!({"hi": "limiter"})) {
             Ok(v) => println!("  [unexpected success] {v}"),
             Err(e) => println!("  [expected timeout] {e}"),
         }
@@ -354,12 +403,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    // Pipeline via erased capability view.
+    // Pipeline — hold typed Capability<R, SyncKind> in stages.
     println!("\n[pipeline] token-based composition:");
-    if let (Some(rev_cap), Some(echo_cap)) = (&reverse_token, &echo_token) {
+    if let (Some(rev_slot), Some(echo_slot)) = (
+        ctx.require::<capability::Slot<ReverseResource, SyncKind>>("slot:reverse")
+            .ok(),
+        ctx.require::<capability::Slot<EchoResource, SyncKind>>("slot:echo")
+            .ok(),
+    ) {
+        let rev_cap: Arc<Capability<ReverseResource, SyncKind>> = rev_slot
+            .capability()
+            .ok_or("rev slot empty")?;
+        let echo_cap: Arc<Capability<EchoResource, SyncKind>> = echo_slot
+            .capability()
+            .ok_or("echo slot empty")?;
         let stages = vec![
-            pipeline::SyncStage::new(rev_cap.clone() as Arc<dyn AnyCapability>)?,
-            pipeline::SyncStage::new(echo_cap.clone() as Arc<dyn AnyCapability>)?,
+            pipeline::SyncStage::new(rev_cap)?,
+            pipeline::SyncStage::new(echo_cap)?,
         ];
         let p = pipeline::Pipeline::new(stages);
         match p.run(json!("hello")) {
@@ -369,8 +429,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // Generator streaming.
-    if let Some(gen_cap) = &gen_token {
-        match gen_cap.open(json!("hello there")) {
+    if let Some(gen_slot) = ctx
+        .require::<capability::Slot<GeneratorResource, StreamKind>>("slot:generate")
+        .ok()
+    {
+        match gen_slot.open(json!("hello there")) {
             Ok(rx) => {
                 println!("  generate streaming:");
                 print!("   ");
@@ -380,10 +443,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Sandbox via typed token.
-    println!("\n[sandbox] exec via token (fuel=1_000_000):");
-    if let Some(sandbox_cap) = &sandbox_token {
-        match sandbox_cap.invoke(json!({
+    // Sandbox via slot.
+    println!("\n[sandbox] exec via slot (fuel=1_000_000):");
+    if let Some(sandbox_slot) = ctx
+        .require::<capability::Slot<SandboxResource, SyncKind>>("slot:exec")
+        .ok()
+    {
+        match sandbox_slot.invoke(json!({
             "path": "plugins/sandbox_programs/hello.wat",
             "fuel": 1_000_000
         })) {
@@ -392,14 +458,29 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Phase 8: HTTP bridge.
+    // Demonstrate revocation: revoke echo's slot, then the plugin's lookup fails.
+    if let Some(echo_slot_id) = echo_slot_id {
+        println!("\n[revoke] clearing echo slot={echo_slot_id}...");
+        cspace.revoke(echo_slot_id);
+        if let Some(echo_slot) = ctx
+            .require::<capability::Slot<EchoResource, SyncKind>>("slot:echo")
+            .ok()
+        {
+            match echo_slot.invoke(json!({"after": "revoke"})) {
+                Ok(v) => println!("  [unexpected] {v}"),
+                Err(e) => println!("  [expected after revoke] {e}"),
+            }
+        }
+    }
+
+    // Phase 7: HTTP bridge.
     let ctx_clone = ctx.clone();
-    let cap_svc_clone = cap_svc.clone();
+    let cspace_clone = cspace.clone();
     let server_handle = tokio::spawn(async move {
         serve(
             "127.0.0.1:3030".parse().unwrap(),
             ctx_clone,
-            cap_svc_clone,
+            cspace_clone,
             async {
                 let _ = tokio::signal::ctrl_c().await;
             },
@@ -412,9 +493,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = server_handle.await;
     eprintln!("[main] shutting down");
     ctx.stop().await;
-
-    // Touch chain_token to keep lint happy when echo-chain wasn't built.
-    let _ = chain_token;
 
     Ok(())
 }
