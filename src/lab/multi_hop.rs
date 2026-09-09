@@ -43,6 +43,7 @@ fn mint_broker(
         in_type: "object".into(),
         out_type: "object".into(),
         streaming: false,
+        ..Default::default()
     };
     let pid = crate::host::manifest::PluginId {
         name: "broker".into(),

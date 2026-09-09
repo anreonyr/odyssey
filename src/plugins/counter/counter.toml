@@ -24,5 +24,15 @@ in_type   = "object"
 out_type  = "object"
 streaming = false
 
+# Capability contract — JSON Schema for input / output, surfaced by
+# the HTTP bridge and any type-aware caller. The `actions` field
+# documents which `op` strings the handler accepts; an agent that
+# reads the contract can map `op` → OperationRights without
+# hardcoding the vocabulary.
+[exposes.contract]
+description = "Shared integer behind a mutex. Three actions: read, increment, reset."
+input_schema = { type = "object", required = ["op"], properties = { op = { type = "string", enum = ["read", "increment", "reset"] } } }
+output_schema = { type = "object", required = ["value"], properties = { value = { type = "integer" } } }
+
 [resources]
 timeout_ms = 5000

@@ -50,6 +50,7 @@ fn mint_counter(space: &CapabilitySpace) -> SlotId {
             in_type: "object".into(),
             out_type: "object".into(),
             streaming: false,
+            ..Default::default()
         },
         &PluginId {
             name: "counter".into(),
@@ -69,6 +70,7 @@ fn mint_echo(space: &CapabilitySpace, name: &str) -> SlotId {
             in_type: "any".into(),
             out_type: "any".into(),
             streaming: false,
+            ..Default::default()
         },
         &PluginId {
             name: "echo".into(),
@@ -88,6 +90,7 @@ fn mint_slow(space: &CapabilitySpace) -> SlotId {
             in_type: "any".into(),
             out_type: "any".into(),
             streaming: false,
+            ..Default::default()
         },
         &PluginId {
             name: "slow".into(),
@@ -164,6 +167,7 @@ fn delegation_through_broker_mints_child_slot() {
             in_type: "object".into(),
             out_type: "object".into(),
             streaming: false,
+            ..Default::default()
         },
         &PluginId {
             name: "broker".into(),

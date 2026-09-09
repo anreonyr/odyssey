@@ -7,6 +7,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+use crate::capability::CapabilityContract;
+
 #[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
 pub struct PluginId {
     pub name: String,
@@ -73,7 +75,7 @@ pub enum Transport {
     Uds { path: String },
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CapabilityDecl {
     pub name: String,
     /// Logical type name for input (declared in manifest). Surfaced to the
@@ -85,6 +87,14 @@ pub struct CapabilityDecl {
     #[allow(dead_code)]
     pub out_type: String,
     pub streaming: bool,
+    /// JSON-Schema-style contract for input / output and a one-line
+    /// description. Optional — missing field deserialises to an empty
+    /// contract so existing manifests keep parsing unchanged.
+    /// `CapabilityMeta.contract` carries it from the factory into the
+    /// runtime, where the HTTP bridge and any type-aware caller (the
+    /// RuleAgent in particular) can read it.
+    #[serde(default)]
+    pub contract: CapabilityContract,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

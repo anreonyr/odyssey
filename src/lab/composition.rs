@@ -39,6 +39,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         in_type: "any".into(),
         out_type: "any".into(),
         streaming: false,
+        ..Default::default()
     };
     let pid = crate::host::manifest::PluginId {
         name: "echo".into(),

@@ -42,6 +42,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         in_type: "object".into(),
         out_type: "object".into(),
         streaming: false,
+        ..Default::default()
     };
     let counter_slot = factory.mint::<CounterResource>(
         crate::capability::CapKind::Sync,
@@ -65,6 +66,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         in_type: "object".into(),
         out_type: "object".into(),
         streaming: false,
+        ..Default::default()
     };
     let agent_pid = crate::host::manifest::PluginId {
         name: "agent".into(),
@@ -96,6 +98,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         in_type: "object".into(),
         out_type: "object".into(),
         streaming: false,
+        ..Default::default()
     };
     let agent_b_slot = factory.mint::<AgentResource>(
         crate::capability::CapKind::Sync,

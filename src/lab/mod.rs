@@ -57,6 +57,7 @@ pub(crate) fn boot_counter() -> Harness {
         in_type: "object".into(),
         out_type: "object".into(),
         streaming: false,
+        ..Default::default()
     };
     let pid = crate::host::manifest::PluginId {
         name: "counter".into(),

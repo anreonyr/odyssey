@@ -33,6 +33,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         in_type: "object".into(),
         out_type: "object".into(),
         streaming: false,
+        ..Default::default()
     };
     let chan_slot = factory.mint::<ChannelResource>(
         crate::capability::CapKind::Sync,
@@ -47,6 +48,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         in_type: "null".into(),
         out_type: "object".into(),
         streaming: false,
+        ..Default::default()
     };
     let cons_slot = factory.mint::<ConsumerResource>(
         crate::capability::CapKind::Sync,

@@ -27,8 +27,8 @@
 //!   Broker A → Broker B delegation chain.
 
 use odyssey::capability::{
-    CapabilityBudget, CapabilityContract, CapabilityError, CapabilityMeta, CapabilityRights,
-    CapabilitySpace, CapKind, OperationRights, QuotaSpec, Slot, SlotId,
+    CapabilityBudget, CapabilityContract, CapabilityError, CapabilityRights, CapabilitySpace,
+    CapKind, OperationRights, QuotaSpec, Slot, SlotId,
 };
 use odyssey::host::factory::CapabilityFactory;
 use odyssey::host::manifest::{CapabilityDecl, PluginId};
@@ -45,6 +45,7 @@ fn mint_counter(_space: &CapabilitySpace, factory: &CapabilityFactory) -> SlotId
             in_type: "object".into(),
             out_type: "object".into(),
             streaming: false,
+            ..Default::default()
         },
         &PluginId {
             name: "counter".into(),
@@ -68,6 +69,7 @@ fn mint_broker(
             in_type: "object".into(),
             out_type: "object".into(),
             streaming: false,
+            ..Default::default()
         },
         &PluginId {
             name: "broker".into(),
@@ -164,6 +166,7 @@ fn p4_capability_channel_severs_on_revoke() {
             in_type: "object".into(),
             out_type: "object".into(),
             streaming: false,
+            ..Default::default()
         },
         &pid,
         CapabilityBudget::new(1000),
@@ -226,6 +229,7 @@ fn p5_same_agent_different_caps_different_behavior() {
             in_type: "object".into(),
             out_type: "object".into(),
             streaming: false,
+            ..Default::default()
         },
         &PluginId {
             name: "agent".into(),
@@ -245,6 +249,7 @@ fn p5_same_agent_different_caps_different_behavior() {
             in_type: "object".into(),
             out_type: "object".into(),
             streaming: false,
+            ..Default::default()
         },
         &PluginId {
             name: "agent".into(),
@@ -351,6 +356,7 @@ fn quota_blocks_after_per_minute_limit() {
             in_type: "object".into(),
             out_type: "object".into(),
             streaming: false,
+            ..Default::default()
         },
         &PluginId {
             name: "counter".into(),
@@ -452,59 +458,124 @@ fn p2_multihop_attenuation_holds_at_each_hop() {
 }
 
 // ---------------------------------------------------------------------------
-// Bonus: contract is part of meta
+// Contract metadata: manifest → factory → CapabilityMeta
 // ---------------------------------------------------------------------------
 
 #[test]
-fn contract_survives_mint() {
+fn contract_decl_survives_mint_via_factory() {
     let space = CapabilitySpace::new();
     let factory = CapabilityFactory::new(space.clone());
 
-    // Manually mint with a contract.
-    let id = odyssey::capability::CapabilityId(0);
-    let budget = CapabilityBudget::new(5000);
-    let meta = CapabilityMeta {
-        id: id.clone(),
+    // A CapabilityDecl with a real contract — this is what a
+    // `[exposes.contract]` block in a manifest TOML deserialises into.
+    let decl = CapabilityDecl {
         name: "demo".into(),
-        namespace: "odyssey.demo".into(),
-        plugin: PluginId {
-            name: "demo".into(),
-            version: "0.1.0".into(),
-        },
         in_type: "object".into(),
         out_type: "object".into(),
         streaming: false,
-        timeout_ms: 5000,
-        quota: budget.quota_state.spec(),
         contract: CapabilityContract::empty()
             .with_description("Phase 2 contract demo")
             .with_input(serde_json::json!({"type": "object"})),
+        ..Default::default()
     };
-    // Use a dummy counter resource just to get a typed capability minted.
+
     let slot = factory.mint::<CounterResource>(
         CapKind::Sync,
-        &CapabilityDecl {
-            name: "demo".into(),
-            in_type: "object".into(),
-            out_type: "object".into(),
-            streaming: false,
-        },
+        &decl,
         &PluginId {
             name: "demo".into(),
             version: "0.1.0".into(),
         },
-        budget,
+        CapabilityBudget::new(5000),
         odyssey::plugins::counter::handler(),
     );
     let observed = space.slot_meta(slot).unwrap();
-    // The factory may overwrite the contract with empty (since we
-    // didn't plumb contracts through the factory in this commit).
-    // This test only verifies that the namespace and quota survive
-    // — both added in Phase 2.
-    assert_eq!(observed.namespace, "demo");
-    assert!(observed.quota.is_unlimited());
-    let _ = meta;
-    let _ = id;
+    assert_eq!(
+        observed.contract.description,
+        "Phase 2 contract demo",
+        "factory must forward decl.contract into CapabilityMeta"
+    );
+    assert_eq!(observed.contract.input_schema, serde_json::json!({"type": "object"}));
+}
+
+#[test]
+fn contract_defaults_to_empty_when_manifest_omits_it() {
+    // Manifests that don't declare `[exposes.contract]` should still
+    // mint — the missing field falls through to CapabilityContract::default().
+    let space = CapabilitySpace::new();
+    let factory = CapabilityFactory::new(space.clone());
+    let decl = CapabilityDecl {
+        name: "demo".into(),
+        in_type: "any".into(),
+        out_type: "any".into(),
+        streaming: false,
+        ..Default::default()
+    };
+    let slot = factory.mint::<CounterResource>(
+        CapKind::Sync,
+        &decl,
+        &PluginId {
+            name: "demo".into(),
+            version: "0.1.0".into(),
+        },
+        CapabilityBudget::new(5000),
+        odyssey::plugins::counter::handler(),
+    );
+    let observed = space.slot_meta(slot).unwrap();
+    assert_eq!(observed.contract.description, "");
+    assert_eq!(observed.contract.input_schema, serde_json::Value::Null);
+}
+
+#[test]
+fn contract_roundtrips_through_toml_parse() {
+    // The contract metadata must actually arrive via the TOML parser,
+    // not just the in-process struct literal. counter.toml is the
+    // reference manifest — it declares a real contract in Phase 2.
+    let toml_src = std::fs::read_to_string("src/plugins/counter/counter.toml")
+        .expect("counter.toml present");
+    let m = odyssey::host::manifest::PluginManifest::from_toml_str(&toml_src)
+        .expect("counter.toml parses");
+    let cap = &m.exposes[0];
+    assert_eq!(
+        cap.contract.description,
+        "Shared integer behind a mutex. Three actions: read, increment, reset."
+    );
+    assert_eq!(
+        cap.contract.input_schema["properties"]["op"]["enum"],
+        serde_json::json!(["read", "increment", "reset"])
+    );
+}
+
+#[test]
+fn contract_from_manifest_reaches_capability_meta_end_to_end() {
+    // Parse the manifest, run the factory.mint path, then read the
+    // resulting meta back through the CSpace — the contract has to
+    // survive the full chain TOML → PluginManifest → CapabilityDecl →
+    // factory.mint → CapabilityMeta → slot_meta().
+    let toml_src = std::fs::read_to_string("src/plugins/counter/counter.toml")
+        .expect("counter.toml present");
+    let m = odyssey::host::manifest::PluginManifest::from_toml_str(&toml_src)
+        .expect("counter.toml parses");
+    let cap = &m.exposes[0];
+
+    let space = CapabilitySpace::new();
+    let factory = CapabilityFactory::new(space.clone());
+    let slot = factory.mint::<CounterResource>(
+        CapKind::Sync,
+        cap,
+        &m.plugin,
+        CapabilityBudget::new(5000),
+        odyssey::plugins::counter::handler(),
+    );
+    let observed = space.slot_meta(slot).unwrap();
+    assert_eq!(
+        observed.contract.description,
+        "Shared integer behind a mutex. Three actions: read, increment, reset."
+    );
+    assert_eq!(
+        observed.contract.input_schema["properties"]["op"]["enum"],
+        serde_json::json!(["read", "increment", "reset"])
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -526,6 +597,7 @@ fn quota_shared_across_restrict_chain() {
             in_type: "object".into(),
             out_type: "object".into(),
             streaming: false,
+            ..Default::default()
         },
         &PluginId {
             name: "counter".into(),

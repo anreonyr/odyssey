@@ -59,8 +59,8 @@ use crate::host::manifest::{CapabilityDecl, PluginId};
 ///
 /// Phase 2: namespace defaults to the plugin's FQDN-style name (or the
 /// declaration name if the plugin has no namespace). The contract is
-/// read from the manifest's `[[contracts]]` table by the factory, not
-/// here — `meta_from_decl` is the simple path used by tests and labs.
+/// read straight from `decl.contract` — manifests that omit it get an
+/// empty contract via `CapabilityContract::default()`.
 pub fn meta_from_decl(
     id: CapabilityId,
     decl: &CapabilityDecl,
@@ -77,7 +77,7 @@ pub fn meta_from_decl(
         streaming: decl.streaming,
         timeout_ms: budget.timeout_ms,
         quota: budget.quota_state.spec(),
-        contract: CapabilityContract::empty(),
+        contract: decl.contract.clone(),
     }
 }
 

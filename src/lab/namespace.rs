@@ -48,6 +48,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         in_type: "object".into(),
         out_type: "object".into(),
         streaming,
+        ..Default::default()
     };
 
     let budget = || CapabilityBudget::with_spec(5000, QuotaSpec::unlimited());
