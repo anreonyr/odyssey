@@ -315,11 +315,13 @@ impl CapabilitySpace {
     //   revoke   — CNode.Delete + Revoke
     // -----------------------------------------------------------------------
 
-    /// Mint a fresh `CapabilityId` for a derived capability. The high bit
-    /// marks it as derived.
+    /// Mint a fresh `CapabilityId` for a derived capability. ID space
+    /// is shared with the factory's root-id counter; the parent→child
+    /// relationship is tracked separately in `CSpaceInner.parents` so
+    /// the high bit no longer needs to encode lineage.
     fn next_derived_id(&self) -> CapabilityId {
         let raw = self.inner.next_derived.fetch_add(1, Ordering::Relaxed) + 1;
-        CapabilityId(raw | (1u64 << 62))
+        CapabilityId(raw)
     }
 
     fn install_derived<R: Resource>(

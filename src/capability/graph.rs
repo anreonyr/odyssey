@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 
 use serde::Serialize;
 
-use crate::capability::{CapabilityMeta, CapabilitySpace};
+use crate::capability::CapabilitySpace;
 
 /// A read-only snapshot of the CSpace's capability layout.
 #[derive(Debug, Clone, Serialize)]
@@ -47,18 +47,13 @@ pub struct GraphNode {
     pub quota_bytes_per_minute: u64,
 }
 
-impl From<&CapabilityMeta> for GraphNode {
-    fn from(m: &CapabilityMeta) -> Self {
-        GraphNode {
-            name: m.name.clone(),
-            namespace: m.namespace.clone(),
-            plugin: format!("{}@{}", m.plugin.name, m.plugin.version),
-            streaming: m.streaming,
-            timeout_ms: m.timeout_ms,
-            quota_calls_per_minute: m.quota.calls_per_minute,
-            quota_tokens_per_minute: m.quota.tokens_per_minute,
-            quota_bytes_per_minute: m.quota.bytes_per_minute,
-        }
+impl GraphNode {
+    /// Build a `GraphNode` directly from the parts the tree builder
+    /// needs, without going through `CapabilityMeta`. Used by both
+    /// `from(&cspace)` (which has full metas) and `under(prefix)`
+    /// (which only has nodes).
+    fn view(&self) -> (&str, &str) {
+        (self.namespace.as_str(), self.name.as_str())
     }
 }
 
@@ -73,8 +68,20 @@ impl CapabilityGraph {
     /// Build a graph from the current state of `cspace`.
     pub fn from(cspace: &CapabilitySpace) -> Self {
         let metas = cspace.enumerate();
-        let nodes: Vec<GraphNode> = metas.iter().map(GraphNode::from).collect();
-        let namespaces = build_namespace_tree(&metas);
+        let nodes: Vec<GraphNode> = metas
+            .iter()
+            .map(|m| GraphNode {
+                name: m.name.clone(),
+                namespace: m.namespace.clone(),
+                plugin: format!("{}@{}", m.plugin.name, m.plugin.version),
+                streaming: m.streaming,
+                timeout_ms: m.timeout_ms,
+                quota_calls_per_minute: m.quota.calls_per_minute,
+                quota_tokens_per_minute: m.quota.tokens_per_minute,
+                quota_bytes_per_minute: m.quota.bytes_per_minute,
+            })
+            .collect();
+        let namespaces = build_namespace_tree(nodes.iter().map(GraphNode::view));
         CapabilityGraph { nodes, namespaces }
     }
 
@@ -86,12 +93,7 @@ impl CapabilityGraph {
             .filter(|n| namespace_starts_with(&n.namespace, prefix))
             .cloned()
             .collect();
-        let mut metas: Vec<CapabilityMeta> = Vec::new();
-        // Reconstruct metas from nodes for tree build.
-        for n in &nodes {
-            metas.push(synthesize_meta(n));
-        }
-        let namespaces = build_namespace_tree(&metas);
+        let namespaces = build_namespace_tree(nodes.iter().map(GraphNode::view));
         CapabilityGraph { nodes, namespaces }
     }
 
@@ -124,27 +126,6 @@ impl CapabilityGraph {
     }
 }
 
-fn synthesize_meta(_n: &GraphNode) -> CapabilityMeta {
-    // Used only for namespace tree reconstruction; we don't actually
-    // need a full CapabilityMeta to compute the tree, so return a
-    // placeholder with just the namespace.
-    CapabilityMeta {
-        id: crate::capability::CapabilityId(0),
-        name: String::new(),
-        namespace: _n.namespace.clone(),
-        plugin: crate::host::manifest::PluginId {
-            name: String::new(),
-            version: String::new(),
-        },
-        in_type: String::new(),
-        out_type: String::new(),
-        streaming: false,
-        timeout_ms: 0,
-        quota: crate::capability::QuotaSpec::unlimited(),
-        contract: crate::capability::CapabilityContract::empty(),
-    }
-}
-
 fn namespace_starts_with(ns: &str, prefix: &str) -> bool {
     if prefix.is_empty() || prefix == "." {
         return true;
@@ -155,22 +136,31 @@ fn namespace_starts_with(ns: &str, prefix: &str) -> bool {
     ns.starts_with(&format!("{prefix}."))
 }
 
-fn build_namespace_tree(metas: &[CapabilityMeta]) -> Vec<NamespaceNode> {
+/// Group namespaces by their top-level segment. The tree builder only
+/// needs the (namespace, name) pair — full `CapabilityMeta` is unused
+/// inside this function.
+fn build_namespace_tree<'a, I>(leaves: I) -> Vec<NamespaceNode>
+where
+    I: IntoIterator<Item = (&'a str, &'a str)>,
+{
     // Group by top-level prefix.
-    let mut by_root: BTreeMap<String, Vec<&CapabilityMeta>> = BTreeMap::new();
-    for m in metas {
-        let root = m.namespace.split('.').next().unwrap_or("").to_string();
+    let mut by_root: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+    for (namespace, name) in leaves {
+        let root = namespace.split('.').next().unwrap_or("").to_string();
         if root.is_empty() {
             continue;
         }
-        by_root.entry(root).or_default().push(m);
+        by_root
+            .entry(root)
+            .or_default()
+            .push((namespace.to_string(), name.to_string()));
     }
     by_root
         .into_iter()
         .map(|(root, leaves)| NamespaceNode {
             name: root,
             count: leaves.len(),
-            children: leaves.iter().map(|m| m.namespace.clone()).collect(),
+            children: leaves.into_iter().map(|(ns, _)| ns).collect(),
         })
         .collect()
 }

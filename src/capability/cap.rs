@@ -78,13 +78,23 @@ impl<R: Resource> Capability<R> {
         }
     }
 
-    /// Derive a new capability sharing the same handler `Arc<R>` with the
-    /// source, with the given rights and a fresh `CapabilityId`. Kind is
-    /// preserved. The CSpace is responsible for verifying the requested
-    /// rights are a subset of `self.operations` *before* calling derive;
-    /// derive itself just records what the CSpace asked for.
+    /// Derive a new capability sharing the same handler `Arc<R>` and the
+    /// same `Arc<QuotaState>` (so a child's calls debit the parent's
+    /// rate-limit bucket) with the given rights and a fresh
+    /// `CapabilityId`. Kind is preserved. The CSpace is responsible for
+    /// verifying the requested rights are a subset of `self.operations`
+    /// *before* calling derive; derive itself just records what the
+    /// CSpace asked for.
+    ///
+    /// Quota sharing is the attenuation semantics the doc on
+    /// `CapabilityBudget` promises: a derived cap cannot mint extra
+    /// calls beyond the parent's bucket. To get per-leaf accounting,
+    /// mint a fresh capability via `CapabilityFactory::mint`.
     pub fn derive(&self, rights: CapabilityRights, new_id: CapabilityId) -> Self {
-        let new_budget = Arc::new(super::types::CapabilityBudget::new(rights.timeout_ms));
+        let new_budget = Arc::new(super::types::CapabilityBudget::share_quota_with(
+            &self.budget,
+            rights.timeout_ms,
+        ));
         let mut new_meta = self.meta.clone();
         new_meta.id = new_id;
         new_meta.timeout_ms = rights.timeout_ms;
@@ -111,10 +121,16 @@ impl<R: Resource> Clone for Capability<R> {
 }
 
 impl<R: Resource> Capability<R> {
-    /// Invoke the resource **as if the caller held `EXECUTE`** — for
-    /// backward compatibility with existing plugins that don't yet know
-    /// about per-operation rights. New callers should use `invoke_op`
-    /// and pick the right bit.
+    /// Invoke the resource **declaring `EXECUTE`** as the caller's
+    /// bit. This is the path plugin code uses — the resource handler
+    /// itself stays bit-agnostic, and `EXECUTE` is the conventional
+    /// bit for "I want this thing to do its thing".
+    ///
+    /// Code that needs to exercise a *specific* bit (the policy
+    /// layer: `RuleAgent`, `Pipeline`, anything type-erased that has
+    /// to introspect `cap.operations()` first) uses `invoke_op(bit,
+    /// input)` instead, so the kernel guard sees the bit the caller
+    /// is actually claiming.
     ///
     /// Returns `Err` if the held rights don't include `EXECUTE`, the
     /// elapsed wall-clock time exceeds the token's `timeout_ms`, the

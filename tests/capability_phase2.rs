@@ -508,6 +508,71 @@ fn contract_survives_mint() {
 }
 
 // ---------------------------------------------------------------------------
+// Bonus: a derived capability shares its parent's quota bucket.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn quota_shared_across_restrict_chain() {
+    let space = CapabilitySpace::new();
+    let factory = CapabilityFactory::new(space.clone());
+    let budget = CapabilityBudget::with_spec(
+        5000,
+        QuotaSpec::unlimited().with_calls_per_minute(2),
+    );
+    let root = factory.mint::<CounterResource>(
+        CapKind::Sync,
+        &CapabilityDecl {
+            name: "counter_q".into(),
+            in_type: "object".into(),
+            out_type: "object".into(),
+            streaming: false,
+        },
+        &PluginId {
+            name: "counter".into(),
+            version: "0.1.0".into(),
+        },
+        budget,
+        odyssey::plugins::counter::handler(),
+    );
+    let cap_root = Slot::<CounterResource>::new(space.clone(), root);
+
+    // Derive a child via restrict — must NOT mint a fresh quota bucket.
+    let child = space
+        .restrict::<CounterResource>(
+            root,
+            CapabilityRights {
+                operations: OperationRights::READ,
+                timeout_ms: 5000,
+            },
+            "counter_q_child".into(),
+        )
+        .unwrap();
+    let cap_child = Slot::<CounterResource>::new(space.clone(), child);
+
+    // Root consumes its 2 calls.
+    assert!(
+        cap_root
+            .invoke_op(OperationRights::READ, serde_json::json!({"op": "read"}))
+            .is_ok()
+    );
+    assert!(
+        cap_root
+            .invoke_op(OperationRights::READ, serde_json::json!({"op": "read"}))
+            .is_ok()
+    );
+    // Child has nothing left in the shared bucket.
+    let third = cap_child.invoke_op(OperationRights::READ, serde_json::json!({"op": "read"}));
+    assert!(
+        third.is_err(),
+        "child must hit shared quota denial, got {third:?}"
+    );
+    assert!(
+        third.as_ref().unwrap_err().contains("quota"),
+        "expected 'quota' in error, got {third:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Silence unused warnings (these are kept for future Phase 2 work).
 // ---------------------------------------------------------------------------
 
