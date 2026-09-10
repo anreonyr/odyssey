@@ -9,19 +9,39 @@
 //! result \u2014 the budget is the contract); the per-minute
 //! quota is debited; the handler result is returned.
 //!
-//! Two complementary tests pin this:
+//! Four complementary tests pin this on a SINGLE cap each
+//! (no two-cap cross-bucket workarounds; each test owns one
+//! quota bucket so the invariant is verifiable directly via
+//! `budget.snapshot().calls_used`):
 //!
 //!   - timeout_drops_successful_result_and_does_not_debit_quota
 //!     \u2014 a 200ms sleep handler with a 100ms budget returns
 //!     the typed Timeout variant. The wall-clock counter is
-//!     recorded (the budget was blown), the quota is NOT
-//!     debited (the budget failed the contract). A subsequent
-//!     call within the same window still has the original
-//!     quota intact.
+//!     recorded (the budget was blown); the quota state is
+//!     not touched. `calls_used` stays at 0 across the
+//!     timeout.
 //!
-//!   - successful_handler_debits_quota \u2014 a 50ms sleep
-//!     handler with a 100ms budget returns Ok; the quota is
-//!     debited; a subsequent call exhausts the bucket.
+//!   - timeout_does_not_debit_quota \u2014 the same single-cap
+//!     shape, but invokes twice. Both calls return Timeout
+//!     (200ms sleep / 100ms budget). `calls_used` stays at
+//!     0 across both. Without this assertion the invariant
+//!     is silently broken: a regression where the quota is
+//!     debited before the handler runs would let
+//!     `calls_used` climb to 2, and an unrelated cap's
+//!     quota-deny path would mask the bug.
+//!
+//!   - successful_handler_debits_quota \u2014 a 20ms sleep
+//!     handler with a 200ms budget and a 2-call quota
+//!     returns Ok twice (calls_used climbs to 1, then 2);
+//!     the third call exhausts the bucket and returns
+//!     QuotaExceeded. `calls_used` is asserted directly
+//!     after each call, so a regression that double-debits
+//!     or fails-to-debit on success is caught.
+//!
+//!   - invoke_returns_typed_timeout_on_slow_call
+//!     \u2014 `invoke` (no operation-rights check) also
+//!     returns the typed Timeout variant on a slow call.
+//!     Same M3 invariant.
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -139,9 +159,13 @@ fn timeout_drops_successful_result_and_does_not_debit_quota() {
     );
 }
 
-/// Test B: 50ms sleep handler with 100ms budget and a 2-call
-/// quota. invoke_op returns Ok; the quota is debited; the
-/// next call exhausts the bucket and returns QuotaExceeded.
+/// Test B: 20ms sleep handler with 200ms budget and a 2-call
+/// quota. invoke_op returns Ok twice (the quota is debited on
+/// each successful call); the third call exhausts the bucket
+/// and returns QuotaExceeded. `budget.snapshot().calls_used` is
+/// asserted after each call so a regression that double-debits
+/// or fails-to-debit on success is caught directly (no reliance
+/// on a second cap's bucket).
 #[test]
 fn successful_handler_debits_quota() {
     let (space, factory) = build_world();
@@ -177,15 +201,34 @@ fn successful_handler_debits_quota() {
         .lookup_typed::<SleepResource>(slot)
         .expect("typed cap");
 
-    // First call: Ok, quota debited.
-    let r1 = typed.invoke_op(OperationRights::READ, serde_json::json!({}));
-    assert!(r1.is_ok(), "call 1 (50ms / 100ms budget) should succeed; got {r1:?}");
+    // Pre-condition: fresh budget, calls_used = 0.
+    assert_eq!(
+        typed.budget().snapshot().calls_used,
+        0,
+        "fresh budget starts with calls_used=0"
+    );
 
-    // Second call: Ok, quota debited.
+    // First call: Ok, quota debited to 1.
+    let r1 = typed.invoke_op(OperationRights::READ, serde_json::json!({}));
+    assert!(r1.is_ok(), "call 1 (20ms / 200ms budget) should succeed; got {r1:?}");
+    assert_eq!(
+        typed.budget().snapshot().calls_used,
+        1,
+        "first successful call must debit calls_used to 1"
+    );
+
+    // Second call: Ok, quota debited to 2.
     let r2 = typed.invoke_op(OperationRights::READ, serde_json::json!({}));
     assert!(r2.is_ok(), "call 2 should succeed; got {r2:?}");
+    assert_eq!(
+        typed.budget().snapshot().calls_used,
+        2,
+        "second successful call must debit calls_used to 2"
+    );
 
-    // Third call: QuotaExceeded.
+    // Third call: QuotaExceeded. The bucket is full;
+    // calls_used stays at 2 (a quota-exhausted call does
+    // not consume additional capacity).
     let r3 = typed.invoke_op(OperationRights::READ, serde_json::json!({}));
     assert!(
         matches!(
@@ -197,15 +240,24 @@ fn successful_handler_debits_quota() {
         ),
         "call 3 should be quota-denied; got {r3:?}"
     );
+    assert_eq!(
+        typed.budget().snapshot().calls_used,
+        2,
+        "QuotaExceeded must not consume additional capacity; calls_used stays at 2"
+    );
 }
 
-/// Test C: the same cap, a long-running handler call that
-/// times out. The timeout path drops the successful handler
-/// result (the budget contract is the contract) and does NOT
-/// debit the quota. After the timeout, the quota is still
-/// available for a successful call.
+/// Test C: SINGLE slow cap (200ms sleep, 100ms budget, 3-call
+/// quota). Two consecutive `invoke_op` calls both return Timeout.
+/// The key invariant is `budget.snapshot().calls_used == 0` across
+/// both timeouts \u2014 the budget blew, but the quota bucket was
+/// not touched. The 3-call quota is chosen so a hypothetical
+/// regression that debits the quota before the handler runs would
+/// surface as `calls_used >= 1` after the first timeout; with
+/// the production handler-first ordering, the quota stays at 0
+/// for both calls.
 #[test]
-fn timeout_does_not_debit_quota_then_success_debits() {
+fn timeout_does_not_debit_quota() {
     let (space, factory) = build_world();
 
     let plugin = PluginId {
@@ -213,21 +265,21 @@ fn timeout_does_not_debit_quota_then_success_debits() {
         version: "0.1.0".into(),
     };
     let decl = CapabilityDecl {
-        name: "mixed".into(),
+        name: "slow_timeout".into(),
         in_type: "any".into(),
         out_type: "any".into(),
         streaming: false,
         ..Default::default()
     };
 
-    // 2-call quota, 100ms budget. The single resource sleeps
-    // 200ms (times out) then 50ms (succeeds) — we need two
-    // caps for this, since each cap has one fixed sleep.
+    // 200ms sleep, 100ms budget, 3-call quota. The budget
+    // blows on every call; the quota is only touched by
+    // successful handler returns.
     let budget = CapabilityBudget::with_spec(
         100,
-        QuotaSpec::unlimited().with_calls_per_minute(2),
+        QuotaSpec::unlimited().with_calls_per_minute(3),
     );
-    let slow_slot = factory.mint::<SleepResource>(
+    let slot = factory.mint::<SleepResource>(
         CapKind::Sync,
         &decl,
         &plugin,
@@ -236,55 +288,49 @@ fn timeout_does_not_debit_quota_then_success_debits() {
             sleep: Duration::from_millis(200),
         }),
     );
-    let typed_slow: Arc<Capability<SleepResource>> = space
-        .lookup_typed::<SleepResource>(slow_slot)
+    let typed: Arc<Capability<SleepResource>> = space
+        .lookup_typed::<SleepResource>(slot)
         .expect("typed slow cap");
 
-    // First call (200ms sleep, 100ms budget): Timeout.
-    let r1 = typed_slow.invoke_op(OperationRights::READ, serde_json::json!({}));
+    // Pre-condition: fresh cap, calls_used = 0.
+    let snap_before = typed.budget().snapshot();
+    assert_eq!(
+        snap_before.calls_used, 0,
+        "fresh budget must start with calls_used=0; got {}",
+        snap_before.calls_used
+    );
+
+    // First call: Timeout.
+    let r1 = typed.invoke_op(OperationRights::READ, serde_json::json!({}));
     assert!(
         matches!(r1, Err(CapabilityError::Timeout { .. })),
         "call 1 should time out; got {r1:?}"
     );
 
-    // Second call: same cap, same quota bucket. The timeout
-    // did NOT debit the quota, so this call is still
-    // allowed. It also times out (200ms sleep, 100ms budget).
-    let r2 = typed_slow.invoke_op(OperationRights::READ, serde_json::json!({}));
+    // After first Timeout: calls_used must still be 0. The
+    // budget was blown, so the handler's successful return
+    // was dropped; the quota bucket was not debited. This
+    // is the M3 invariant: handler-first / quota-second.
+    let snap1 = typed.budget().snapshot();
+    assert_eq!(
+        snap1.calls_used, 0,
+        "M3 INVARIANT VIOLATED: first Timeout must NOT debit the quota; calls_used = {}",
+        snap1.calls_used
+    );
+
+    // Second call: same slow cap, same quota bucket.
+    // Another Timeout. calls_used must STILL be 0.
+    let r2 = typed.invoke_op(OperationRights::READ, serde_json::json!({}));
     assert!(
         matches!(r2, Err(CapabilityError::Timeout { .. })),
         "call 2 should time out; got {r2:?}"
     );
 
-    // Third call: would normally be QuotaExceeded, but
-    // since timeouts don't debit, both calls were "free"
-    // — the quota is still 2/2 available. We can't easily
-    // verify this with a single slow cap; instead, mint a
-    // fast cap on a fresh quota and verify the timing logic
-    // independently.
-    let fast_budget = CapabilityBudget::with_spec(
-        200,
-        QuotaSpec::unlimited().with_calls_per_minute(1),
-    );
-    let fast_slot = factory.mint::<SleepResource>(
-        CapKind::Sync,
-        &decl,
-        &plugin,
-        fast_budget,
-        Arc::new(SleepResource {
-            sleep: Duration::from_millis(20),
-        }),
-    );
-    let typed_fast: Arc<Capability<SleepResource>> = space
-        .lookup_typed::<SleepResource>(fast_slot)
-        .expect("typed fast cap");
-
-    let ok = typed_fast.invoke_op(OperationRights::READ, serde_json::json!({}));
-    assert!(ok.is_ok(), "fast call should succeed; got {ok:?}");
-    let deny = typed_fast.invoke_op(OperationRights::READ, serde_json::json!({}));
-    assert!(
-        matches!(deny, Err(CapabilityError::QuotaExceeded { .. })),
-        "second fast call should be quota-denied; got {deny:?}"
+    let snap2 = typed.budget().snapshot();
+    assert_eq!(
+        snap2.calls_used, 0,
+        "M3 INVARIANT VIOLATED: second Timeout must NOT debit the quota; calls_used = {}",
+        snap2.calls_used
     );
 }
 
