@@ -373,10 +373,13 @@ fn runtime_manifests_have_contract_names() {
     /// returning `&'static PluginManifest`.
     fn collect_runtime_manifests() -> Vec<PluginManifest> {
         vec![
+            odyssey::plugins::database::manifest().clone(),
             odyssey::plugins::echo::basic::manifest().clone(),
             odyssey::plugins::echo::chain::manifest().clone(),
             odyssey::plugins::echo::stream::manifest().clone(),
+            odyssey::plugins::embedder::manifest().clone(),
             odyssey::plugins::generator::manifest().clone(),
+            odyssey::plugins::http::manifest().clone(),
             odyssey::plugins::reverse::manifest().clone(),
             odyssey::plugins::sandbox::manifest().clone(),
             odyssey::plugins::slow::manifest().clone(),

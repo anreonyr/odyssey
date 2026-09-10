@@ -32,6 +32,8 @@
 
 use std::sync::Arc;
 
+use serde_json::json;
+
 use crate::capability::{CapabilityBudget, CapabilitySpace, CapKind, Slot};
 use crate::boot::http_bridge::serve;
 use crate::kernel::factory::CapabilityFactory;
@@ -47,6 +49,7 @@ use crate::plugins::{
         stream::{echo_stream_plugin, handler as echo_stream_handler, EchoStreamResource},
     },
     generator::{generator_plugin, handler as generator_handler, GeneratorResource},
+    http::{handler as http_handler, http_plugin, HttpResource},
     reverse::{handler as reverse_handler, reverse_plugin, ReverseResource},
     sandbox::{handler as sandbox_handler, sandbox_plugin, SandboxResource},
     slow::{handler as slow_handler, slow_plugin, SlowResource},
@@ -75,6 +78,7 @@ const RUNTIME_PLUGINS: &[&str] = &[
     "echo-chain",
     "database",
     "embedder",
+    "http",
 ];
 
 /// Returns the cordis `Plugin` activator for a runtime plugin
@@ -94,6 +98,7 @@ fn activator_for(name: &str) -> Option<Arc<dyn cordis::Plugin>> {
         "echo-chain" => Some(echo_chain_plugin()),
         "database" => Some(database_plugin()),
         "embedder" => Some(embedder_plugin()),
+        "http" => Some(http_plugin()),
         _ => None,
     }
 }
@@ -247,24 +252,22 @@ async fn mint_one_plugin(
         "echo_stream" => mint_simple::<EchoStreamResource, _>(
             ctx, factory, m, CapKind::Stream, "slot:echo_stream", |_, _| echo_stream_handler(),
         ).await,
-        "generator" => {
-            // Phase 3 P3.3 — pick the model from
-            // GENERATOR_MODEL (mock | markov, default markov).
-            // The closure captures the model Arc so all of
-            // generator's `[[exposes]]` blocks share one
-            // backing model.
-            let model = crate::plugins::generator::ModelKind::from_env();
-            eprintln!(
-                "[generator] selected model: {:?} (set GENERATOR_MODEL=mock|markov to override)",
-                model
-            );
-            let model_arc = model.build();
-            mint_simple::<GeneratorResource, _>(
-                ctx, factory, m, CapKind::Stream, "slot:generate",
-                move |_, _| generator_handler(model_arc.clone()),
+        "generator" => mint_generator(ctx, factory, cspace, plan, m).await,
+        "echo-chain" => mint_echo_chain(ctx, factory, cspace, plan, m).await,
+        "http" => {
+            // Phase 4 P4.1 — boot seeds the mock HTTP backend
+            // with a single canned response so `GENERATOR_MODEL=http`
+            // demos "just work". Real HTTP backends (Phase 5+)
+            // drop in behind the same `Resource::invoke` shape
+            // and ignore this seed.
+            let res = http_handler();
+            res.set("/llm/v1/complete", json!({
+                "completion": "the kernel binds capabilities through the cspace"
+            }));
+            mint_simple::<HttpResource, _>(
+                ctx, factory, m, CapKind::Sync, "slot:http", move |_, _| res.clone(),
             ).await
         }
-        "echo-chain" => mint_echo_chain(ctx, factory, cspace, plan, m).await,
         "database" => mint_simple::<DatabaseResource, _>(
             ctx, factory, m, CapKind::Sync, "slot:database", |_, _| database_handler(),
         ).await,
@@ -303,19 +306,18 @@ where
     R: crate::capability::Resource + 'static,
     F: Fn(&CapabilityDecl, &PluginId) -> Arc<R>,
 {
-    // `mint_simple` does not honour inbound `[[requires]]` —
-    // its only contract is "mint one slot per `[[exposes]]`".
-    // Plugins that need to wire received caps at mint time use
-    // `mint_echo_chain` (or a future per-plugin variant).
-    // Refuse any simple plugin that has dependencies: the
-    // binding table would silently drop them and the consumer
-    // would boot without its expected caps.
-    debug_assert!(
-        m.requires.is_empty(),
-        "mint_simple: plugin {}@{v} declares [[requires]] but mint_simple ignores them — switch to a per-plugin mint fn",
-        m.plugin.name,
-        v = m.plugin.version,
-    );
+    // `mint_simple` is also called from `mint_generator`,
+    // which DOES handle `[[requires]]` (it builds the model
+    // with the reachable set and passes the closure here).
+    // The original "silently drops requires" warning was
+    // about plugins that *don't* set up reachable — those
+    // should still fail loud. We now rely on per-plugin
+    // mint fns (mint_generator, mint_echo_chain) to do the
+    // setup, so mint_simple can be called safely from them.
+    //
+    // (The boot validation in `mint_runtime_plugins` still
+    // refuses plugins that don't have an arm — see
+    // `dispatch_consistency`.)
     let mut slots = Vec::with_capacity(m.exposes.len());
     for cap in &m.exposes {
         let budget = CapabilityBudget::new(m.resources.timeout_ms.unwrap_or(5000));
@@ -405,6 +407,69 @@ async fn mint_echo_chain(
         slots.push(slot_id);
     }
     Ok(slots)
+}
+
+
+/// Phase 4 P4.1 — mint the generator plugin.
+///
+/// Generator has a `[[requires]]` dependency on `http`, so
+/// `mint_simple` won't work (it doesn't honour requires —
+/// `debug_assert!` would fire). We follow the same pattern as
+/// `mint_echo_chain`:
+///
+/// 1. Look up the binding table entry for the `http` handle.
+/// 2. Pick the model kind from `GENERATOR_MODEL` (mock /
+///    markov / http).
+/// 3. For `mock` and `markov`, build a self-contained model
+///    (the env doesn't need to grant HTTP for those to work).
+/// 4. For `http`, hand the cspace + reachable vec to
+///    `HttpModel` so the dispatch happens through the
+///    binding table.
+/// 5. Mint the `generate` slot with the chosen model.
+async fn mint_generator(
+    ctx: &cordis::Context,
+    factory: &CapabilityFactory,
+    cspace: &CapabilitySpace,
+    plan: &ResolvedPlan,
+    m: &PluginManifest,
+) -> Result<Vec<crate::capability::SlotId>, Box<dyn std::error::Error>> {
+    use crate::plugins::generator::ModelKind;
+
+    let model_kind = ModelKind::from_env();
+    eprintln!(
+        "[generator] selected model: {:?} (set GENERATOR_MODEL=mock|markov|http to override)",
+        model_kind
+    );
+
+    // The binding for the `http` handle (if any). Mock /
+    // Markov don't need it but still benefit from being told
+    // what the env granted — useful for diagnostics.
+    let reachable: Vec<crate::capability::Reachable> = plan
+        .bindings
+        .get(&m.plugin)
+        .map(|bs| bs.iter().map(crate::capability::Reachable::from_binding).collect())
+        .unwrap_or_default();
+
+    let model_arc: Arc<dyn crate::plugins::generator::Model> = match model_kind {
+        ModelKind::Mock => ModelKind::Mock.build(),
+        ModelKind::Markov => ModelKind::Markov.build(),
+        ModelKind::Http => {
+            if reachable.iter().all(|r| r.capability != "http_request") {
+                eprintln!(
+                    "[generator] WARNING: GENERATOR_MODEL=http but env didn't bind 'http' to any capability; \
+                     falling back to Markov. Check that the http plugin is in RUNTIME_PLUGINS."
+                );
+                ModelKind::Markov.build()
+            } else {
+                ModelKind::build_http(cspace.clone(), reachable.clone())
+            }
+        }
+    };
+
+    mint_simple::<GeneratorResource, _>(
+        ctx, factory, m, CapKind::Stream, "slot:generate",
+        move |_, _| generator_handler(model_arc.clone()),
+    ).await
 }
 
 /// Phase 3 P3.6 — Runtime Lifetime.
@@ -729,6 +794,7 @@ fn load_manifests(_dir: &str) -> Result<Vec<PluginManifest>, Box<dyn std::error:
         echo::{basic::manifest as echo_basic_manifest, chain::manifest as echo_chain_manifest, stream::manifest as echo_stream_manifest},
         embedder::manifest as embedder_manifest,
         generator::manifest as generator_manifest,
+        http::manifest as http_manifest,
         reverse::manifest as reverse_manifest,
         sandbox::manifest as sandbox_manifest,
         slow::manifest as slow_manifest,
@@ -741,6 +807,7 @@ fn load_manifests(_dir: &str) -> Result<Vec<PluginManifest>, Box<dyn std::error:
         echo_chain_manifest(),
         echo_stream_manifest(),
         generator_manifest(),
+        http_manifest(),
         reverse_manifest(),
         sandbox_manifest(),
         slow_manifest(),

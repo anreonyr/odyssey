@@ -26,6 +26,7 @@ pub mod database;
 pub mod echo;
 pub mod embedder;
 pub mod generator;
+pub mod http;
 pub mod reverse;
 pub mod sandbox;
 pub mod slow;

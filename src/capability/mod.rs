@@ -36,11 +36,13 @@ pub mod cap;
 pub mod cspace;
 pub mod events;
 pub mod graph;
+pub mod reachable;
 pub mod resource;
 pub mod types;
 
 pub use cap::{AnyCapability, Capability};
 pub use cspace::{CapabilitySpace, Slot};
+pub use reachable::Reachable;
 pub use resource::Resource;
 pub use types::{
     AuthorityContract, CapabilityAction, CapabilityBudget, CapabilityChunk,

@@ -41,6 +41,7 @@ use std::sync::Arc;
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use rand::seq::SliceRandom;
+use serde_json::{json, Value};
 
 /// The model abstraction. `generator`'s handler dispatches
 /// through this trait; concrete implementations are
@@ -252,6 +253,7 @@ pub const DEFAULT_CORPUS: &[&str] = &[
 pub enum ModelKind {
     Mock,
     Markov,
+    Http,
 }
 
 impl ModelKind {
@@ -261,15 +263,16 @@ impl ModelKind {
     /// operator can spot a typo (`GENERATOR_MODEL=mockk`
     /// silently falling back to `Markov` is a bad day).
     ///
-    /// Reuses [`<Self as FromStr>::from_str`] so the case
-    /// rules match: any case of "mock" or "markov" parses;
-    /// anything else falls back to `Markov` with a warning.
+    /// Recognised values: `mock`, `markov`, `http` (Phase 4
+    /// P4.1). `http` requires the `http` capability to be
+    /// reachable — handled by `mint_generator` via the
+    /// binding table.
     pub fn from_env() -> Self {
         match std::env::var("GENERATOR_MODEL") {
             Err(_) => Self::Markov,
             Ok(s) => s.parse().unwrap_or_else(|_| {
                 eprintln!(
-                    "[generator] GENERATOR_MODEL={s:?} is not 'mock' or 'markov'; \
+                    "[generator] GENERATOR_MODEL={s:?} is not 'mock', 'markov', or 'http'; \
                      falling back to 'markov'"
                 );
                 Self::Markov
@@ -282,10 +285,19 @@ impl ModelKind {
     /// it in `Arc<dyn Model>` anyway — the Box-to-Arc
     /// transition costs an extra allocation if we return
     /// `Box<dyn Model>` here.
+    /// Build the matching `Model` instance **without** a
+    /// capability dependency. Used by `Mock` and `Markov`,
+    /// which are self-contained. For `Http`, callers must use
+    /// [`Self::build_http`] so the model can be wired to the
+    /// http capability slot.
     pub fn build(self) -> Arc<dyn Model> {
         match self {
             Self::Mock => Arc::new(MockModel),
             Self::Markov => Arc::new(MarkovModel::default()),
+            Self::Http => {
+                panic!("ModelKind::Http requires the http capability; \
+                        use ModelKind::build_http(cspace, reachable) instead");
+            }
         }
     }
 }
@@ -296,7 +308,10 @@ impl std::str::FromStr for ModelKind {
         match s.to_lowercase().as_str() {
             "mock" => Ok(Self::Mock),
             "markov" => Ok(Self::Markov),
-            other => Err(format!("unknown model kind '{other}'; expected 'mock' or 'markov'")),
+            "http" => Ok(Self::Http),
+            other => Err(format!(
+                "unknown model kind '{other}'; expected 'mock', 'markov', or 'http'"
+            )),
         }
     }
 }
@@ -381,5 +396,200 @@ mod tests {
         let m = ModelKind::Markov.build();
         let toks = m.generate("hi", None).unwrap();
         assert!(!toks.is_empty());
+    }
+}
+// ---------------------------------------------------------------------------
+// Phase 4 P4.1 — HttpModel
+// ---------------------------------------------------------------------------
+
+use crate::capability::{Capability, CapabilitySpace, Reachable};
+use crate::plugins::http::HttpResource;
+
+/// HTTP-backed model. Holds the http capability via the
+/// binding table: `Reachable { handle, capability }` says
+/// "the http handle is provided by the slot named <capability>".
+///
+/// At generate time, [`HttpModel`] does the standard Phase 4
+/// dispatch:
+///
+///   1. Find the `http` entry in `reachable`.
+///   2. Look up the typed slot via `cspace.lookup_by_name(capability)`.
+///   3. Downcast to `Capability<HttpResource>` (compile-time
+///      guarantee that the slot really is an HttpResource).
+///   4. Call `invoke({method: "POST", url, body: {prompt}})`.
+///
+/// If any step fails — capability not reachable, slot missing,
+/// downcast wrong — the model returns an Err. This is the
+/// "graceful failure" property the Phase 4 thesis depends on:
+/// the same Model interface, the same handler, but different
+/// reachable sets drive different behaviour.
+pub struct HttpModel {
+    cspace: CapabilitySpace,
+    reachable: Vec<Reachable>,
+}
+
+impl HttpModel {
+    pub fn new(cspace: CapabilitySpace, reachable: Vec<Reachable>) -> Self {
+        Self { cspace, reachable }
+    }
+}
+
+impl Model for HttpModel {
+    fn generate(&self, prompt: &str, _seed: Option<u64>) -> Result<Vec<String>, String> {
+        // 1) Find the http entry in our reachable set.
+        let binding = self
+            .reachable
+            .iter()
+            .find(|r| r.handle == "http" || r.capability == "http_request")
+            .ok_or_else(|| {
+                "HttpModel: 'http' is not in the binding table — environment denies HTTP"
+                    .to_string()
+            })?;
+        // 2) Look up the typed slot. We don't know its slot ID
+        //    statically (the resolver picks the provider); we
+        //    go through the registered name.
+        let slot = self
+            .cspace
+            .lookup_by_name(&binding.capability)
+            .ok_or_else(|| {
+                format!(
+                    "HttpModel: reachable says capability={:?} but no slot found in cspace",
+                    binding.capability
+                )
+            })?;
+        // 3) Downcast to Capability<HttpResource>. The cspace
+        //    stores `Arc<dyn AnyCapability>`; we use the
+        //    standard `as_any().downcast_ref` pattern to
+        //    recover the typed `Capability<R>`.
+        let http_cap: &Capability<HttpResource> = slot
+            .as_any()
+            .downcast_ref::<Capability<HttpResource>>()
+            .ok_or_else(|| {
+                "HttpModel: 'http' capability is not HttpResource".to_string()
+            })?;
+        // 4) Dispatch.
+        let request = json!({
+            "method": "POST",
+            "url":    "/llm/v1/complete",
+            "body":   { "prompt": prompt },
+        });
+        let response = http_cap
+            .invoke(request)
+            .map_err(|e| format!("HttpModel: invoke failed: {e}"))?;
+        // Response shape: {status, body}. body.completion is
+        // a single string (Phase 4: sync single-completion).
+        let completion = response
+            .get("body")
+            .and_then(|b| b.get("completion"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                "HttpModel: response missing body.completion".to_string()
+            })?;
+        // Split the completion into whitespace tokens for the
+        // streaming shape.
+        Ok(completion.split_whitespace().map(String::from).collect())
+    }
+}
+
+impl ModelKind {
+    /// Build the HTTP-backed model. `cspace` is the live
+    /// capability space at mint time; `reachable` is the
+    /// binding table entry for `http`. Caller is `mint_generator`,
+    /// which already pulled both from the resolved plan.
+    pub fn build_http(cspace: CapabilitySpace, reachable: Vec<Reachable>) -> Arc<dyn Model> {
+        Arc::new(HttpModel::new(cspace, reachable))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// HttpModel tests — Phase 4 P4.1
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod http_model_tests {
+    use super::*;
+    use crate::capability::CapabilitySpace;
+    use crate::plugins::http::HttpResource;
+
+    /// Build a cspace with one http capability pre-installed
+    /// (simulates what `mint_http` does at boot, minus the
+    /// cordis `provide` step).
+    fn cspace_with_http(seed: Value) -> (CapabilitySpace, crate::capability::SlotId) {
+        use crate::capability::CapKind;
+        use crate::kernel::factory::CapabilityFactory;
+        let space = CapabilitySpace::new();
+        let factory = CapabilityFactory::new(space.clone());
+        let resource = HttpResource::new();
+        resource.set("/llm/v1/complete", seed);
+        let plugin = crate::kernel::manifest::PluginId {
+            name: "http".into(),
+            version: "0.1.0".into(),
+        };
+        let decl = crate::kernel::manifest::CapabilityDecl {
+            name: "http_request".into(),
+            in_type: "http_request".into(),
+            out_type: "http_response".into(),
+            streaming: false,
+            contract_name: "http_request".into(),
+            authority: crate::capability::AuthorityContract::empty(),
+            protocol: crate::capability::Protocol::empty(),
+        };
+        let budget = crate::capability::CapabilityBudget::new(5000);
+        let slot_id = factory.mint::<HttpResource>(
+            CapKind::Sync,
+            &decl,
+            &plugin,
+            budget,
+            Arc::new(resource),
+        );
+        (space, slot_id)
+    }
+
+    fn reachable(cap: &str) -> Vec<Reachable> {
+        vec![Reachable::new("http", cap)]
+    }
+
+    #[test]
+    fn http_model_dispatches_through_reachable() {
+        let (cspace, _slot) = cspace_with_http(json!({
+            "completion": "hello from mock LLM"
+        }));
+        let m = HttpModel::new(cspace, reachable("http_request"));
+        let toks = m.generate("test prompt", None).expect("generate ok");
+        let joined = toks.join(" ");
+        assert_eq!(joined, "hello from mock LLM");
+    }
+
+    #[test]
+    fn http_model_missing_reachable_is_error() {
+        let (cspace, _slot) = cspace_with_http(json!({"completion": "x"}));
+        let m = HttpModel::new(cspace, vec![]); // no http binding
+        let err = m.generate("anything", None).unwrap_err();
+        assert!(
+            err.contains("'http' is not in the binding table"),
+            "expected missing-binding error, got: {err}"
+        );
+    }
+
+    #[test]
+    fn http_model_missing_completion_field_is_error() {
+        let (cspace, _slot) = cspace_with_http(json!({"not_completion": "x"}));
+        let m = HttpModel::new(cspace, reachable("http_request"));
+        let err = m.generate("anything", None).unwrap_err();
+        assert!(err.contains("missing body.completion"), "got: {err}");
+    }
+
+    #[test]
+    fn http_model_rejects_response_without_completion_field() {
+        // Seed /some/other/url so the /llm/v1/complete call
+        // gets a 404 with body = {"error": "..."} — no
+        // completion field. HttpModel should refuse.
+        let (cspace, _slot) = cspace_with_http(json!({"error": "not seeded at this URL"}));
+        let m = HttpModel::new(cspace, reachable("http_request"));
+        let err = m.generate("anything", None).unwrap_err();
+        assert!(
+            err.contains("missing body.completion"),
+            "expected parse error, got: {err}"
+        );
     }
 }

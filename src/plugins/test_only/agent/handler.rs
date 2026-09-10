@@ -78,24 +78,11 @@ fn parse_operation(s: &str) -> Option<OperationRights> {
     })
 }
 
-/// One row of the agent's reachable table. `handle` is the local
-/// name the agent uses for dispatch (input's `target` field);
-/// `capability` is the cspace name `lookup_by_name` resolves
-/// against.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Reachable {
-    pub handle: String,
-    pub capability: String,
-}
-
-impl Reachable {
-    fn from_binding(b: &ResolvedBinding) -> Self {
-        Self {
-            handle: b.handle.clone(),
-            capability: b.capability.clone(),
-        }
-    }
-}
+// Reachable moved to crate::capability in Phase 4 P4.1
+// because Generator's HttpModel and any future consumer
+// need it. The agent test surface still uses it; it just
+// imports from `crate::capability` now.
+pub use crate::capability::Reachable;
 
 /// Holds the agent's identity, the reachable set derived from
 /// its binding table, and a reference to the cspace so it can
