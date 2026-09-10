@@ -77,7 +77,9 @@ async fn drain_until_step_starts(
 
 struct World {
     space: odyssey::capability::CapabilitySpace,
+    #[allow(dead_code)]
     echo_slot: odyssey::capability::SlotId,
+    #[allow(dead_code)]
     database_slot: odyssey::capability::SlotId,
 }
 
@@ -516,7 +518,7 @@ async fn agent_program_completes_then_revocation_is_noop() {
     );
 
     // Run a small program and wait for done.
-    let mut rx = agent
+    let rx = agent
         .open(json!({
             "program": [
                 { "handle": "echo", "input": "x" },

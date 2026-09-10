@@ -68,7 +68,7 @@ impl<R: Resource> AnyCapability for Capability<R> {
         Capability::operations(self)
     }
     fn invoke_dyn(&self, input: Value) -> Result<Value, String> {
-        self.invoke(input)
+        self.invoke(input).map_err(|e| e.to_string())
     }
     fn invoke_op_dyn(
         &self,

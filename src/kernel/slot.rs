@@ -54,11 +54,12 @@ impl<R: Resource> Slot<R> {
         self.capability().map(|c| c.kind())
     }
 
-    /// Direct sync invocation via the slot.
-    pub fn invoke(&self, input: Value) -> Result<Value, String> {
+    /// Direct sync invocation via the slot. Returns typed
+    /// `CapabilityError` (Phase 5 M4 / n1).
+    pub fn invoke(&self, input: Value) -> Result<Value, CapabilityError> {
         let cap = self
             .capability()
-            .ok_or_else(|| format!("slot {} empty or revoked", self.id.raw()))?;
+            .ok_or(CapabilityError::SlotEmpty(self.id))?;
         cap.invoke(input)
     }
 
@@ -68,22 +69,23 @@ impl<R: Resource> Slot<R> {
         &self,
         op: OperationRights,
         input: Value,
-    ) -> Result<Value, String> {
+    ) -> Result<Value, CapabilityError> {
         let cap = self
             .capability()
-            .ok_or_else(|| format!("slot {} empty or revoked", self.id.raw()))?;
-        cap.invoke_op(op, input).map_err(|e| e.to_string())
+            .ok_or(CapabilityError::SlotEmpty(self.id))?;
+        cap.invoke_op(op, input)
     }
 
-    /// Direct stream open via the slot.
+    /// Direct stream open via the slot. Phase 5 M4: typed
+    /// `CapabilityError`.
     pub fn open(
         &self,
         input: Value,
-    ) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
+    ) -> Result<mpsc::Receiver<CapabilityChunk>, CapabilityError> {
         let cap = self
             .capability()
-            .ok_or_else(|| format!("slot {} empty or revoked", self.id.raw()))?;
-        cap.open(input).map_err(|e| e.to_string())
+            .ok_or(CapabilityError::SlotEmpty(self.id))?;
+        cap.open(input)
     }
 
     /// **Grant**: derive a new slot with reduced rights; source preserved.

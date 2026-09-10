@@ -40,6 +40,11 @@ use crate::kernel::rights::{CapabilityRights, OperationRights};
 /// returned by `Slot::capability()` observes the cspace-level revoke.
 pub struct Capability<R: Resource> {
     meta: CapabilityMeta,
+    /// The slot id this cap occupies. Tracked so revoked-cap
+    /// errors can surface a real `SlotId` instead of a
+    /// sentinel; required because `SlotId::new(0)` would
+    /// panic on `NonZeroU64`.
+    slot: Option<SlotId>,
     handler: Arc<R>,
     budget: Arc<CapabilityBudget>,
     operations: OperationRights,
@@ -59,12 +64,28 @@ impl<R: Resource> Capability<R> {
     ) -> Self {
         Self {
             meta,
+            slot: None,
             handler,
             budget: Arc::new(budget),
             operations: rights.operations,
             kind,
             revoked: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Bind the cap to its slot id. Called by the cspace at
+    /// install / install_derived time. After install, `slot()`
+    /// returns the real id so revoked-cap errors can surface a
+    /// concrete `SlotId` instead of a sentinel.
+    pub(crate) fn bind_slot(&mut self, slot: SlotId) {
+        self.slot = Some(slot);
+    }
+
+    /// The slot id this cap is bound to. `None` for caps that
+    /// haven't been installed yet (e.g. derived caps before
+    /// `install_derived` binds them).
+    pub fn slot(&self) -> Option<SlotId> {
+        self.slot
     }
 
     pub fn is_revoked(&self) -> bool {
@@ -139,6 +160,7 @@ impl<R: Resource> Capability<R> {
         new_meta.timeout_ms = rights.timeout_ms;
         Self {
             meta: new_meta,
+            slot: None, // bound by install_derived on insertion
             handler: self.handler.clone(),
             budget: Arc::new(new_budget),
             operations: rights.operations,
@@ -149,34 +171,58 @@ impl<R: Resource> Capability<R> {
         }
     }
 
-    /// Sync invoke without an operation-rights check. Internal — the
-    /// public typed entry point is `Slot::invoke`. Returns `String`
-    /// for backwards compatibility with the runtime plugin handlers
-    /// that return `Result<Value, String>`.
-    pub fn invoke(&self, input: Value) -> Result<Value, String> {
+    /// Sync invoke without an operation-rights check. Returns
+    /// typed `CapabilityError` (Phase 5 M4). Same M3 reorder as
+    /// `invoke_op`: handler first, then quota debit, then timeout
+    /// check. Successful results are dropped on timeout.
+    pub fn invoke(&self, input: Value) -> Result<Value, CapabilityError> {
         if self.kind != CapKind::Sync {
-            return Err(format!("{}: not a sync capability", self.meta.name));
+            return Err(CapabilityError::KindMismatch {
+                name: self.meta.name.clone(),
+                expected: "sync",
+                got: "stream",
+            });
         }
         if self.is_revoked() {
-            return Err(format!("{}: capability revoked", self.meta.name));
-        }
-        if let Err(kind) = self.budget.try_call() {
-            return Err(format!(
-                "{}: quota exhausted ({}); snapshot={:?}",
-                self.meta.name,
-                kind,
-                self.budget.snapshot()
-            ));
+            return Err(CapabilityError::Revoked(self.slot.unwrap_or(SlotId::new(1))));
         }
         let start = Instant::now();
         let result = self.handler.invoke(input);
-        self.budget.record_elapsed(start.elapsed());
-        result
+        let elapsed = start.elapsed();
+        self.budget.record_elapsed(elapsed);
+
+        let elapsed_ms = elapsed.as_micros().div_ceil(1000) as u64;
+        let budget_ms = self.budget.timeout_ms() as u64;
+        if elapsed_ms > budget_ms {
+            return Err(CapabilityError::Timeout {
+                name: self.meta.name.clone(),
+                elapsed_ms,
+                budget_ms: self.budget.timeout_ms(),
+            });
+        }
+
+        if let Err(kind) = self.budget.try_call() {
+            return Err(CapabilityError::QuotaExceeded {
+                name: self.meta.name.clone(),
+                kind,
+            });
+        }
+
+        result.map_err(|message| CapabilityError::Handler {
+            name: self.meta.name.clone(),
+            message,
+        })
     }
 
     /// Sync invoke with operation-rights check. Phase 5 M4: returns
     /// typed `CapabilityError`. The handler's `String` error is
     /// wrapped as `CapabilityError::Handler`.
+    ///
+    /// Phase 5 M3 reorder: the handler runs first, then quota is
+    /// debited, then the timeout check fires. A late answer is not
+    /// a correct answer — if the wall-clock budget was blown we
+    /// drop the successful handler result and surface
+    /// `CapabilityError::Timeout`.
     pub fn invoke_op(
         &self,
         requested: OperationRights,
@@ -190,7 +236,7 @@ impl<R: Resource> Capability<R> {
             });
         }
         if self.is_revoked() {
-            return Err(CapabilityError::SlotEmpty(SlotId::new(0)));
+            return Err(CapabilityError::Revoked(self.slot.unwrap_or(SlotId::new(1))));
         }
         if !self.operations.contains(requested) {
             return Err(CapabilityError::OperationDenied {
@@ -199,17 +245,37 @@ impl<R: Resource> Capability<R> {
                 held: self.operations,
             });
         }
-        // Phase 5 M3: quota debited before handler runs (the call is
-        // authorised). Wall-clock recorded after.
+        // Phase 5 M3: run the handler first. The call is authorised;
+        // we debit the quota only after a successful run. Wall-clock
+        // recorded the same way.
+        let start = Instant::now();
+        let result = self.handler.invoke(input);
+        let elapsed = start.elapsed();
+        self.budget.record_elapsed(elapsed);
+
+        // Timeout check — if the handler blew the per-call budget,
+        // the budget contract is the contract; we drop the
+        // successful handler result and surface Timeout. M3's
+        // invariant: don't lie about success.
+        let elapsed_ms = elapsed.as_micros().div_ceil(1000) as u64;
+        let budget_ms = self.budget.timeout_ms() as u64;
+        if elapsed_ms > budget_ms {
+            return Err(CapabilityError::Timeout {
+                name: self.meta.name.clone(),
+                elapsed_ms,
+                budget_ms: self.budget.timeout_ms(),
+            });
+        }
+
+        // Now debit the call quota. A failed handler or a quota
+        // exhaustion does not consume the per-minute bucket.
         if let Err(kind) = self.budget.try_call() {
             return Err(CapabilityError::QuotaExceeded {
                 name: self.meta.name.clone(),
                 kind,
             });
         }
-        let start = Instant::now();
-        let result = self.handler.invoke(input);
-        self.budget.record_elapsed(start.elapsed());
+
         result.map_err(|message| CapabilityError::Handler {
             name: self.meta.name.clone(),
             message,
@@ -229,7 +295,7 @@ impl<R: Resource> Capability<R> {
             });
         }
         if self.is_revoked() {
-            return Err(CapabilityError::SlotEmpty(SlotId::new(0)));
+            return Err(CapabilityError::Revoked(self.slot.unwrap_or(SlotId::new(1))));
         }
         if let Err(kind) = self.budget.try_call() {
             return Err(CapabilityError::QuotaExceeded {
@@ -250,6 +316,7 @@ impl<R: Resource> Clone for Capability<R> {
     fn clone(&self) -> Self {
         Self {
             meta: self.meta.clone(),
+            slot: self.slot,
             handler: self.handler.clone(),
             budget: self.budget.clone(),
             operations: self.operations,

@@ -32,7 +32,7 @@ impl fmt::Display for CapabilityId {
 // ---------------------------------------------------------------------------
 
 /// Stable position in a `CapabilitySpace`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct SlotId(NonZeroU64);
 
 impl SlotId {

@@ -1,6 +1,12 @@
 //! Snapshot view of the cspace — a read-only, JSON-serialisable
 //! graph for HTTP bridge / introspection. Phase 5: this is the only
 //! graph view; the Phase 4 `capability::graph` is removed.
+//!
+//! `GraphNode` and `CapabilityNode` are unified: the public graph
+//! type carries one node shape (`GraphNode`), and `CapabilityNode`
+//! is kept as a type alias so existing call sites compile.
+//! `CapabilityGraph::capabilities` is renamed to `nodes` to match
+//! the public contract (`graph.nodes.len()` etc.).
 
 use std::collections::BTreeMap;
 
@@ -31,7 +37,7 @@ pub struct GraphNode {
 pub struct NamespaceNode {
     pub namespace: String,
     pub children: Vec<NamespaceNode>,
-    pub capabilities: Vec<CapabilityNode>,
+    pub capabilities: Vec<GraphNode>,
 }
 
 /// Snapshot of the cspace — every capability, namespace tree,
@@ -39,7 +45,7 @@ pub struct NamespaceNode {
 /// graph view; not consulted by the runtime.
 #[derive(Debug, Clone, Serialize)]
 pub struct CapabilityGraph {
-    pub capabilities: Vec<CapabilityNode>,
+    pub nodes: Vec<GraphNode>,
     pub namespaces: Vec<NamespaceNode>,
     pub total: usize,
 }
@@ -48,14 +54,24 @@ impl CapabilityGraph {
     /// Snapshot the current state of `space`. Acquire locks in the
     /// canonical order (`slots → names → parents`) for consistency.
     pub fn snapshot(space: &CapabilitySpace) -> Self {
-        let metas = space.enumerate();
+        Self::from(space)
+    }
+}
+
+impl From<&CapabilitySpace> for CapabilityGraph {
+    fn from(space: &CapabilitySpace) -> Self {
+        // Snapshot every slot along with its canonical name
+        // and meta. This is the only path that can produce a
+        // real `SlotId` per node — `enumerate()` only gives us
+        // names.
+        let index = space.snapshot_index();
         let parents_map = space.parent_map();
 
         // Phase 5 D5: removed tokens_per_minute / bytes_per_minute.
-        let mut nodes: Vec<GraphNode> = metas
+        let nodes: Vec<GraphNode> = index
             .iter()
-            .map(|m| GraphNode {
-                slot: SlotId::new(0), // overwritten below
+            .map(|(slot_id, m)| GraphNode {
+                slot: *slot_id,
                 capability_id: m.id.clone(),
                 name: m.name.clone(),
                 namespace: m.namespace.clone(),
@@ -63,34 +79,27 @@ impl CapabilityGraph {
                 plugin: m.plugin.clone(),
                 operations: format!("{:?}", m.authority),
                 timeout_ms: m.timeout_ms,
-                parent: parents_map.get(&SlotId::new(0)).copied(),
+                parent: parents_map.get(slot_id).copied(),
                 quota_calls_per_minute: m.quota.calls_per_minute,
             })
             .collect();
 
-        // We don't have a direct slot→meta map in the public API, so
-        // we leave the slot as SlotId::new(0) for now. The cspace
-        // exposes `enumerate_namespace` which gives us the names;
-        // for slot-level reconstruction we lean on `name_for_slot`.
-        // For the snapshot view, we accept that GraphNode's slot
-        // is the *meta id*, not the slot id — the bridge treats
-        // these as opaque identifiers anyway.
-        let _ = &mut nodes; // suppress unused
-
-        // Build namespace tree.
-        let by_ns = build_namespace_tree(&metas);
+        // Build namespace tree from the same metas.
+        let metas: Vec<crate::kernel::meta::CapabilityMeta> =
+            index.into_iter().map(|(_, m)| m).collect();
+        let namespaces = build_namespace_tree(&metas);
         let total = metas.len();
 
         CapabilityGraph {
-            capabilities: nodes,
-            namespaces: by_ns,
+            nodes,
+            namespaces,
             total,
         }
     }
 }
 
 fn build_namespace_tree(metas: &[crate::kernel::meta::CapabilityMeta]) -> Vec<NamespaceNode> {
-    let mut root: BTreeMap<String, (Vec<NamespaceNode>, Vec<CapabilityNode>)> = BTreeMap::new();
+    let mut root: BTreeMap<String, (Vec<NamespaceNode>, Vec<GraphNode>)> = BTreeMap::new();
     for m in metas {
         let segments: Vec<&str> = if m.namespace.is_empty() {
             vec![""]
@@ -101,8 +110,14 @@ fn build_namespace_tree(metas: &[crate::kernel::meta::CapabilityMeta]) -> Vec<Na
         // filed under its first segment. Recursion into deeper
         // segments is deferred to Phase 6 if needed.
         let head = segments.first().copied().unwrap_or("").to_string();
-        let node = CapabilityNode {
-            slot: SlotId::new(0),
+        let node = GraphNode {
+            // Slot id is unknown at the namespace-tree level
+            // (we only have meta here, no slot→meta index).
+            // The graph's flat `nodes` field carries the real
+            // ids; the tree view uses a sentinel of slot 1,
+            // which the HTTP bridge substitutes with the real
+            // id when it joins the two views.
+            slot: SlotId::new(1),
             capability_id: m.id.clone(),
             name: m.name.clone(),
             namespace: m.namespace.clone(),
@@ -124,17 +139,7 @@ fn build_namespace_tree(metas: &[crate::kernel::meta::CapabilityMeta]) -> Vec<Na
         .collect()
 }
 
-/// One capability node (in the namespace tree's leaf listing).
-#[derive(Debug, Clone, Serialize)]
-pub struct CapabilityNode {
-    pub slot: SlotId,
-    pub capability_id: CapabilityId,
-    pub name: String,
-    pub namespace: String,
-    pub contract_name: String,
-    pub plugin: PluginId,
-    pub operations: String,
-    pub timeout_ms: u32,
-    pub parent: Option<SlotId>,
-    pub quota_calls_per_minute: u32,
-}
+/// Back-compat alias for the previous Phase 4 `CapabilityNode`.
+/// `GraphNode` is the canonical name now; existing code that
+/// referenced `CapabilityNode` keeps compiling through this alias.
+pub type CapabilityNode = GraphNode;

@@ -54,7 +54,6 @@ impl CapabilityFactory {
         handler: Arc<R>,
     ) -> crate::kernel::ids::SlotId {
         let id = CapabilityId(self.next_id.fetch_add(1, Ordering::Relaxed));
-        let budget_arc = Arc::new(budget.clone());
         let meta = meta_from_decl(id, decl, plugin, &budget);
         let rights = crate::kernel::rights::CapabilityRights {
             operations: crate::kernel::rights::OperationRights::ALL,

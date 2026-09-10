@@ -61,3 +61,34 @@ pub use space::{
     CapabilityGraph, CapabilitySpace, DeriveKind, GraphEvent, GraphEventBus, GraphEventReceiver,
     TryRecvError,
 };
+
+// Back-compat shims for the Phase 4 kernel layout. Phase 5
+// moved these into `host::*` (composition layer); the `kernel`
+// re-exports keep the Phase 4 import paths compiling.
+pub mod factory {
+    pub use crate::host::factory::CapabilityFactory;
+}
+
+pub mod manifest {
+    pub use crate::host::manifest::{
+        CapabilityDecl, CapabilityRequirement, DependencyRef, HostServiceRef, IsolationMode,
+        ManifestError, PluginManifest, ResourceHints,
+    };
+    // `PluginId` was a kernel-level identity in Phase 4. The
+    // canonical home is `kernel::ids`, but the Phase 4 path
+    // `kernel::manifest::PluginId` needs to keep compiling for
+    // back-compat.
+    pub use crate::kernel::ids::PluginId;
+}
+
+pub mod manifest_builder {
+    pub use crate::host::manifest::ManifestBuilder;
+}
+
+pub mod resolver {
+    pub use crate::host::resolver::{resolve, ResolveError, ResolvedBinding, ResolvedPlan};
+}
+
+pub mod pipeline {
+    pub use crate::host::pipeline::{Pipeline, PipelineError, SyncStage};
+}

@@ -29,7 +29,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use odyssey::capability::{CapabilityChunk, Resource};
-use odyssey::plugins::agent::{handler_from_plan, AgentResource, ProgramStep};
+use odyssey::plugins::agent::handler_from_plan;
 use odyssey::plugins::database::{handler as database_handler, DatabaseResource};
 use odyssey::plugins::echo::basic::{handler as echo_handler, EchoResource};
 use odyssey::{kernel::resolver::resolve, kernel::manifest::PluginManifest};

@@ -25,7 +25,6 @@ pub mod graph;
 pub mod namespace;
 pub mod revocation;
 
-use std::any::Any;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock, RwLockWriteGuard};
@@ -107,11 +106,19 @@ impl CapabilitySpace {
         let contract = cap.meta().contract_name.clone();
         let plugin = cap.meta().plugin.clone();
 
+        // Bind the slot id onto the cap so revoked-cap errors can
+        // surface a real `SlotId` instead of a sentinel. We mutate
+        // through `Arc::make_mut`-style: the inner `Arc<Capability<R>>`
+        // is shared with whoever holds the typed cap, so we
+        // clone-into-Arc with the bound slot.
+        let mut owned = (*cap).clone();
+        owned.bind_slot(slot);
+        let cap = Arc::new(owned);
         cap.reset_revoked();
         let erased: Arc<dyn AnyCapability> = cap;
 
         // Phase 5 M1: canonical lock order.
-        let mut parents = self.inner.parents.write().expect("cspace poisoned");
+        let parents = self.inner.parents.write().expect("cspace poisoned");
         let mut slots = self.inner.slots.write().expect("cspace poisoned");
         let prev = slots.insert(slot, SlotEntry { cap: erased });
         let mut names = self.inner.names.write().expect("cspace poisoned");
@@ -223,6 +230,61 @@ impl CapabilitySpace {
         self.inner.parents.read().expect("cspace poisoned").clone()
     }
 
+    /// Pair every installed slot with its registered name and
+    /// metadata. Used by the graph snapshot view to assign a
+    /// real `SlotId` to each `GraphNode` (the public API
+    /// exposes `enumerate()` over names, not slots, so the
+    /// graph view needs this join to produce a node-per-slot
+    /// mapping). Internal-only; the HTTP bridge walks it once
+    /// per `snapshot`.
+    pub fn snapshot_index(&self) -> Vec<(SlotId, crate::kernel::meta::CapabilityMeta)> {
+        // Canonical lock order: parents → slots → names.
+        let _parents = self.inner.parents.read().expect("cspace poisoned");
+        let slots = self.inner.slots.read().expect("cspace poisoned");
+        let names = self.inner.names.read().expect("cspace poisoned");
+        // For each slot, find the first name that points at it.
+        let mut out: Vec<(SlotId, _)> = Vec::with_capacity(slots.len());
+        for slot_id in slots.keys() {
+            // Look up the name for this slot.
+            let cap = slots.get(slot_id).unwrap();
+            let meta = cap.cap.meta().clone();
+            // We need at least one name per slot for the
+            // graph view. The canonical name is the first
+            // name in the names map that points at this slot.
+            let canonical_name = names
+                .iter()
+                .filter(|(_, s)| **s == *slot_id)
+                .map(|(n, _)| n.clone())
+                .min()
+                .unwrap_or_default();
+            let mut m = meta;
+            // Prefer the canonical name over meta.name so the
+            // graph view's name field matches what's actually
+            // registered in the namespace.
+            if !canonical_name.is_empty() {
+                m.name = canonical_name;
+            }
+            out.push((*slot_id, m));
+        }
+        out.sort_by_key(|(s, _)| *s);
+        out
+    }
+
+    /// Direct children of `slot` in the parent-pointer tree.
+    /// Roots are slots whose parent pointer is not in `parents`;
+    /// leaves are slots that have no children of their own.
+    /// Used by the graph view and by tests that walk the
+    /// attenuation tree.
+    pub fn children_of(&self, slot: SlotId) -> Vec<SlotId> {
+        let parents = self.inner.parents.read().expect("cspace poisoned");
+        let mut out: Vec<SlotId> = parents
+            .iter()
+            .filter_map(|(child, parent)| if *parent == slot { Some(*child) } else { None })
+            .collect();
+        out.sort();
+        out
+    }
+
     pub fn len(&self) -> usize {
         self.inner.slots.read().expect("cspace poisoned").len()
     }
@@ -279,7 +341,7 @@ impl CapabilitySpace {
     }
 
     /// Install a derived capability. Phase 5 D2 fix: refuses when
-    /// `parent` is no longer in `parents` (Interleaving 2 race).
+    /// `parent` is no longer in `slots` (Interleaving 2 race).
     pub(crate) fn install_derived<R: Resource>(
         &self,
         parent: SlotId,
@@ -289,16 +351,27 @@ impl CapabilitySpace {
         // D2 precondition: parent must be live. We check under a
         // brief read lock; the race window between this read and
         // the write below is benign because the canonical lock
-        // order ensures any concurrent `revoke_tree` waits on the
-        // write lock until our insert completes.
+        // order (`parents → slots → names`) ensures any
+        // concurrent `revoke_tree` waits on the write lock
+        // until our insert completes.
+        //
+        // The check is against `slots`, not `parents`: a parent
+        // is just "a slot in the cspace", which means it's in
+        // `slots`. The `parents` map only contains entries for
+        // derived slots (child → parent), so checking `parents`
+        // would wrongly reject every root cap.
         {
-            let parents = self.inner.parents.read().expect("cspace poisoned");
-            if !parents.contains_key(&parent) {
+            let slots = self.inner.slots.read().expect("cspace poisoned");
+            if !slots.contains_key(&parent) {
                 return Err(CapabilityError::SlotEmpty(parent));
             }
         }
 
         let new_slot = self.allocate();
+        // Bind the new slot id onto the derived cap so revoked-
+        // cap errors surface the real `SlotId`.
+        let mut new_cap = new_cap;
+        new_cap.bind_slot(new_slot);
         let cap: Arc<dyn AnyCapability> = Arc::new(new_cap);
 
         let mut parents = self.inner.parents.write().expect("cspace poisoned");

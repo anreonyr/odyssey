@@ -106,9 +106,10 @@ impl SyncStage {
                     // error message indicates a slot empty/revoked
                     // condition OR the typed `CapabilityError::SlotEmpty`
                     // display. Handler errors stay stringly typed.
-                    if e.contains("slot") && e.contains("empty") {
-                        PipelineError::SlotRevoked(slot.to_string())
-                    } else if e.contains("capability revoked") {
+                    let lowered = e.to_lowercase();
+                    if lowered.contains("slot") && lowered.contains("empty")
+                        || e.contains("capability revoked")
+                    {
                         PipelineError::SlotRevoked(slot.to_string())
                     } else {
                         PipelineError::StageFailed(name.clone(), e)

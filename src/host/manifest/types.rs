@@ -11,7 +11,6 @@
 //! loaders must honour — live under `docs/deferred/`.
 
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 
 pub use crate::kernel::ids::PluginId;
 use crate::kernel::meta::{AuthorityContract, Protocol};
@@ -99,12 +98,15 @@ pub struct CapabilityDecl {
     pub name: String,
     /// Logical type name for input (declared in manifest). Surfaced to the
     /// HTTP bridge for clients; not yet enforced as a runtime type check.
+    #[serde(default)]
     #[allow(dead_code)]
     pub in_type: String,
     /// Logical type name for output (declared in manifest). Surfaced to the
     /// HTTP bridge for clients; not yet enforced as a runtime type check.
+    #[serde(default)]
     #[allow(dead_code)]
     pub out_type: String,
+    #[serde(default)]
     pub streaming: bool,
     /// Phase 3 P3.1 — the contract name this capability publishes.
     /// Other plugins declare a matching `contract` in their
@@ -165,17 +167,6 @@ pub enum ManifestError {
 }
 
 impl PluginManifest {
-    pub fn from_toml_str(s: &str) -> Result<Self, ManifestError> {
-        let m: PluginManifest = toml::from_str(s)?;
-        m.validate()?;
-        Ok(m)
-    }
-
-    pub fn from_path(p: impl AsRef<Path>) -> Result<Self, ManifestError> {
-        let text = std::fs::read_to_string(p)?;
-        Self::from_toml_str(&text)
-    }
-
     pub fn validate(&self) -> Result<(), ManifestError> {
         if self.plugin.name.is_empty() {
             return Err(ManifestError::Validation("plugin.name is empty".into()));

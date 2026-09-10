@@ -339,8 +339,8 @@ impl Resource for AgentResource {
     /// - `step_ok`   — handle in reachable, slot in cspace, invoke ok
     /// - `step_skip` — handle not in reachable (env doesn't grant)
     /// - `step_deny` — handle in reachable, but cap's authority
-    ///                 doesn't include the step's `op` (when set)
-    /// - `step_fail` — invoke itself returned an Err
+    ///   doesn't include the step's `op` (when set)
+    /// - `step_fail` — invoke itself returned an err
     ///
     /// The agent never aborts on a failed step — it records
     /// the outcome and proceeds to the next. This is the

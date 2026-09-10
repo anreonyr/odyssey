@@ -8,10 +8,9 @@
 
 use std::sync::Arc;
 
-use crate::kernel::error::CapabilityError;
 use crate::kernel::ids::SlotId;
 
-use super::{CapabilitySpace, DeriveKind, GraphEvent, RevokeMode};
+use super::{CapabilitySpace, GraphEvent, RevokeMode};
 
 /// **Revoke** — clear `slot`. Mode-aware:
 ///

@@ -41,7 +41,9 @@ use serde_json::{json, Value};
 
 struct World {
     space: odyssey::capability::CapabilitySpace,
+    #[allow(dead_code)]
     echo_slot: odyssey::capability::SlotId,
+    #[allow(dead_code)]
     database_slot: odyssey::capability::SlotId,
 }
 

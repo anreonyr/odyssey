@@ -170,9 +170,10 @@ impl CapabilityBudget {
     /// successful handler output.
     pub(crate) fn record_elapsed(&self, elapsed: std::time::Duration) {
         // Round up so that sub-millisecond calls register as ≥1ms.
-        // Without the rounding, a fast handler (`elapsed = 0`) leaves
-        // the wall-clock counter stuck at 0.
-        let elapsed_ms = elapsed.as_micros().div_ceil(1000) as u64;
+        // A handler that returns in <1us has `as_micros() == 0`,
+        // and `0u128.div_ceil(1000) == 0`; without the `max(1)` the
+        // wall-clock counter would stay at 0 for any fast handler.
+        let elapsed_ms = std::cmp::max(1u128, elapsed.as_micros().div_ceil(1000)) as u64;
         self.wall_clock_total_ms.fetch_add(elapsed_ms, Ordering::Relaxed);
     }
 

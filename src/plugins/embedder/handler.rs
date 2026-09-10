@@ -147,7 +147,6 @@ pub fn embedder_plugin() -> Arc<dyn Plugin> {
                         .map(|c| c.id().to_string())
                         .unwrap_or_else(|| "(empty)".to_string()),
                 )
-                .into(),
             );
             Ok(())
         },

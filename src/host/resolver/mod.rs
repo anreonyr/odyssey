@@ -11,34 +11,41 @@
 //! effect of building the contract index, so a separate type
 //! is redundant.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
-use crate::host::manifest::{CapabilityRequirement, PluginManifest};
+use crate::host::manifest::PluginManifest;
 use crate::kernel::ids::PluginId;
-use crate::kernel::ids::SlotId;
 
 #[derive(Debug)]
 pub enum ResolveError {
-    Unprovided { contract: String, requested_by: PluginId },
-    Ambiguous { contract: String, providers: Vec<PluginId> },
-    Cycle(Vec<PluginId>),
+    /// A consumer's `[[requires]] contract` had no matching
+    /// `[[exposes]] contract_name` in any other manifest.
+    Unprovided { contract: String, by: String },
+    /// Two providers published the same contract without a
+    /// priority hint; the resolver can't pick one.
+    Ambiguous { contract: String, a: String, b: String },
+    /// The dependency graph has a cycle. The chain lists the
+    /// plugins that form the cycle, in `"name@version"` form.
+    Cycle { chain: Vec<String> },
     DuplicateName { plugin: PluginId },
 }
 
 impl std::fmt::Display for ResolveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Unprovided { contract, requested_by } => write!(
+            Self::Unprovided { contract, by } => write!(
                 f,
-                "no provider for contract `{contract}` (requested by {}@{})",
-                requested_by.name, requested_by.version
+                "no provider for contract `{contract}` (requested by {by})"
             ),
-            Self::Ambiguous { contract, providers } => write!(
+            Self::Ambiguous { contract, a, b } => write!(
                 f,
-                "ambiguous contract `{contract}` (providers: {})",
-                providers.len()
+                "ambiguous contract `{contract}` (providers: {a}, {b})"
             ),
-            Self::Cycle(cycle) => write!(f, "dependency cycle detected ({} plugin(s))", cycle.len()),
+            Self::Cycle { chain } => write!(
+                f,
+                "dependency cycle detected ({} plugin(s))",
+                chain.len()
+            ),
             Self::DuplicateName { plugin } => write!(
                 f,
                 "duplicate plugin name `{}@{}`",
@@ -52,27 +59,26 @@ impl std::error::Error for ResolveError {}
 
 #[derive(Debug, Clone)]
 pub struct ResolvedBinding {
-    pub requirement: CapabilityRequirement,
-    pub provider: PluginId,
-    pub provider_slot: SlotId,
-    /// Phase 5: this is the `Reachable` shape. ResolvedBindings
-    /// are what the host hands to a plugin's handler at mint
-    /// time. The plugin gets `(requirement.name, ResolvedBinding)`;
-    /// it can use `ResolvedBinding.provider_slot` to deref the cap.
-    pub contract: String,
-    /// Local handle in the consumer plugin (matches `requirement.name`).
-    /// Convenience for `Reachable::from_binding`.
+    /// Local handle in the consumer plugin (e.g. `"counter"`).
     pub handle: String,
-    /// Capability name the consumer dispatches by. Matches the
-    /// `[[exposes]] name` of the provider. Convenience for
-    /// `Reachable::from_binding`.
+    /// The plugin that published the contract. Identified by
+    /// `(name, version)`.
+    pub provider: PluginId,
+    /// Capability name in the cspace — what `lookup_by_name`
+    /// resolves against at dispatch time. Distinct from
+    /// `handle` so two agents can use the same handle to
+    /// reach different caps (P3.4).
     pub capability: String,
+    /// Contract name that was matched. Carried for diagnostics
+    /// and for any downstream type that wants to surface the
+    /// capability-type vocabulary.
+    pub contract: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct ResolvedPlan {
     pub mint_order: Vec<PluginId>,
-    pub bindings: HashMap<PluginId, Vec<ResolvedBinding>>,
+    pub bindings: BTreeMap<PluginId, Vec<ResolvedBinding>>,
 }
 
 impl ResolvedPlan {
@@ -109,16 +115,23 @@ pub fn resolve(manifests: &[PluginManifest]) -> Result<ResolvedPlan, ResolveErro
         }
         for e in &m.exposes {
             if !e.contract_name.is_empty() {
-                if by_contract.insert(e.contract_name.clone(), (pid.clone(), m, &e.name)).is_some() {
-                    // Ambiguous: two plugins publish the same contract.
-                    return Err(ResolveError::Ambiguous {
-                        contract: e.contract_name.clone(),
-                        providers: by_contract
-                            .values()
-                            .filter(|(p, _, _)| p == &pid)
-                            .map(|(p, _, _)| p.clone())
-                            .collect(),
-                    });
+                match by_contract.get(&e.contract_name).cloned() {
+                    Some((other_pid, _, _)) => {
+                        // Ambiguous: two plugins publish the same
+                        // contract. Surface the first two providers
+                        // by `"name@version"` for diagnostics.
+                        return Err(ResolveError::Ambiguous {
+                            contract: e.contract_name.clone(),
+                            a: format!("{}@{}", other_pid.name, other_pid.version),
+                            b: format!("{}@{}", pid.name, pid.version),
+                        });
+                    }
+                    None => {
+                        by_contract.insert(
+                            e.contract_name.clone(),
+                            (pid.clone(), m, &e.name),
+                        );
+                    }
                 }
             }
         }
@@ -126,7 +139,7 @@ pub fn resolve(manifests: &[PluginManifest]) -> Result<ResolvedPlan, ResolveErro
 
     // 2. Edges + bindings.
     let mut edges: BTreeMap<PluginId, BTreeSet<PluginId>> = BTreeMap::new();
-    let mut bindings: HashMap<PluginId, Vec<ResolvedBinding>> = HashMap::new();
+    let mut bindings: BTreeMap<PluginId, Vec<ResolvedBinding>> = BTreeMap::new();
     let mut in_degree: BTreeMap<PluginId, usize> = BTreeMap::new();
     for m in manifests {
         let pid = m.plugin.clone();
@@ -136,7 +149,7 @@ pub fn resolve(manifests: &[PluginManifest]) -> Result<ResolvedPlan, ResolveErro
             let provider = by_contract.get(&req.contract).ok_or_else(|| {
                 ResolveError::Unprovided {
                     contract: req.contract.clone(),
-                    requested_by: pid.clone(),
+                    by: pid.name.clone(),
                 }
             })?;
             let (provider_pid, _provider_manifest, provider_cap_name) = provider;
@@ -149,12 +162,10 @@ pub fn resolve(manifests: &[PluginManifest]) -> Result<ResolvedPlan, ResolveErro
                 .entry(pid.clone())
                 .or_default()
                 .push(ResolvedBinding {
-                    requirement: req.clone(),
-                    provider: provider_pid,
-                    provider_slot: SlotId::new(0), // assigned at mint time
-                    contract: (*provider_cap_name).to_string(),
                     handle: req.name.clone(),
+                    provider: provider_pid,
                     capability: (*provider_cap_name).to_string(),
+                    contract: req.contract.clone(),
                 });
         }
     }
@@ -181,12 +192,12 @@ pub fn resolve(manifests: &[PluginManifest]) -> Result<ResolvedPlan, ResolveErro
         }
     }
     if mint_order.len() != in_degree.len() {
-        let cycle: Vec<PluginId> = in_degree
+        let chain: Vec<String> = in_degree
             .iter()
             .filter(|(_, d)| **d > 0)
-            .map(|(p, _)| p.clone())
+            .map(|(p, _)| format!("{}@{}", p.name, p.version))
             .collect();
-        return Err(ResolveError::Cycle(cycle));
+        return Err(ResolveError::Cycle { chain });
     }
 
     Ok(ResolvedPlan { mint_order, bindings })
@@ -203,15 +214,16 @@ mod tests {
             isolate: IsolationMode::InProc,
             exposes: vec![CapabilityDecl {
                 name: name.into(),
-                contract: contract.into(),
+                contract_name: contract.into(),
                 in_type: "any".into(),
                 out_type: "any".into(),
                 streaming: false,
-                quota: None,
+                authority: crate::kernel::meta::AuthorityContract::default(),
+                protocol: crate::kernel::meta::Protocol::default(),
             }],
             requires: requires
                 .into_iter()
-                .map(|(n, c)| CapabilityRequirement {
+                .map(|(n, c)| crate::host::manifest::CapabilityRequirement {
                     name: n.into(),
                     contract: c.into(),
                 })
@@ -243,13 +255,18 @@ mod tests {
         let a = make_manifest("a", "echo", vec![("loop", "loop")]);
         let b = make_manifest("b", "loop", vec![("echo", "echo")]);
         let plan = resolve(&[a, b]);
-        assert!(matches!(plan, Err(ResolveError::Cycle(_))));
+        assert!(matches!(plan, Err(ResolveError::Cycle { .. })));
     }
 
     #[test]
     fn unprovided_contract_errors() {
-        let a = make_manifest("a", "missing", vec![]);
+        // Plugin `a` requires a contract that no other manifest publishes.
+        // The resolver must surface the gap as `ResolveError::Unprovided`.
+        let a = make_manifest("a", "echo", vec![("missing", "missing")]);
         let plan = resolve(&[a]);
-        assert!(matches!(plan, Err(ResolveError::DuplicateName { .. }) | Err(ResolveError::Ambiguous { .. })));
+        assert!(
+            matches!(plan, Err(ResolveError::Unprovided { .. })),
+            "expected Unprovided error, got {plan:?}"
+        );
     }
 }
