@@ -16,7 +16,7 @@
 //! slow). Tests that need to vary these build a `CapabilityDecl` by
 //! hand instead.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use odyssey::capability::{
     Capability, CapabilityBudget, CapabilityContract, CapabilityRights, CapabilitySpace, CapKind,
@@ -33,14 +33,20 @@ use odyssey::plugins::counter::CounterResource;
 /// fail.
 pub const DEFAULT_TIMEOUT_MS: u32 = 5000;
 
-/// Read the counter's manifest from disk. Used by [`mint_counter`]
-/// so every test gets the same contract the runtime counter has —
-/// including the action → OperationRights table that the
-/// `RuleAgent` consults.
-fn load_counter_manifest() -> PluginManifest {
-    let toml_src = std::fs::read_to_string("src/plugins/counter/counter.toml")
-        .expect("counter.toml present at src/plugins/counter/counter.toml");
-    PluginManifest::from_toml_str(&toml_src).expect("counter.toml parses")
+/// Read the counter's manifest from disk, cached per-test-crate.
+/// Used by [`mint_counter`] so every test gets the same contract
+/// the runtime counter has — including the action → OperationRights
+/// table that the `RuleAgent` consults. Each test crate has its
+/// own copy of `common::mod` (cargo compiles the helper once per
+/// test binary), so the cache lives for the lifetime of one test
+/// binary's ~24 tests, not forever.
+fn load_counter_manifest() -> &'static PluginManifest {
+    static CACHE: OnceLock<PluginManifest> = OnceLock::new();
+    CACHE.get_or_init(|| {
+        let toml_src = std::fs::read_to_string("src/plugins/counter/counter.toml")
+            .expect("counter.toml present at src/plugins/counter/counter.toml");
+        PluginManifest::from_toml_str(&toml_src).expect("counter.toml parses")
+    })
 }
 
 /// Fresh CSpace + Factory. Every test should boot its own — no shared
