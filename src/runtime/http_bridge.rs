@@ -19,7 +19,6 @@ use axum::{
     Router,
 };
 use crate::kernel::{CapabilityChunk, CapabilitySpace};
-use cordis::Context;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -57,8 +56,12 @@ struct ErrorResp {
     error: String,
 }
 
-pub fn router(ctx: Context, cspace: CapabilitySpace) -> Router {
-    let _ = ctx;
+pub fn router(cspace: CapabilitySpace) -> Router {
+    // Phase 5 m6: the `Context` parameter was carried over from
+    // the Phase 4 router but never consulted by any of the
+    // handlers (the HTTP bridge talks to the cspace directly).
+    // Removed; the parameter was always suppressed with `let _ =
+    // ctx;` and removing it eliminates the suppression as well.
     Router::new()
         .route("/", get(index))
         .route("/api/caps", get(list_caps))
@@ -170,11 +173,10 @@ async fn stream(
 
 pub async fn serve(
     addr: SocketAddr,
-    ctx: Context,
     cspace: CapabilitySpace,
     shutdown: impl Future<Output = ()> + Send + 'static,
 ) {
-    let app = router(ctx, cspace);
+    let app = router(cspace);
     let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");
     eprintln!("[http] listening on http://{addr}");
     axum::serve(listener, app)

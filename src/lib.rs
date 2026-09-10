@@ -23,10 +23,10 @@
 //!   split. Sub-modules `cspace`, `events`, `graph` mirror the
 //!   Phase 4 sub-module names.
 
-pub mod boot;
 pub mod host;
 pub mod kernel;
 pub mod plugins;
+pub mod runtime;
 
 pub mod capability {
     //! Phase 4 `capability` namespace re-expressed on top of the

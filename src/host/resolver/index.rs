@@ -15,6 +15,7 @@ use crate::kernel::ids::PluginId;
 
 use super::error::ResolveError;
 
+
 /// Single contract-name index entry. The cap name is the
 /// `[[exposes]] name` field of the provider — distinct from
 /// the contract name itself (which is the resolver key).
@@ -36,9 +37,14 @@ pub(crate) struct ContractEntry<'a> {
 /// is what lets the rest of the resolver assume "every
 /// contract has exactly one provider" and run a single
 /// hash-table lookup per `requires` entry.
+type ContractIndex<'a> = (
+    BTreeMap<String, ContractEntry<'a>>,
+    BTreeMap<PluginId, &'a PluginManifest>,
+);
+
 pub(crate) fn build_contract_index(
     manifests: &[PluginManifest],
-) -> Result<(BTreeMap<String, ContractEntry<'_>>, BTreeMap<PluginId, &PluginManifest>), ResolveError> {
+) -> Result<ContractIndex<'_>, ResolveError> {
     let mut by_contract: BTreeMap<String, ContractEntry<'_>> = BTreeMap::new();
     let mut by_plugin: BTreeMap<PluginId, &PluginManifest> = BTreeMap::new();
 
