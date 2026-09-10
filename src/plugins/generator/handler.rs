@@ -1,4 +1,12 @@
 //! Generator plugin — `GeneratorResource: Resource`. Stream only.
+//!
+//! Phase 3 P3.3 — the resource carries an `Arc<dyn Model>`;
+//! the boot selects the model via the `GENERATOR_MODEL` env
+//! var (`mock` / `markov`, default `markov`). The handler's
+//! shape is unchanged: `open()` returns an
+//! `mpsc::Receiver<CapabilityChunk>` and chunks are paced at
+//! `TICK` (15ms) per token so the streaming latency profile
+//! matches the original mock.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -8,10 +16,13 @@ use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
 use crate::capability::{CapabilityChunk, Resource, Slot};
+use crate::plugins::generator::model::Model;
 
 const TICK: Duration = Duration::from_millis(15);
 
-pub struct GeneratorResource;
+pub struct GeneratorResource {
+    model: Arc<dyn Model>,
+}
 
 impl Resource for GeneratorResource {
     fn open(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
@@ -19,17 +30,16 @@ impl Resource for GeneratorResource {
             .as_str()
             .ok_or_else(|| "generate: input must be a string".to_string())?
             .to_string();
-
-        let response = if prompt.to_lowercase().contains("hello") {
-            "Hello! I'm a mock generator — the framework supports any provider.".to_string()
-        } else {
-            format!("Mock generator received: \"{prompt}\"")
-        };
-
+        // Phase 3 P3.3 — generate synchronously (CPU-bound but
+        // bounded by MAX_TOKENS), then stream the tokens at
+        // TICK pacing. This keeps the streaming API stable
+        // while letting the model be anything that returns a
+        // Vec<String>.
+        let tokens = self.model.generate(&prompt, None)?;
         let (tx, rx) = mpsc::channel(16);
         tokio::spawn(async move {
-            for ch in response.chars() {
-                if tx.send(CapabilityChunk::Item(json!(ch.to_string()))).await.is_err() {
+            for tok in tokens {
+                if tx.send(CapabilityChunk::Item(json!(tok))).await.is_err() {
                     return;
                 }
                 tokio::time::sleep(TICK).await;
@@ -41,8 +51,11 @@ impl Resource for GeneratorResource {
     }
 }
 
-pub fn handler() -> Arc<GeneratorResource> {
-    Arc::new(GeneratorResource)
+/// Build a `GeneratorResource` carrying `model`. Boot uses
+/// [`crate::plugins::generator::model::ModelKind::build`] to
+/// select the model from `GENERATOR_MODEL`.
+pub fn handler(model: Arc<dyn Model>) -> Arc<GeneratorResource> {
+    Arc::new(GeneratorResource { model })
 }
 
 pub fn generator_plugin() -> Arc<dyn Plugin> {
@@ -59,7 +72,8 @@ pub fn generator_plugin() -> Arc<dyn Plugin> {
                     slot.capability()
                         .map(|c| c.id().to_string())
                         .unwrap_or_else(|| "(empty)".to_string()),
-                ),
+                )
+                .into(),
             );
             Ok(())
         },

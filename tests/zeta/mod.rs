@@ -61,8 +61,20 @@
 //! - **ζ.16** ([`p3_7_events`]): full lifecycle event sequence
 //!   matches the expected boot shape (mint order → activate →
 //!   shutdown reverse order → completed).
+//!
+//! ## Phase 3.3 — Real AI Resources
+//!
+//! - **ζ.17** ([`p3_3_real_models`]): `MockModel` preserves
+//!   the historical canned behaviour for back-compat.
+//! - **ζ.18** ([`p3_3_real_models`]): `MarkovModel` produces
+//!   non-trivial, prompt-sensitive, deterministic output.
+//! - **ζ.19** ([`p3_3_real_models`]): boot selects `Markov`
+//!   by default and `Mock` when `GENERATOR_MODEL=mock`.
+//! - **ζ.20** ([`p3_3_real_models`]): runtime handler streams
+//!   tokens in order; both models end with `[end]` + `Done`.
 
 mod p3_2_protocol;
+mod p3_3_real_models;
 mod p3_4_capability_native;
 mod p3_6_lifetime;
 mod p3_7_events;

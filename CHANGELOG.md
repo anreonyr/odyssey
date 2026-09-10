@@ -406,6 +406,97 @@ In `tests/zeta/p3_7_events.rs` (5 tests):
 **Test results**: 64/64 passing (was 55; +4 events unit +
 +5 ζ tests for P3.7).
 
+### P3.3 — Real AI Resources
+
+The `generator` plugin used to be a hard-coded mock:
+detect "hello" in the prompt and emit canned text, otherwise
+echo the prompt. P3.3 replaces that with a `Model` trait and
+two real implementations.
+
+**Why Markov, not a real LLM**
+
+- Network I/O, API-key dep, and non-determinism all conflict
+  with the streaming-quota / quota-spec test surface.
+- Markov chain hits the same shape (variable-length stream
+  of tokens that depends on the prompt) without those costs.
+- The [`Model`] trait is what `generator`'s handler
+  dispatches through; swapping in an HTTP-bridged LLM later
+  is a one-file change.
+
+**Changes**
+
+- `src/plugins/generator/model.rs` (new): `Model` trait;
+  `MockModel` (canned back-compat); `MarkovModel` (n-gram
+  generator trained on a built-in tech/programming corpus).
+- `MarkovModel` uses `StdRng` seeded by `prompt.hash()` XOR
+  model seed → deterministic given `(model, prompt)`.
+- `ModelKind` enum (`Mock` / `Markov`) parsed from
+  `GENERATOR_MODEL` env var (default `Markov`).
+- `GeneratorResource` carries `Arc<dyn Model>`; `handler(model)`
+  takes the model as an argument.
+- `boot.rs` reads `GENERATOR_MODEL` and prints
+  `[generator] selected model: Markov` so operators can
+  confirm the choice.
+- `Cargo.toml`: `rand = "0.8"` (light dep, just `StdRng`).
+
+**Tests**
+
+In `src/plugins/generator/model.rs` (8 unit tests):
+
+- `mock_model_canned_hello_response`
+- `mock_model_echoes_non_hello`
+- `markov_model_deterministic_for_same_prompt_and_seed`
+- `markov_model_different_for_different_seeds`
+- `markov_model_returns_non_empty_output`
+- `markov_model_ngram_table_populated`
+- `model_kind_parses_known_strings`
+- `model_kind_build_returns_a_model`
+
+In `tests/zeta/p3_3_real_models.rs` (9 tests):
+
+- **ζ.17** `mock_model_preserves_historical_behaviour`
+- **ζ.18** `markov_model_extends_prompt_and_is_deterministic` +
+  `markov_model_varies_with_prompt` +
+  `markov_model_force_seed_forces_output`
+- **ζ.19** `model_kind_default_is_markov` +
+  `model_kind_mock_when_env_says_mock` +
+  `model_kind_markov_when_env_says_markov`
+- **ζ.20** `runtime_handler_streams_mock_model_in_order` +
+  `runtime_handler_streams_markov_model_with_real_output`
+
+**End-to-end HTTP bridge**
+
+```
+# Markov:
+$ curl -X POST http://127.0.0.1:3030/api/stream \
+    -d '{"capability":"generate","input":"the kernel"}'
+event: chunk
+data: "the"
+event: chunk
+data: "kernel"
+event: chunk
+data: "enforces"
+event: chunk
+data: "the"
+event: chunk
+data: "bits"
+event: chunk
+data: "[end]"
+event: done
+
+# Mock (back-compat, $GENERATOR_MODEL=mock):
+event: chunk
+data: "Mock"
+event: chunk
+data: "generator"
+event: chunk
+data: "received:"
+... (echo with prefix)
+```
+
+**Test results**: 82/82 passing (was 64; +8 model unit +
++10 ζ tests for P3.3).
+
 ### Added — Phase 2: Capability-Native Composition
 
 #### Plugin directory cleanup

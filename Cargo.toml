@@ -28,6 +28,10 @@ futures-core = "0.3"
 futures-util = "0.3"
 tokio-stream = { version = "0.1", features = ["sync"] }
 bitflags = { version = "2", features = ["serde"] }
+# Phase 3 P3.3 — Real AI resources: Markov-chain generator
+# uses `StdRng` for deterministic token sampling. Light
+# dep, no std RNG re-implementation in-tree.
+rand = { version = "0.8", features = ["std_rng"] }
 
 [[bin]]
 name = "odyssey"

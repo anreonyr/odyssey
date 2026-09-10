@@ -238,9 +238,23 @@ async fn mint_one_plugin(
         "echo_stream" => mint_simple::<EchoStreamResource, _>(
             ctx, factory, m, CapKind::Stream, "slot:echo_stream", |_, _| echo_stream_handler(),
         ).await,
-        "generator" => mint_simple::<GeneratorResource, _>(
-            ctx, factory, m, CapKind::Stream, "slot:generate", |_, _| generator_handler(),
-        ).await,
+        "generator" => {
+            // Phase 3 P3.3 — pick the model from
+            // GENERATOR_MODEL (mock | markov, default markov).
+            // The closure captures the model Arc so all of
+            // generator's `[[exposes]]` blocks share one
+            // backing model.
+            let model = crate::plugins::generator::ModelKind::from_env();
+            eprintln!(
+                "[generator] selected model: {:?} (set GENERATOR_MODEL=mock|markov to override)",
+                model
+            );
+            let model_arc: Arc<dyn crate::plugins::generator::Model> = Arc::from(model.build());
+            mint_simple::<GeneratorResource, _>(
+                ctx, factory, m, CapKind::Stream, "slot:generate",
+                move |_, _| generator_handler(model_arc.clone()),
+            ).await
+        }
         "echo-chain" => mint_echo_chain(ctx, factory, cspace, plan, m).await,
         // B1: instead of silently returning an empty vec, fail
         // loudly. `mint_runtime_plugins` already checked that

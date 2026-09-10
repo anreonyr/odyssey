@@ -4,5 +4,8 @@
 
 mod handler;
 pub use handler::*;
+pub mod model;
+pub use model::{MarkovModel, MockModel, Model, ModelKind};
+
 mod manifest;
 pub use manifest::manifest;
