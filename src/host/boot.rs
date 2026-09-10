@@ -81,10 +81,13 @@ where
 // ---------------------------------------------------------------------------
 
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    // Phase 1: Parse manifests.
-    let LoadedManifests { ready, deferred } = load_manifests(MANIFEST_DIR)?;
-    println!("[manifest] loaded {} plugin(s):", ready.len() + deferred.len());
-    for m in &ready {
+    // Phase 1: Parse manifests. Today every plugin manifest in
+    // `src/plugins/` is InProc; Wasm / cdylib / subprocess loaders
+    // are tracked under `docs/deferred/` and will mint into the
+    // CSpace when those loaders land.
+    let manifests = load_manifests(MANIFEST_DIR)?;
+    println!("[manifest] loaded {} plugin(s):", manifests.len());
+    for m in &manifests {
         println!(
             "  - {}@{}  {:?}  exposes={}",
             m.plugin.name,
@@ -93,16 +96,6 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             m.exposes.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(",")
         );
     }
-    for m in &deferred {
-        println!(
-            "  - {}@{}  {:?}  [skip: {}]",
-            m.plugin.name,
-            m.plugin.version,
-            m.isolate,
-            deferral_reason(&m.isolate),
-        );
-    }
-    let manifests = ready;
 
     // Phase 2: Provide core services.
     let ctx = cordis::Context::new();
@@ -267,58 +260,28 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Manifests ready for the runtime, plus manifests that parsed
-/// cleanly but are not currently wired in.
-struct LoadedManifests {
-    ready: Vec<PluginManifest>,
-    deferred: Vec<PluginManifest>,
-}
-
-/// `true` when the runtime knows how to actually instantiate this
-/// manifest. Today only `InProc` plugins are wired; `Wasm` and
-/// `Subprocess` are deferred.
-fn is_runtime_supported(m: &PluginManifest) -> bool {
-    matches!(m.isolate, crate::host::manifest::IsolationMode::InProc)
-}
-
-fn deferral_reason(iso: &crate::host::manifest::IsolationMode) -> &'static str {
-    match iso {
-        crate::host::manifest::IsolationMode::InProc => "in-proc (no skip needed)",
-        crate::host::manifest::IsolationMode::Wasm { .. } => "wasm loader not wired",
-        crate::host::manifest::IsolationMode::Subprocess { .. } => {
-            "subprocess transport not wired"
-        }
-    }
-}
-
-fn load_manifests(dir: &str) -> Result<LoadedManifests, Box<dyn std::error::Error>> {
-    fn walk(
-        p: &std::path::Path,
-        ready: &mut Vec<PluginManifest>,
-        deferred: &mut Vec<PluginManifest>,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+/// Manifests ready for the runtime. Today every manifest must
+/// declare `InProc` isolation; the Wasm / cdylib / subprocess
+/// loaders tracked under `docs/deferred/` will mint into this
+/// list when they ship.
+fn load_manifests(dir: &str) -> Result<Vec<PluginManifest>, Box<dyn std::error::Error>> {
+    fn walk(out: &mut Vec<PluginManifest>, p: &std::path::Path) -> Result<(), Box<dyn std::error::Error>> {
         for entry in std::fs::read_dir(p)? {
             let entry = entry?;
             let path = entry.path();
             let ft = entry.file_type()?;
             if ft.is_dir() {
-                walk(&path, ready, deferred)?;
+                walk(out, &path)?;
             } else if path.extension().and_then(|s| s.to_str()) == Some("toml") {
                 let m = PluginManifest::from_path(&path)
                     .map_err(|e| format!("{}: {e}", path.display()))?;
-                if is_runtime_supported(&m) {
-                    ready.push(m);
-                } else {
-                    deferred.push(m);
-                }
+                out.push(m);
             }
         }
         Ok(())
     }
-    let mut ready = Vec::new();
-    let mut deferred = Vec::new();
-    walk(std::path::Path::new(dir), &mut ready, &mut deferred)?;
-    ready.sort_by(|a, b| a.plugin.name.cmp(&b.plugin.name));
-    deferred.sort_by(|a, b| a.plugin.name.cmp(&b.plugin.name));
-    Ok(LoadedManifests { ready, deferred })
+    let mut out = Vec::new();
+    walk(&mut out, std::path::Path::new(dir))?;
+    out.sort_by(|a, b| a.plugin.name.cmp(&b.plugin.name));
+    Ok(out)
 }
