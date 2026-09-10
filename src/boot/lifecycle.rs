@@ -139,7 +139,7 @@ fn dispatch_consistency() {
 /// plugins are skipped (they're not in [`RUNTIME_PLUGINS`]).
 ///
 /// Phase 3 P3.6 — Runtime Lifetime. Returns the per-plugin
-/// minted slot ids so [`shutdown_runtime_plugins`] can walk
+/// minted slot ids so [`ruin_runtime_plugins`] can walk
 /// them in reverse mint order and revoke each one via
 /// `cspace.revoke_tree`. The mapping is what makes the
 /// teardown direction explicit: every provider cap that a
@@ -397,13 +397,20 @@ async fn mint_echo_chain(
 
 /// Phase 3 P3.6 — Runtime Lifetime.
 ///
-/// Tear down runtime plugins in **reverse** mint order. Each
-/// plugin's minted slot ids are passed to
-/// `cspace.revoke_tree`, which removes the slot and any
-/// descendants (derived caps from `restrict`/`grant`). After
-/// this returns, every runtime slot is freed; consumer binding
-/// entries pointing at revoked caps return `None` from
-/// `cspace.lookup_by_name`.
+/// Tear down runtime plugins in **reverse** mint order — the
+/// symmetric counterpart to `mint_runtime_plugins`. Each
+/// plugin's minted slot ids are passed to `cspace.revoke_tree`,
+/// which removes the slot and any descendants (derived caps
+/// from `restrict`/`grant`). After this returns, every
+/// runtime slot is freed; consumer binding entries pointing at
+/// revoked caps return `None` from `cspace.lookup_by_name`.
+///
+/// The name mirrors `mint`: just as `mint` mints a typed
+/// capability token, `ruin` reclaims it. The boot phase this
+/// runs in is still called "shutdown" (see `[shutdown]`
+/// log labels, `ShutdownStarted`/`ShutdownCompleted` graph
+/// events) — those names describe the lifecycle phase, not
+/// the action on each plugin's caps.
 ///
 /// The order matters: consumers die **before** providers, so
 /// any in-flight work the consumer was doing on the provider's
@@ -412,7 +419,7 @@ async fn mint_echo_chain(
 /// mint fresh caps and don't derive), but the rule generalises
 /// cleanly when later phases add real provider revocation
 /// hooks.
-async fn shutdown_runtime_plugins(
+async fn ruin_runtime_plugins(
     cspace: &CapabilitySpace,
     plan: &ResolvedPlan,
     minted: &std::collections::HashMap<PluginId, Vec<crate::capability::SlotId>>,
@@ -679,7 +686,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // lifecycle events (`PluginDeactivated`) accompany each
     // per-plugin revoke.
     cspace.publish_event(crate::capability::events::GraphEvent::ShutdownStarted);
-    shutdown_runtime_plugins(&cspace, &plan, &minted).await;
+    ruin_runtime_plugins(&cspace, &plan, &minted).await;
     cspace.publish_event(
         crate::capability::events::GraphEvent::ShutdownCompleted {
             remaining_slots: cspace.len(),
