@@ -16,6 +16,20 @@
 //! in-flight work the consumer was doing on the provider's
 //! cap sees `Slot::capability() → None` rather than racing
 //! the provider's teardown.
+//!
+//! ## Naming note
+//!
+//! The function is named `ruin_runtime_plugins` (Phase 4
+//! introduced it as `shutdown_runtime_plugins`; commit
+//! `ee680e3` renamed it to `ruin_runtime_plugins`). The name
+//! is the deliberate English-verb dual of `mint_runtime_plugins`
+//! in the runtime layer: `mint` is the verb for capability
+//! creation, `ruin` is the verb for wholesale capability
+//! destruction. The surrounding `teardown` module name and
+//! `[shutdown]` log prefix are layer-local terminology for
+//! the same lifecycle event; the function name carries the
+//! duality. Do not normalise this name without an explicit
+//! owner decision — see `CHANGELOG.md` Phase 7 entry.
 
 use std::collections::HashMap;
 

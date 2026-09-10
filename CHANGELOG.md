@@ -45,6 +45,24 @@ adheres to [Semantic Versioning](https://semver.org/).
   (`quota_spec_has_no_token_or_byte_fields`,
   `manifest_with_dead_quota_fields_still_loads`)
   remain.
+- **`ruin_runtime_plugins` name is the deliberate dual of
+  `mint_runtime_plugins`.** Despite an apparent asymmetry with
+  the surrounding `teardown` / `[shutdown]` terminology in the
+  same file, the function name is the intentional English-verb
+  counterpart of `mint`. The seL4 mapping table treats
+  `CNode.Mint` (creation) and `CNode.Delete` / `CNode.Revoke`
+  (destruction) as the cap-level operations; the runtime layer
+  abstracts the lifecycle one level up, and `ruin` (the
+  dramatic opposite of "mint") is the runtime-layer term for
+  the wholesale teardown of a plugin's minted capabilities in
+  reverse mint order. The `[shutdown]` log prefix and the
+  `teardown` module name are layer-local terms; the function
+  name carries the duality. Phase 4 introduced it as
+  `shutdown_runtime_plugins`; commit `ee680e3` renamed it to
+  `ruin_runtime_plugins`. Future contributors: do not
+  normalise this name to `teardown_runtime_plugins` or
+  `destroy_runtime_plugins` without an explicit owner
+  decision.
 
 ### Added — Phase 3: Capability-Native Runtime
 
