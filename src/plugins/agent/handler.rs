@@ -404,6 +404,18 @@ async fn run_program(
             return;
         }
 
+        // P0-c (Phase 4 review loop): yield once after
+        // step_start so a sibling task that wants to revoke
+        // (or mutate any other cspace state) gets a chance
+        // to run before we look up the cap. Without this,
+        // a fully synchronous program on a 16-buffer mpsc
+        // would complete all steps before the test task
+        // wakes up to revoke, defeating mid-flight tests.
+        // `yield_now` is a no-op when no other task is
+        // ready (no observable cost in production); it
+        // only adds latency when there's actual contention.
+        tokio::task::yield_now().await;
+
         // 1) Reachable check
         let entry = match reachable.iter().find(|r| r.handle == step.handle) {
             Some(e) => e,
@@ -446,7 +458,32 @@ async fn run_program(
                     continue;
                 }
                 Some(op_str) => {
+                    // P0-a (Phase 4 review loop): if the cap's
+                    // authority publishes a string the parser
+                    // doesn't recognise as a known operation
+                    // bit, the sync `invoke` path returns Err
+                    // (handler.rs:296-301). The streaming path
+                    // used to silently fall back to EXECUTE,
+                    // which is a true auth bypass: any string
+                    // that slipped through the authority table
+                    // would dispatch whatever EXECUTE the cap
+                    // held. Mirror the sync path's semantics:
+                    // emit step_deny with the same reason the
+                    // sync path produces, increment denied,
+                    // continue.
                     requested_op = parse_operation(op_str);
+                    if requested_op.is_none() {
+                        emit_event(&tx, json!({
+                            "event": "step_deny",
+                            "index": i,
+                            "handle": step.handle,
+                            "op": op_name,
+                            "reason": format!("{op_str}: op_str not a known operation bit"),
+                        }))
+                        .await;
+                        stats.denied += 1;
+                        continue;
+                    }
                 }
             }
         }
@@ -455,9 +492,52 @@ async fn run_program(
         //    invoke_op_dyn with the parsed bits so the
         //    kernel-level guard can refuse bits not held.
         //    Otherwise fall back to invoke_dyn (default EXECUTE).
+        //
+        //    Note (P0-a): the streaming path used to fall
+        //    through to `invoke_dyn` whenever `parse_operation`
+        //    returned `None`, which silently downgraded the
+        //    request to EXECUTE. That case is now caught above
+        //    and produces step_deny, so `requested_op` here is
+        //    guaranteed `Some` when `step.op` was set.
+        //
+        //    Phase 4 review loop (panic containment): wrap the
+        //    dispatch in `std::panic::catch_unwind`. A handler
+        //    that panics (unhandled unwrap, divide-by-zero,
+        //    explicit `panic!`) used to tear down the entire
+        //    agent task because the panic unwound through the
+        //    `tokio::spawn` boundary. That violated the P4.4
+        //    thesis property "capability failure is data, not
+        //    crash". `AssertUnwindSafe` opts out of the
+        //    UnwindSafe check across the closure because
+        //    `cap` is `Arc<dyn AnyCapability>` and we don't
+        //    care whether the inner state is unwind-safe —
+        //    we're catching the unwind either way. The
+        //    `Resource::invoke` trait is unchanged; this is
+        //    a runtime concession at the agent's dispatch
+        //    site only.
         let dispatch_result = match requested_op {
-            Some(op) => cap.invoke_op_dyn(op, step.input.clone()),
-            None => cap.invoke_dyn(step.input.clone()),
+            Some(op) => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                cap.invoke_op_dyn(op, step.input.clone())
+            })) {
+                Ok(r) => r,
+                Err(panic_payload) => Err(format!(
+                    "{}.{}: handler panicked: {}",
+                    name,
+                    step.handle,
+                    panic_payload_to_str(&panic_payload)
+                )),
+            },
+            None => match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                cap.invoke_dyn(step.input.clone())
+            })) {
+                Ok(r) => r,
+                Err(panic_payload) => Err(format!(
+                    "{}.{}: handler panicked: {}",
+                    name,
+                    step.handle,
+                    panic_payload_to_str(&panic_payload)
+                )),
+            },
         };
         match dispatch_result {
             Ok(output) => {
@@ -613,4 +693,21 @@ pub fn agent_plugin() -> Arc<dyn Plugin> {
             Ok(())
         },
     )
+}
+
+/// Phase 4 review loop (panic containment): best-effort
+/// formatting of a `catch_unwind` payload. `Box<dyn Any + Send>`
+/// is what `panic::catch_unwind` returns on `Err`; the most
+/// common payloads are `&'static str` (from `panic!("...")`)
+/// and `String` (from `panic!("{}", x)`). Anything else falls
+/// back to a fixed string so we always have a non-empty
+/// reason for `step_fail`.
+fn panic_payload_to_str(p: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = p.downcast_ref::<&'static str>() {
+        (*s).to_string()
+    } else if let Some(s) = p.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "non-string panic payload".to_string()
+    }
 }

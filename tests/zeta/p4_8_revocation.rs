@@ -4,11 +4,11 @@
 //! not crash**. P4.8 verifies this holds when a capability is
 //! revoked *while the agent is mid-program*.
 //!
-//! - **ζ.34**: agent's program has 3 steps: [echo, revoke, echo].
-//!   The test revokes the echo slot between step 1 and step 2
-//!   (in practice: revoke before running the program; verify the
-//!   revocation shows up at step 2). Steps after the revoke that
-//!   target the revoked cap record `step_skip` ("reachable but
+//! - **ζ.34**: agent's program has 3 echo steps. The test
+//!   interleaves: run the agent on a sibling task, drain events
+//!   until the second `step_start` is observed, then revoke
+//!   the echo slot from the main task. The third step targets
+//!   the revoked cap and records `step_skip` ("reachable but
 //!   cap missing in cspace"). The agent's stream continues to
 //!   `done` — no panic.
 //!
@@ -19,9 +19,11 @@
 //!   same capability returns "cap missing".
 //!
 //! - **ζ.36**: agent has two reachable caps [echo, database].
-//!   A program runs [echo, database, echo]. After step 1,
-//!   revoke `echo`. Step 2 (database) succeeds; step 3 (echo)
-//!   records `step_skip`. Final `done` has ok=2, skip=1.
+//!   A program runs [echo, database, echo]. Interleaved: after
+//!   the database `step_start`, revoke echo. Step 1 (echo)
+//!   succeeded earlier; step 2 (database) succeeds; step 3
+//!   (echo, post-revoke) records `step_skip`. Final `done` has
+//!   ok=2, skip=1.
 
 use odyssey::capability::{
     CapabilityChunk, Reachable, Resource,
@@ -39,6 +41,35 @@ async fn drain_events(mut rx: tokio::sync::mpsc::Receiver<CapabilityChunk>) -> V
             Ok(Some(CapabilityChunk::Done)) => break,
             Ok(None) => break,
             Err(_) => panic!("agent stream timed out"),
+        }
+    }
+    events
+}
+
+/// Drain events until `count` `step_start` events have been
+/// observed. Returns the events drained so far (including the
+/// matched step_starts and any events that arrived between
+/// them). Used by ζ.34/ζ.36 to coordinate a mid-flight revoke
+/// from the main test task: open the agent on a sibling task,
+/// drain step_starts until the desired step is about to begin,
+/// then revoke.
+async fn drain_until_step_starts(
+    rx: &mut tokio::sync::mpsc::Receiver<CapabilityChunk>,
+    count: usize,
+) -> Vec<Value> {
+    let mut events: Vec<Value> = Vec::new();
+    let mut seen = 0usize;
+    while seen < count {
+        match tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await {
+            Ok(Some(CapabilityChunk::Item(v))) => {
+                if v["event"] == "step_start" {
+                    seen += 1;
+                }
+                events.push(v);
+            }
+            Ok(Some(CapabilityChunk::Done)) => panic!("stream done before {count} step_starts; saw {events:?}"),
+            Ok(None) => panic!("stream closed before {count} step_starts; saw {events:?}"),
+            Err(_) => panic!("timed out waiting for step_starts; saw {events:?}"),
         }
     }
     events
@@ -125,11 +156,11 @@ fn build_agent(
 }
 
 // =========================================================================
-// ζ.34 — Revoke before step 2 → step_skip on revoked handle
+// ζ.34 — Mid-flight revocation: revoke between step 1 and step 2
 // =========================================================================
 
 #[tokio::test]
-async fn revoke_before_step_makes_subsequent_step_skip() {
+async fn mid_flight_revoke_skips_subsequent_steps_targeting_revoked_cap() {
     let world = build_world();
 
     let agent = build_agent(
@@ -138,40 +169,71 @@ async fn revoke_before_step_makes_subsequent_step_skip() {
         world.space.clone(),
     );
 
-    // Run a 2-step program. Between step 1 and step 2 (which
-    // we coordinate via a separate task), revoke echo.
-    // Pre-revoke echo. Now any step that targets echo will
-    // find the slot removed from the namespace. This proves
-    // the graceful path: lookup_by_name returns None →
-    // run_program emits step_skip with reason "reachable
-    // but cap missing in cspace". The agent's stream
-    // continues to `done` — no panic.
-    world.space.revoke(world.echo_slot);
+    // Open the agent on a sibling task. We can't get the
+    // JoinHandle back from `open()`, but the receiver is what
+    // we need anyway — events flow from the agent task into
+    // this main task, which lets us coordinate the revoke.
+    let mut rx = agent
+        .open(json!({
+            "program": [
+                { "handle": "echo", "input": "a" },
+                { "handle": "echo", "input": "b" },
+                { "handle": "echo", "input": "c" },
+            ]
+        }))
+        .expect("agent.open");
 
-    let rx = agent.open(json!({
-        "program": [
-            { "handle": "echo", "input": "a" },
-            { "handle": "echo", "input": "b" },
-            { "handle": "echo", "input": "c" },
-        ]
-    })).unwrap();
+    // Wait until step 1 has fully run (its step_start and
+    // step_ok) and step 2 has just emitted step_start. At
+    // that moment, the agent is about to dispatch step 2.
+    // This is the narrow window to revoke from the main
+    // task — the agent's run_program is between
+    // emit_event(step_start) and cspace.lookup_by_name.
+    let before_revoke = drain_until_step_starts(&mut rx, 2).await;
+    assert!(
+        before_revoke.iter().any(|e| e["event"] == "step_ok"),
+        "step 1 should have completed before revoke; events: {before_revoke:?}"
+    );
 
-    let events = drain_events(rx).await;
-    let done = events.last().unwrap();
+    // Revoke the echo slot. Step 2 and step 3, which target
+    // "echo", will now find lookup_by_name returning None.
+    let removed = world.space.revoke(world.echo_slot);
+    assert!(removed, "revoke should return true");
 
-    // Every step sees the revoked slot and step_skips.
-    assert_eq!(done["skipped"], 3, "all 3 echo steps must step_skip after revoke; events: {events:?}");
-    assert_eq!(done["ok"], 0);
+    // Drain the rest. Step 2 should step_skip ("reachable
+    // but cap missing in cspace"). Step 3 should also
+    // step_skip for the same reason. Final `done` summarises.
+    let after_revoke = drain_events(rx).await;
+    let mut all = before_revoke;
+    all.extend(after_revoke);
+    let done = all.last().expect("done event present");
+
+    // Step 1 succeeded; step 2 and 3 skipped.
+    assert_eq!(
+        done["ok"], 1,
+        "step 1 (pre-revoke) should step_ok; events: {all:?}"
+    );
+    assert_eq!(
+        done["skipped"], 2,
+        "step 2 and 3 (post-revoke) should step_skip; events: {all:?}"
+    );
+    assert_eq!(done["denied"], 0);
     assert_eq!(done["failed"], 0);
 
     // The skip reason must surface "missing in cspace" —
     // this is what differentiates step_skip from step_deny.
-    let skip = events.iter().find(|e| e["event"] == "step_skip").expect("step_skip present");
-    let reason = skip["reason"].as_str().unwrap();
-    assert!(
-        reason.contains("missing in cspace"),
-        "step_skip reason must surface cap-missing; got: {reason}"
-    );
+    let skip_reasons: Vec<&str> = all
+        .iter()
+        .filter(|e| e["event"] == "step_skip")
+        .filter_map(|e| e["reason"].as_str())
+        .collect();
+    assert_eq!(skip_reasons.len(), 2, "two step_skips; got {skip_reasons:?}");
+    for r in &skip_reasons {
+        assert!(
+            r.contains("missing in cspace"),
+            "step_skip reason must surface cap-missing; got: {r}"
+        );
+    }
 }
 
 // =========================================================================
@@ -252,11 +314,12 @@ async fn revoking_streaming_cap_does_not_crash_inflight_receiver() {
 }
 
 // =========================================================================
-// ζ.36 — Full lifecycle: agent has 2 caps, one revoked, agent falls back
+// ζ.36 — Mid-flight revocation: agent has 2 caps, echo revoked between
+// database step and the post-revoke echo step
 // =========================================================================
 
 #[tokio::test]
-async fn agent_with_two_caps_continues_when_one_revoked() {
+async fn mid_flight_revoke_of_one_cap_leaves_other_steps_untouched() {
     let world = build_world();
 
     let agent = build_agent(
@@ -270,44 +333,211 @@ async fn agent_with_two_caps_continues_when_one_revoked() {
 
     // Program: echo "first", database read "k", echo "second".
     // The 3rd step targets echo AFTER we'll have revoked it.
-    let program = json!({
-        "program": [
-            { "handle": "echo", "input": "first" },
-            { "handle": "database", "op": "read", "input": { "op": "read", "key": "k" } },
-            { "handle": "echo", "input": "second" },
-        ]
-    });
+    let mut rx = agent
+        .open(json!({
+            "program": [
+                { "handle": "echo", "input": "first" },
+                { "handle": "database", "op": "read", "input": { "op": "read", "key": "k" } },
+                { "handle": "echo", "input": "second" },
+            ]
+        }))
+        .expect("agent.open");
 
-    // Pre-revoke echo so the third step's lookup misses.
-    // (We can't easily interleave revoke with the streaming
-    // program for this synchronous fixture, but the
-    // *observable behaviour* is the same: the third step
-    // sees the revoked slot and step_skips.)
-    world.space.revoke(world.echo_slot);
+    // Wait until step 2 (database) has emitted step_start.
+    // That means step 1 (echo) has already completed and
+    // step 2 is about to dispatch. We revoke echo *now*,
+    // so step 2 (database) still succeeds (unaffected) and
+    // step 3 (echo) hits a missing-in-cspace lookup.
+    let before_revoke = drain_until_step_starts(&mut rx, 2).await;
+    // Verify step 1 already produced step_ok before we revoke.
+    assert!(
+        before_revoke.iter().any(|e| e["event"] == "step_ok"),
+        "step 1 (echo) should have completed before revoke; events: {before_revoke:?}"
+    );
 
-    let rx = agent.open(program).unwrap();
-    let events = drain_events(rx).await;
-    let done = events.last().unwrap();
+    let removed = world.space.revoke(world.echo_slot);
+    assert!(removed, "revoke should return true");
 
-    // Step 1 (echo) and step 2 (database) ran BEFORE the
-    // revoke took effect on the program. Hmm — actually the
-    // revoke happened BEFORE the program started, so all
-    // three steps would see the revoked echo.
-    //
-    // For a more interesting proof, we want revoke to happen
-    // AFTER step 2 (database) but BEFORE step 3 (echo). That
-    // requires interleaving. The simpler proof here is:
-    //
-    //   * echo is revoked
-    //   * both echo steps skip
-    //   * database step succeeds
-    //
-    // Which is what we verify below. The interleaved version
-    // is ζ.34 (with a separate revoke task).
-    assert_eq!(done["ok"], 1, "database should step_ok");
-    assert_eq!(done["skipped"], 2, "both echo steps should step_skip");
+    let after_revoke = drain_events(rx).await;
+    let mut all = before_revoke;
+    all.extend(after_revoke);
+    let done = all.last().expect("done event present");
+
+    // Step 1 (echo, pre-revoke) ok; step 2 (database, never
+    // revoked) ok; step 3 (echo, post-revoke) skipped.
+    assert_eq!(
+        done["ok"], 2,
+        "step 1 (pre-revoke echo) and step 2 (database) should step_ok; events: {all:?}"
+    );
+    assert_eq!(
+        done["skipped"], 1,
+        "step 3 (post-revoke echo) should step_skip; events: {all:?}"
+    );
+    assert_eq!(done["denied"], 0);
     assert_eq!(done["failed"], 0);
+
+    // Skip reason must surface the missing cap.
+    let skip = all
+        .iter()
+        .find(|e| e["event"] == "step_skip")
+        .expect("step_skip present");
+    let reason = skip["reason"].as_str().unwrap();
+    assert!(
+        reason.contains("missing in cspace"),
+        "step_skip reason must surface cap-missing; got: {reason}"
+    );
 
     // Suppress the unused-import warning.
     let _ = std::marker::PhantomData::<ProgramStep>;
+}
+
+// =========================================================================
+// Edge test 1 — Double-revoke returns false on the second call
+// =========================================================================
+
+#[tokio::test]
+async fn cspace_double_revoke_returns_false() {
+    use odyssey::capability::cspace::CapabilitySpace;
+    use odyssey::capability::events::GraphEventBus;
+    use odyssey::kernel::factory::CapabilityFactory;
+    use odyssey::kernel::manifest::{
+        CapabilityDecl, IsolationMode, PluginId, PluginManifest,
+    };
+
+    let bus = GraphEventBus::default();
+    let space = CapabilitySpace::with_bus(bus);
+    let factory = CapabilityFactory::new(space.clone());
+
+    let decl = PluginManifest {
+        plugin: PluginId { name: "echo".into(), version: "0.1.0".into() },
+        isolate: IsolationMode::InProc,
+        exposes: vec![CapabilityDecl {
+            name: "echo".into(),
+            in_type: "any".into(),
+            out_type: "any".into(),
+            streaming: false,
+            contract_name: "echo".into(),
+            authority: odyssey::capability::AuthorityContract::empty(),
+            protocol: odyssey::capability::Protocol::empty(),
+        }],
+        requires: vec![],
+        consumes: vec![],
+        host: vec![],
+        resources: Default::default(),
+    };
+    let slot_id = factory.mint::<EchoResource>(
+        odyssey::capability::CapKind::Sync,
+        &decl.exposes[0],
+        &decl.plugin,
+        odyssey::capability::CapabilityBudget::new(5000),
+        echo_handler(),
+    );
+
+    let first = space.revoke(slot_id);
+    assert!(first, "first revoke should succeed");
+
+    let second = space.revoke(slot_id);
+    assert!(!second, "second revoke should return false, not panic");
+
+    // The cspace must not double-publish the Revoked event
+    // for the second call. Subscribe and confirm no further
+    // Revoked events fire for this slot.
+    let mut rx = space.subscribe();
+    let mut revoked_count = 0;
+    while let Ok(res) = tokio::time::timeout(
+        std::time::Duration::from_millis(50),
+        rx.recv(),
+    ).await {
+        match res {
+            Ok(odyssey::capability::events::GraphEvent::Revoked { slot: s, .. }) => {
+                if s == slot_id {
+                    revoked_count += 1;
+                }
+            }
+            Ok(_) => continue,
+            Err(_) => break,
+        }
+    }
+    // subscribe() is called AFTER the first revoke. A
+    // double-revoke from this point must not publish any
+    // additional Revoked events for our slot.
+    assert_eq!(
+        revoked_count, 0,
+        "no Revoked event should fire after the second revoke"
+    );
+}
+
+// =========================================================================
+// Edge test 2 — Revoking after a program completes is a clean no-op
+// =========================================================================
+
+#[tokio::test]
+async fn agent_program_completes_then_revocation_is_noop() {
+    use odyssey::capability::cspace::CapabilitySpace;
+    use odyssey::capability::events::GraphEventBus;
+    use odyssey::kernel::factory::CapabilityFactory;
+    use odyssey::kernel::manifest::{
+        CapabilityDecl, IsolationMode, PluginId, PluginManifest,
+    };
+
+    let bus = GraphEventBus::default();
+    let space = CapabilitySpace::with_bus(bus);
+    let factory = CapabilityFactory::new(space.clone());
+
+    let echo_decl = PluginManifest {
+        plugin: PluginId { name: "echo".into(), version: "0.1.0".into() },
+        isolate: IsolationMode::InProc,
+        exposes: vec![CapabilityDecl {
+            name: "echo".into(),
+            in_type: "any".into(),
+            out_type: "any".into(),
+            streaming: false,
+            contract_name: "echo".into(),
+            authority: odyssey::capability::AuthorityContract::empty(),
+            protocol: odyssey::capability::Protocol::empty(),
+        }],
+        requires: vec![],
+        consumes: vec![],
+        host: vec![],
+        resources: Default::default(),
+    };
+    let echo_slot = factory.mint::<EchoResource>(
+        odyssey::capability::CapKind::Sync,
+        &echo_decl.exposes[0],
+        &echo_decl.plugin,
+        odyssey::capability::CapabilityBudget::new(5000),
+        echo_handler(),
+    );
+
+    let agent = build_agent(
+        "agent",
+        vec![Reachable::new("echo", "echo")],
+        space.clone(),
+    );
+
+    // Run a small program and wait for done.
+    let mut rx = agent
+        .open(json!({
+            "program": [
+                { "handle": "echo", "input": "x" },
+                { "handle": "echo", "input": "y" },
+            ]
+        }))
+        .expect("agent.open");
+    let events = drain_events(rx).await;
+    let done = events.last().expect("done");
+    assert_eq!(done["ok"], 2);
+
+    // Revoke after completion. The receiver is already closed;
+    // revoke should still return true (the slot was populated
+    // when we revoked it) and must not panic.
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        space.revoke(echo_slot)
+    }));
+    let removed = result.expect("revoke after completion must not panic");
+    assert!(removed, "revoke after completion should succeed");
+
+    // A second revoke is the no-op case (Edge test 1 in this file).
+    let removed2 = space.revoke(echo_slot);
+    assert!(!removed2, "second revoke should return false");
 }

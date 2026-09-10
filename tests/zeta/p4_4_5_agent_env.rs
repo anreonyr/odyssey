@@ -524,3 +524,142 @@ async fn agent_streams_program_via_http_bridge() {
     assert_eq!(done["failed"], 0);
     assert_eq!(done["denied"], 0);
 }
+
+// =========================================================================
+// Edge test 5 — Panicking handler records step_fail without crashing
+// =========================================================================
+//
+// Phase 4 review loop: a capability handler that panics inside
+// `invoke` is a real bug in the wild (unhandled unwrap, divide
+// by zero, etc.). The agent's `run_program` must catch the
+// panic and emit `step_fail` rather than letting the panic
+// tear down the agent task. This proves the "capability
+// failure is data, not crash" thesis property under the most
+// hostile input.
+//
+// If this test surfaces a real panic-catch bug, we flag it as
+// P0 and stop. We do not silently add a catch_unwind to the
+// runtime handler dispatch path without parent approval.
+
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// A resource that panics on invoke. (Atomic so the test can
+/// read the flag without borrowing problems.)
+struct PanickingResource {
+    panicked: AtomicBool,
+}
+
+impl Resource for PanickingResource {
+    fn invoke(&self, _input: serde_json::Value) -> Result<serde_json::Value, String> {
+        self.panicked.store(true, Ordering::SeqCst);
+        panic!("panicking handler: simulate handler-side panic")
+    }
+}
+
+#[tokio::test]
+async fn panicking_handler_records_step_fail_not_crash() {
+    use odyssey::capability::cspace::CapabilitySpace;
+    use odyssey::capability::events::GraphEventBus;
+    use odyssey::capability::{CapabilityBudget, Reachable};
+    use odyssey::kernel::factory::CapabilityFactory;
+    use odyssey::kernel::manifest::{
+        CapabilityDecl, IsolationMode, PluginId, PluginManifest,
+    };
+    use odyssey::plugins::agent::AgentResource;
+    use std::sync::Arc;
+
+    let bus = GraphEventBus::default();
+    let space = CapabilitySpace::with_bus(bus);
+    let factory = CapabilityFactory::new(space.clone());
+
+    let decl = PluginManifest {
+        plugin: PluginId { name: "panicker".into(), version: "0.1.0".into() },
+        isolate: IsolationMode::InProc,
+        exposes: vec![CapabilityDecl {
+            name: "panic_cap".into(),
+            in_type: "any".into(),
+            out_type: "any".into(),
+            streaming: false,
+            contract_name: "panic_cap".into(),
+            authority: odyssey::capability::AuthorityContract::empty(),
+            protocol: odyssey::capability::Protocol::empty(),
+        }],
+        requires: vec![],
+        consumes: vec![],
+        host: vec![],
+        resources: Default::default(),
+    };
+    let panicker = Arc::new(PanickingResource { panicked: AtomicBool::new(false) });
+    let _slot = factory.mint::<PanickingResource>(
+        odyssey::capability::CapKind::Sync,
+        &decl.exposes[0],
+        &decl.plugin,
+        CapabilityBudget::new(5000),
+        panicker.clone(),
+    );
+
+    let agent = Arc::new(AgentResource::from_reachable(
+        "agent",
+        vec![Reachable::new("panic", "panic_cap")],
+        space.clone(),
+    ));
+
+    // Build a single-step program.
+    let program = json!({
+        "program": [
+            { "handle": "panic", "input": "trigger" },
+        ]
+    });
+
+    let rx = agent.open(program).expect("open");
+
+    // Drain with a timeout. If the agent task panicked, the
+    // mpsc Sender is dropped, the receiver closes, and
+    // drain_events returns. If the agent caught the panic,
+    // we see step_start, step_fail, and done.
+    let events = drain_events(rx).await;
+
+    // The handler must have been invoked (panic recorded).
+    assert!(
+        panicker.panicked.load(Ordering::SeqCst),
+        "handler should have been invoked"
+    );
+
+    // Outcome A (good): the agent caught the panic and
+    // emitted step_fail + done.
+    let step_fail = events.iter().find(|e| e["event"] == "step_fail");
+    if let Some(fail) = step_fail {
+        let done = events.last().expect("done");
+        assert_eq!(done["failed"], 1, "done should record 1 failure");
+        assert_eq!(done["ok"], 0);
+        // The step_fail reason must surface the handler
+        // panic — operators reading the stream need to know
+        // the failure was a panic, not a normal Err.
+        let reason = fail["error"].as_str().unwrap_or("");
+        assert!(
+            reason.contains("handler panicked"),
+            "step_fail error must contain 'handler panicked'; got: {reason}"
+        );
+        return;
+    }
+
+    // Outcome B (bug): the panic propagated and tore the
+    // agent task down before any event after step_start
+    // could be emitted. drain_events returned because the
+    // channel closed.
+    let step_starts: Vec<&Value> = events
+        .iter()
+        .filter(|e| e["event"] == "step_start")
+        .collect();
+    let dones: Vec<&Value> = events.iter().filter(|e| e["event"] == "done").collect();
+    panic!(
+        "P0 BUG FOUND: panicking handler tore down the agent task. \
+         step_start events = {}, done events = {}, total events = {}. \
+         run_program must catch_unwind on invoke_dyn or the handler \
+         dispatch must surface panics as Err instead of unwinding. \
+         Events: {events:?}",
+        step_starts.len(),
+        dones.len(),
+        events.len()
+    );
+}
