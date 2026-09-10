@@ -373,6 +373,7 @@ fn runtime_manifests_have_contract_names() {
     /// returning `&'static PluginManifest`.
     fn collect_runtime_manifests() -> Vec<PluginManifest> {
         vec![
+            odyssey::plugins::agent::manifest().clone(),
             odyssey::plugins::database::manifest().clone(),
             odyssey::plugins::echo::basic::manifest().clone(),
             odyssey::plugins::echo::chain::manifest().clone(),
@@ -417,8 +418,8 @@ fn runtime_manifests_have_contract_names() {
     manifests.extend(load_toml_manifests().iter().cloned());
 
     assert!(
-        manifests.len() >= 11,
-        "expected ≥11 manifests (7 runtime + 4 test_only), got {}",
+        manifests.len() >= 14,
+        "expected ≥14 manifests (11 runtime + 3 test_only), got {}",
         manifests.len()
     );
 
