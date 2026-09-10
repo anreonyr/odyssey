@@ -3,7 +3,7 @@
 //! Slot-bound pipeline stages observe revocation mid-run via
 //! `PipelineError::SlotRevoked`.
 
-use odyssey::host::pipeline::{Pipeline, SyncStage};
+use odyssey::kernel::pipeline::{Pipeline, SyncStage};
 use serde_json::json;
 
 #[test]
@@ -28,7 +28,7 @@ fn pipeline_fails_after_revoke() {
     // After revoke — SlotRevoked.
     let err = pipeline.run(json!({"k": "v2"})).unwrap_err();
     assert!(
-        matches!(err, odyssey::host::pipeline::PipelineError::SlotRevoked(_)),
+        matches!(err, odyssey::kernel::pipeline::PipelineError::SlotRevoked(_)),
         "expected SlotRevoked, got: {err}"
     );
 }

@@ -36,11 +36,11 @@ fn agent_gated_by_cap_authority() {
         )
         .unwrap();
 
-    let pid = odyssey::host::manifest::PluginId {
+    let pid = odyssey::kernel::manifest::PluginId {
         name: "agent".into(),
         version: "0.1.0".into(),
     };
-    let decl_a = odyssey::host::manifest::CapabilityDecl {
+    let decl_a = odyssey::kernel::manifest::CapabilityDecl {
         name: "agent_a".into(),
         in_type: "object".into(),
         out_type: "object".into(),
@@ -54,7 +54,7 @@ fn agent_gated_by_cap_authority() {
         odyssey::capability::CapabilityBudget::new(crate::common::DEFAULT_TIMEOUT_MS),
         agent_handler("agent_a".to_string(), vec![("counter".to_string(), cap_a)], space.clone()),
     );
-    let decl_b = odyssey::host::manifest::CapabilityDecl {
+    let decl_b = odyssey::kernel::manifest::CapabilityDecl {
         name: "agent_b".into(),
         in_type: "object".into(),
         out_type: "object".into(),

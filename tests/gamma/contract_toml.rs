@@ -3,7 +3,7 @@
 //! The `[exposes.contract]` block in a manifest parses into
 //! `CapabilityContract` and survives into `CapabilityMeta`.
 
-use odyssey::host::manifest::PluginManifest;
+use odyssey::kernel::manifest::PluginManifest;
 
 #[test]
 fn toml_contract_parses_into_decl() {

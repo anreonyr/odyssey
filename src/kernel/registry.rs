@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use crate::host::manifest::{PluginId, PluginManifest};
+use crate::kernel::manifest::{PluginId, PluginManifest};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RegistryError {

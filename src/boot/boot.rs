@@ -26,10 +26,10 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::capability::{CapabilityBudget, CapabilitySpace, CapKind, Slot};
-use crate::host::factory::CapabilityFactory;
-use crate::host::http_bridge::serve;
-use crate::host::manifest::{CapabilityDecl, PluginId, PluginManifest};
-use crate::host::registry::Registry;
+use crate::boot::http_bridge::serve;
+use crate::kernel::factory::CapabilityFactory;
+use crate::kernel::manifest::{CapabilityDecl, PluginId, PluginManifest};
+use crate::kernel::registry::Registry;
 use crate::plugins::{
     echo::{echo_plugin, EchoResource},
     echo_chain::{echo_chain_plugin, EchoChainResource},

@@ -8,7 +8,7 @@ use serde_json::Value;
 #[test]
 fn missing_contract_defaults_to_empty() {
     let (space, factory) = crate::common::boot();
-    let decl = odyssey::host::manifest::CapabilityDecl {
+    let decl = odyssey::kernel::manifest::CapabilityDecl {
         name: "demo".into(),
         in_type: "any".into(),
         out_type: "any".into(),
@@ -18,7 +18,7 @@ fn missing_contract_defaults_to_empty() {
     let slot = factory.mint::<odyssey::plugins::counter::CounterResource>(
         odyssey::capability::CapKind::Sync,
         &decl,
-        &odyssey::host::manifest::PluginId {
+        &odyssey::kernel::manifest::PluginId {
             name: "demo".into(),
             version: "0.1.0".into(),
         },

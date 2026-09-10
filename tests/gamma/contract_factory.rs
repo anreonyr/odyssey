@@ -9,7 +9,7 @@ use serde_json::json;
 #[test]
 fn factory_forwards_decl_contract() {
     let (space, factory) = crate::common::boot();
-    let decl = odyssey::host::manifest::CapabilityDecl {
+    let decl = odyssey::kernel::manifest::CapabilityDecl {
         name: "demo".into(),
         in_type: "object".into(),
         out_type: "object".into(),
@@ -22,7 +22,7 @@ fn factory_forwards_decl_contract() {
     let slot = factory.mint::<odyssey::plugins::counter::CounterResource>(
         odyssey::capability::CapKind::Sync,
         &decl,
-        &odyssey::host::manifest::PluginId {
+        &odyssey::kernel::manifest::PluginId {
             name: "demo".into(),
             version: "0.1.0".into(),
         },

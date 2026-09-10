@@ -22,8 +22,8 @@ use odyssey::capability::{
     Capability, CapabilityBudget, CapabilityContract, CapabilityRights, CapabilitySpace, CapKind,
     OperationRights, QuotaSpec, SlotId,
 };
-use odyssey::host::factory::CapabilityFactory;
-use odyssey::host::manifest::{CapabilityDecl, PluginId, PluginManifest};
+use odyssey::kernel::factory::CapabilityFactory;
+use odyssey::kernel::manifest::{CapabilityDecl, PluginId, PluginManifest};
 use odyssey::plugins::broker::{handler as broker_handler, BrokerResource};
 use odyssey::plugins::counter::CounterResource;
 

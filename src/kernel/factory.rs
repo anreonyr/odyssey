@@ -10,10 +10,10 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::capability::{
-    meta_from_decl, Capability, CapabilityBudget, CapabilityId, CapabilityMeta, CapabilitySpace,
-    CapKind, Resource,
+    Capability, CapabilityBudget, CapabilityId, CapabilityMeta, CapabilitySpace, CapKind, Resource,
 };
-use crate::host::manifest::{CapabilityDecl, PluginId};
+use crate::kernel::manifest::{CapabilityDecl, PluginId};
+use crate::kernel::mint::meta_from_decl;
 
 /// Mints typed capability tokens and installs them into a
 /// `CapabilitySpace`. Cheap to clone; all clones share the same id

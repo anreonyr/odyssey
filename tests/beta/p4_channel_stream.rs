@@ -14,13 +14,13 @@ async fn consumer_stream_yields_messages_then_done() {
     let (space, factory) = crate::common::boot();
     let (chan_handler, cons_handler) =
         odyssey::plugins::channel::channel_pair("p4_stream", 16);
-    let pid = odyssey::host::manifest::PluginId {
+    let pid = odyssey::kernel::manifest::PluginId {
         name: "channel".into(),
         version: "0.1.0".into(),
     };
 
     // Producer (sync).
-    let chan_decl = odyssey::host::manifest::CapabilityDecl {
+    let chan_decl = odyssey::kernel::manifest::CapabilityDecl {
         name: "channel_a".into(),
         in_type: "object".into(),
         out_type: "object".into(),
@@ -37,7 +37,7 @@ async fn consumer_stream_yields_messages_then_done() {
 
     // Consumer (stream). Minted as CapKind::Stream to match the
     // manifest's `streaming = true`.
-    let cons_decl = odyssey::host::manifest::CapabilityDecl {
+    let cons_decl = odyssey::kernel::manifest::CapabilityDecl {
         name: "consumer_a".into(),
         in_type: "null".into(),
         out_type: "object".into(),

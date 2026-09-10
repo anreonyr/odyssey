@@ -11,11 +11,11 @@ fn channel_send_fails_after_revoke() {
     let (space, factory) = crate::common::boot();
     let (chan_handler, _cons_handler) =
         odyssey::plugins::channel::channel_pair("p4", 16);
-    let pid = odyssey::host::manifest::PluginId {
+    let pid = odyssey::kernel::manifest::PluginId {
         name: "channel".into(),
         version: "0.1.0".into(),
     };
-    let chan_decl = odyssey::host::manifest::CapabilityDecl {
+    let chan_decl = odyssey::kernel::manifest::CapabilityDecl {
         name: "channel_a".into(),
         in_type: "object".into(),
         out_type: "object".into(),

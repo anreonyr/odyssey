@@ -11,7 +11,7 @@ use bitflags::bitflags;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::host::manifest::PluginId;
+use crate::kernel::manifest::PluginId;
 
 // ---------------------------------------------------------------------------
 // Kinds

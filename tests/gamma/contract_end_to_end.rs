@@ -4,7 +4,7 @@
 //! `CapabilityMeta` → `slot_meta(slot)`. The contract that lives on
 //! disk is the contract that's observable on the slot.
 
-use odyssey::host::manifest::PluginManifest;
+use odyssey::kernel::manifest::PluginManifest;
 
 #[test]
 fn toml_contract_reaches_capability_meta() {

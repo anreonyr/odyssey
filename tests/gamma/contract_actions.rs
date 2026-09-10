@@ -6,7 +6,7 @@
 //! path as `input_schema` / `output_schema` / `description`.
 
 use odyssey::capability::CapabilityContract;
-use odyssey::host::manifest::PluginManifest;
+use odyssey::kernel::manifest::PluginManifest;
 
 #[test]
 fn counter_publishes_three_actions() {
@@ -33,7 +33,7 @@ fn factory_preserves_action_table() {
     .unwrap();
 
     let space = odyssey::capability::CapabilitySpace::new();
-    let factory = odyssey::host::factory::CapabilityFactory::new(space.clone());
+    let factory = odyssey::kernel::factory::CapabilityFactory::new(space.clone());
     let slot = factory.mint::<odyssey::plugins::counter::CounterResource>(
         odyssey::capability::CapKind::Sync,
         &m.exposes[0],

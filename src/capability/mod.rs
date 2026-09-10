@@ -52,49 +52,6 @@ use CapabilityError as _;
 // Bring `Any` into scope for the helper.
 use std::any::Any;
 
-use crate::host::manifest::{CapabilityDecl, PluginId};
-
-/// Construct a `CapabilityMeta` from a manifest declaration + budget.
-/// Used by the factory at mint time.
-///
-/// Phase 2: namespace defaults to the plugin's FQDN-style name (or the
-/// declaration name if the plugin has no namespace). The contract is
-/// read straight from `decl.contract` — manifests that omit it get an
-/// empty contract via `CapabilityContract::default()`.
-pub fn meta_from_decl(
-    id: CapabilityId,
-    decl: &CapabilityDecl,
-    plugin: &PluginId,
-    budget: &CapabilityBudget,
-) -> CapabilityMeta {
-    CapabilityMeta {
-        id,
-        name: decl.name.clone(),
-        namespace: namespace_for(plugin, &decl.name),
-        plugin: plugin.clone(),
-        in_type: decl.in_type.clone(),
-        out_type: decl.out_type.clone(),
-        streaming: decl.streaming,
-        timeout_ms: budget.timeout_ms,
-        quota: budget.quota_state.spec(),
-        contract: decl.contract.clone(),
-    }
-}
-
-/// Compute the hierarchical namespace a capability belongs to. For a
-/// plugin named `odyssey.model.llama3` exposing `generate`, the
-/// namespace is `odyssey.model.llama3.generate`. For a flat name
-/// like `counter` under plugin `counter`, it stays `counter`.
-pub fn namespace_for(plugin: &PluginId, cap_name: &str) -> String {
-    if plugin.name.is_empty() {
-        cap_name.to_string()
-    } else if cap_name.is_empty() || cap_name == plugin.name {
-        plugin.name.clone()
-    } else {
-        format!("{}.{}", plugin.name, cap_name)
-    }
-}
-
 // `Any` is in scope so the trait-bound on `AnyCapability: Any` resolves
 // correctly in this module's re-exports.
 #[allow(unused_imports)]
