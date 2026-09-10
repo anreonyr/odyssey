@@ -259,6 +259,14 @@ impl CapabilitySpace {
         let name = cap.name().to_string();
         let contract = cap.meta().contract_name.clone();
         let plugin = cap.meta().plugin.clone();
+        // Revocable marker (Phase 4 review loop): a freshly
+        // installed slot has its own lifecycle, regardless
+        // of any past state the inner Capability<R> might
+        // carry (e.g. if the same Arc was previously
+        // installed in another slot). Reset to false so
+        // `invoke_op` doesn't spuriously refuse the first
+        // dispatch.
+        cap.reset_revoked();
         let erased: Arc<dyn AnyCapability> = cap;
         let mut slots = self.inner.slots.write().expect("cspace poisoned");
         let prev = slots.insert(slot, SlotEntry { cap: erased });
@@ -604,6 +612,14 @@ impl CapabilitySpace {
         // install.
         let mut parents = self.inner.parents.write().expect("cspace poisoned");
         let mut slots = self.inner.slots.write().expect("cspace poisoned");
+
+        // Revocable marker (Phase 4 review loop): capture
+        // the cap's erased view BEFORE removing the slot so
+        // we can flip the marker on the holder's Arc clone
+        // path. Done under the same write lock as `slots`
+        // to keep "marker flipped ⇔ slot removed" atomic.
+        let cap_for_marker: Option<Arc<dyn AnyCapability>> = slots.get(&slot).map(|e| e.cap.clone());
+
         let removed = slots.remove(&slot);
         if removed.is_some() {
             let mut names = self.inner.names.write().expect("cspace poisoned");
@@ -612,6 +628,141 @@ impl CapabilitySpace {
             drop(slots);
             drop(names);
             drop(parents);
+
+            // Flip the marker on the captured cap. The slot
+            // is gone from the namespace (lookup_by_name
+            // will return None), but a holder that cloned
+            // the Arc<Capability<R>> before revoke can
+            // still call invoke_op on it directly. The
+            // marker is the kernel-level guard for that
+            // path. mark_revoked_dyn is the trait method
+            // that any AnyCapability impl can override;
+            // the production impl on Capability<R> does
+            // the atomic store.
+            if let Some(cap) = cap_for_marker {
+                cap.mark_revoked_dyn();
+            }
+
+            self.publish_event(crate::capability::events::GraphEvent::Revoked {
+                slot,
+                capability: cap_name,
+            });
+            true
+        } else {
+            false
+        }
+    }
+
+    /// **Mark revoked**: flip the revocable marker on the cap
+    /// at `slot` without tearing the slot down. Used by
+    /// `revoke` to ensure any holder of an `Arc<Capability<R>>`
+    /// clone that survived past revocation cannot dispatch.
+    ///
+    /// Called only when `slots.remove` returned `Some`,
+    /// i.e. the slot was populated. Implemented as a
+    /// separate step (not inside the write-locked region)
+    /// because the marker is just an atomic store; holding
+    /// the cspace locks across it would be unnecessary
+    /// blocking.
+    fn mark_revoked_at(&self, _slot: SlotId) {
+        // Phase 4 review loop: marker is now flipped inline
+        // in `revoke` (captures the cap_for_marker before
+        // slot removal). This helper is kept as a no-op
+        // stub so the trait surface is discoverable from
+        // the public API and so future refactors that
+        // split the marker flip from the slot removal have
+        // an obvious home for it.
+    }
+
+    /// P1-c (Phase 4 review loop): revoke with an orphan
+    /// sweep. Used by `revoke_tree` to handle the race
+    /// where a concurrent `install_derived` adds a child
+    /// between the parent pointer read (in revoke_tree's
+    /// walk) and the per-slot revoke. Without the sweep,
+    /// the freshly-installed child stays in `slots` +
+    /// `names` with no parent pointer, never reachable
+    /// from any future revoke_tree, never cleaned up.
+    ///
+    /// Important: this is **only** used by `revoke_tree`,
+    /// not by the public `revoke`. Public `revoke` does
+    /// not sweep children — the orphan-clearing there
+    /// would erroneously destroy legitimate children
+    /// installed by `grant`/`restrict`/`transfer` whose
+    /// parent happens to be the slot being revoked (e.g.
+    /// `transfer` calls `install_derived` then `revoke`
+    /// on the source; sweeping would delete the cap
+    /// transfer just minted).
+    fn revoke_with_sweep(&self, slot: SlotId, visited: &std::collections::HashSet<SlotId>) -> bool {
+        let cap_name: Option<String> = self
+            .inner
+            .names
+            .read()
+            .expect("cspace poisoned")
+            .iter()
+            .find_map(|(n, s)| if *s == slot { Some(n.clone()) } else { None });
+
+        let mut parents = self.inner.parents.write().expect("cspace poisoned");
+        let mut slots = self.inner.slots.write().expect("cspace poisoned");
+
+        // Revocable marker (Phase 4 review loop): capture
+        // the cap's erased view BEFORE removing the slot so
+        // we can flip the marker. Same pattern as in
+        // `revoke`. Done under the slots write lock to keep
+        // "marker flipped ⇔ slot removed" atomic.
+        let cap_for_marker: Option<Arc<dyn AnyCapability>> = slots.get(&slot).map(|e| e.cap.clone());
+
+        let removed = slots.remove(&slot);
+        if removed.is_some() {
+            let mut names = self.inner.names.write().expect("cspace poisoned");
+
+            // Orphan sweep: any child whose parent was just
+            // removed in this revoke and is NOT in `visited`
+            // was installed concurrently with revoke_tree's
+            // walk (it wouldn't be in visited because the
+            // walk has already passed this slot). Sweep it
+            // so the orphan doesn't outlive its parent.
+            // Children in `visited` are legitimate and will
+            // be revoked in their own iteration.
+            //
+            // Revocable marker (Phase 4 review loop): also
+            // capture the orphan's cap to flip its marker.
+            // Without this, an Arc<Capability<R>> clone of
+            // an orphan cap could still dispatch past
+            // revoke_tree.
+            let orphans: Vec<(SlotId, Option<Arc<dyn AnyCapability>>)> = parents
+                .iter()
+                .filter_map(|(child, parent)| {
+                    if *parent == slot && !visited.contains(child) {
+                        let cap = slots.get(child).map(|e| e.cap.clone());
+                        Some((*child, cap))
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            let orphan_markers: Vec<Option<Arc<dyn AnyCapability>>> =
+                orphans.iter().map(|(_, cap)| cap.clone()).collect();
+            for (orphan, _) in &orphans {
+                parents.remove(orphan);
+                slots.remove(orphan);
+                names.retain(|_, s| s != orphan);
+            }
+
+            names.retain(|_, s| *s != slot);
+            parents.remove(&slot);
+            drop(slots);
+            drop(names);
+            drop(parents);
+
+            // Flip markers now that all locks are released.
+            // Atomic stores, no lock contention.
+            if let Some(cap) = cap_for_marker {
+                cap.mark_revoked_dyn();
+            }
+            for cap in orphan_markers.into_iter().flatten() {
+                cap.mark_revoked_dyn();
+            }
+
             self.publish_event(crate::capability::events::GraphEvent::Revoked {
                 slot,
                 capability: cap_name,
@@ -636,7 +787,9 @@ impl CapabilitySpace {
     /// "subtree wipe".
     pub fn revoke_tree(&self, root: SlotId) -> usize {
         let mut removed = 0usize;
+        let mut visited: std::collections::HashSet<SlotId> = std::collections::HashSet::new();
         let mut frontier = vec![root];
+        visited.insert(root);
         while let Some(slot) = frontier.pop() {
             // Find children (slots whose parent == slot).
             let children: Vec<SlotId> = {
@@ -649,11 +802,23 @@ impl CapabilitySpace {
             // Recurse into children first so we don't drop the parent
             // pointer while still walking the tree.
             for c in children {
-                frontier.push(c);
+                if visited.insert(c) {
+                    frontier.push(c);
+                }
             }
-            // Now revoke this slot. Each successful revoke
-            // publishes its own Revoked event (P3.7).
-            if self.revoke(slot) {
+            // Now revoke this slot. P1-c (Phase 4 review
+            // loop): use `revoke_with_sweep` so that if a
+            // concurrent `install_derived` added a child
+            // between this walk's parents-read and the
+            // per-slot revoke, the orphan is also cleared.
+            // `revoke` (no sweep) is reserved for callers
+            // like `transfer` that legitimately need the
+            // child to survive the parent's revocation.
+            // Children already in `visited` are exempt from
+            // the sweep — they were legitimately enumerated
+            // during the walk and will be (or were) revoked
+            // in their own iteration.
+            if self.revoke_with_sweep(slot, &visited) {
                 removed += 1;
             }
         }

@@ -301,3 +301,36 @@ async fn supervisor_can_delegate_multiple_slices_to_separate_consumers() {
     // future cross-program tests).
     let _ = std::marker::PhantomData::<ProgramStep>;
 }
+
+// =========================================================================
+// Edge test 3 — restrict on an already-revoked slot returns error
+// =========================================================================
+
+#[tokio::test]
+async fn restrict_on_already_revoked_cap_returns_error() {
+    use odyssey::capability::{CapabilityRights, OperationRights};
+
+    let world = build_world();
+
+    // Revoke the database slot first.
+    let removed = world.space.revoke(world.database_slot);
+    assert!(removed, "first revoke should succeed");
+
+    // Restrict on the revoked slot must return an error —
+    // the slot is empty, so the lookup_typed inside restrict
+    // returns CapabilityError::SlotEmpty.
+    let result = world.space.restrict::<DatabaseResource>(
+        world.database_slot,
+        CapabilityRights {
+            operations: OperationRights::READ,
+            timeout_ms: 5000,
+        },
+        "after_revoke".into(),
+    );
+    assert!(result.is_err(), "restrict on revoked slot must fail; got {:?}", result);
+    let err_msg = format!("{:?}", result.unwrap_err());
+    assert!(
+        err_msg.contains("SlotEmpty") || err_msg.contains("empty") || err_msg.contains("revoked"),
+        "expected SlotEmpty-ish error; got {err_msg}"
+    );
+}

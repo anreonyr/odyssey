@@ -32,6 +32,25 @@ pub struct Capability<R: Resource> {
     /// at mint time and clamps it at every `restrict`.
     operations: OperationRights,
     kind: CapKind,
+    /// Revocable marker (Phase 4 P4.8 review loop). When set,
+    /// `invoke` and `invoke_op` refuse to dispatch — even if
+    /// some holder kept an `Arc<Capability<R>>` clone past
+    /// the cspace-level revocation. The kernel (`cspace::revoke`)
+    /// flips this to `true` just before tearing down the slot;
+    /// `cspace::install` resets it to `false` because a freshly
+    /// installed slot has its own lifecycle.
+    ///
+    /// Wrapped in `Arc` so that every clone of the same
+    /// `Capability<R>` shares the same atomic — the broken
+    /// typed-cap path is fixed by this single change
+    /// (`Capability::clone` does `Arc::clone(&self.revoked)`).
+    ///
+    /// This is best-effort: if a holder clones the `Arc<R>`
+    /// handler directly (bypassing the cap wrapper), they can
+    /// still call into the resource. The marker is the
+    /// kernel-level guard for the typed-cap path, which is
+    /// the only path the agent uses.
+    revoked: std::sync::Arc<std::sync::atomic::AtomicBool>,
 }
 
 impl<R: Resource> Capability<R> {
@@ -47,7 +66,33 @@ impl<R: Resource> Capability<R> {
             budget,
             operations: OperationRights::ALL,
             kind,
+            revoked: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
+    }
+
+    /// Reset the revoked flag. Called by `cspace::install`
+    /// when a freshly-allocated slot gets a new cap — the
+    /// cap's own lifecycle begins at install time, regardless
+    /// of any past state the same `Arc<R>` handler might have
+    /// shared. Only accessible from the kernel.
+    pub(crate) fn reset_revoked(&self) {
+        self.revoked.store(false, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Mark the cap as revoked. Called by `cspace::revoke`
+    /// just before the slot is torn down. The Arc is kept
+    /// alive in case any holder wants to observe the
+    /// post-revoke state; further invocations return Err.
+    pub(crate) fn mark_revoked(&self) {
+        self.revoked.store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    /// True if the cap has been revoked. Primarily for tests
+    /// and diagnostics — `invoke` already enforces this
+    /// internally.
+    #[allow(dead_code)]
+    pub fn is_revoked(&self) -> bool {
+        self.revoked.load(std::sync::atomic::Ordering::Acquire)
     }
 
     pub fn name(&self) -> &str {
@@ -90,7 +135,31 @@ impl<R: Resource> Capability<R> {
     /// `CapabilityBudget` promises: a derived cap cannot mint extra
     /// calls beyond the parent's bucket. To get per-leaf accounting,
     /// mint a fresh capability via `CapabilityFactory::mint`.
-    pub fn derive(&self, rights: CapabilityRights, new_id: CapabilityId) -> Self {
+    pub(crate) fn derive(&self, rights: CapabilityRights, new_id: CapabilityId) -> Self {
+        // P0-b (Phase 4 review loop): the doc-comment promises
+        // "The CSpace is responsible for verifying the requested
+        // rights are a subset of `self.operations` *before* calling
+        // derive; derive itself just records what the CSpace asked
+        // for." That contract is fine when the only caller is the
+        // CSpace, but `derive` is `pub` (not `pub(crate)`) and the
+        // capability kernel is reachable from anywhere with a
+        // `CapabilitySpace`. A plugin with a `Capability<R>` in hand
+        // could mint a full-rights child of a READ-only parent,
+        // amplifying authority at the type level and bypassing the
+        // attenuation invariant the CSpace is supposed to enforce.
+        //
+        // The fix: a `debug_assert!` at the kernel. Release builds
+        // stay zero-cost; debug builds (which is what `cargo test`
+        // runs) catch the bug immediately. All current CSpace
+        // callers (`grant`, `transfer`, `restrict`) already verify
+        // `held.contains(&rights)` before calling `derive`, so
+        // this assert is a no-op for the happy path. New external
+        // callers that forget the precondition panic in debug.
+        debug_assert!(
+            self.operations.contains(rights.operations),
+            "Capability::derive would amplify rights: held={:?}, requested={:?}",
+            self.operations, rights.operations
+        );
         let new_budget = Arc::new(super::types::CapabilityBudget::share_quota_with(
             &self.budget,
             rights.timeout_ms,
@@ -104,6 +173,9 @@ impl<R: Resource> Capability<R> {
             budget: new_budget,
             operations: rights.operations,
             kind: self.kind,
+            // Fresh marker — a derived slot has its own lifecycle,
+            // independent of the parent slot's revocation state.
+            revoked: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         }
     }
 }
@@ -116,6 +188,15 @@ impl<R: Resource> Clone for Capability<R> {
             budget: self.budget.clone(),
             operations: self.operations,
             kind: self.kind,
+            // Revocable marker (Phase 4 review loop): share
+            // the Arc so the typed-cap path (`Slot::capability()`
+            // → `Arc::new(concrete.clone())`) actually sees
+            // the `cspace::revoke` flip. The kernel keeps only
+            // one canonical `Capability<R>` per slot, but
+            // every clone must share the flag, otherwise
+            // cached typed `Arc<Capability<R>>`s survive
+            // revocation invisibly.
+            revoked: std::sync::Arc::clone(&self.revoked),
         }
     }
 }
@@ -149,6 +230,15 @@ impl<R: Resource> Capability<R> {
         requested: OperationRights,
         input: Value,
     ) -> Result<Value, String> {
+        // Revocable marker (Phase 4 review loop): the kernel
+        // sets this in `cspace::revoke` before tearing down
+        // the slot. Even if a holder kept an `Arc<Capability<R>>`
+        // clone past revocation (e.g. an agent that captured
+        // the cap before the parent slot was revoked), the
+        // kernel-level guard refuses to dispatch.
+        if self.revoked.load(std::sync::atomic::Ordering::Acquire) {
+            return Err(format!("{}: capability revoked", self.meta.name));
+        }
         if self.kind != CapKind::Sync {
             return Err(format!("{}: not a sync capability", self.meta.name));
         }
@@ -226,6 +316,13 @@ pub trait AnyCapability: Any + Send + Sync {
     ) -> Result<Value, String>;
     fn open_dyn(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String>;
     fn as_any(&self) -> &dyn Any;
+    /// Revocable marker (Phase 4 review loop): flip the
+    /// `revoked` flag so future `invoke`/`invoke_op` calls
+    /// return Err. Default implementation is a no-op so
+    /// any future `AnyCapability` impl can opt out; the
+    /// production impl on `Capability<R>` does the actual
+    /// atomic store.
+    fn mark_revoked_dyn(&self) {}
 }
 
 impl<R: Resource> AnyCapability for Capability<R> {
@@ -253,5 +350,8 @@ impl<R: Resource> AnyCapability for Capability<R> {
     }
     fn as_any(&self) -> &dyn Any {
         self
+    }
+    fn mark_revoked_dyn(&self) {
+        self.mark_revoked();
     }
 }
