@@ -419,22 +419,27 @@ impl CapabilitySpace {
     ) -> SlotId {
         let new_slot = self.allocate();
         let cap: Arc<dyn AnyCapability> = Arc::new(new_cap);
+        // Canonical lock order across the whole cspace is
+        // parents → slots → names (see `revoke` for the
+        // matching write path; `install` only takes
+        // slots → names and so doesn't conflict). Acquiring
+        // parents write FIRST makes the entire install
+        // atomic from `revoke_tree(parent)`'s perspective,
+        // which acquires parents read to discover children.
+        // Without this, a concurrent revoke_tree could read
+        // an empty parents set, revoke the parent, and leave
+        // the freshly-installed slot orphaned in slots+names
+        // with no parent pointer to clean it up.
+        let mut parents = self.inner.parents.write().expect("cspace poisoned");
         let mut slots = self.inner.slots.write().expect("cspace poisoned");
-        let prev = slots.insert(new_slot, SlotEntry { cap });
         let mut names = self.inner.names.write().expect("cspace poisoned");
+        let prev = slots.insert(new_slot, SlotEntry { cap });
         if let Some(prev_entry) = prev {
             names.retain(|_, s| *s != new_slot);
             drop(prev_entry);
         }
         names.insert(new_name, new_slot);
-        drop(names);
-        drop(slots);
-        // Record parent so `revoke_tree` can sever the subtree.
-        self.inner
-            .parents
-            .write()
-            .expect("cspace poisoned")
-            .insert(new_slot, parent);
+        parents.insert(new_slot, parent);
         new_slot
     }
 
@@ -578,7 +583,10 @@ impl CapabilitySpace {
     /// can log "what died" without re-reading the cspace.
     pub fn revoke(&self, slot: SlotId) -> bool {
         // Phase 3 P3.7 — capture the registered name before
-        // clearing, so the Revoked event can carry it.
+        // clearing, so the Revoked event can carry it. This
+        // is a transient read released before any writes; it
+        // does not participate in the canonical write order
+        // (parents → slots → names, shared with `install_derived`).
         let cap_name: Option<String> = self
             .inner
             .names
@@ -587,12 +595,19 @@ impl CapabilitySpace {
             .iter()
             .find_map(|(n, s)| if *s == slot { Some(n.clone()) } else { None });
 
+        // Canonical lock order across the whole cspace is
+        // parents → slots → names (see `install_derived`).
+        // Taking parents first lets a concurrent
+        // `revoke_tree` of this slot block on parents.read
+        // and see no children until the slot is fully torn
+        // down — symmetric with install_derived's atomic
+        // install.
+        let mut parents = self.inner.parents.write().expect("cspace poisoned");
         let mut slots = self.inner.slots.write().expect("cspace poisoned");
         let removed = slots.remove(&slot);
         if removed.is_some() {
             let mut names = self.inner.names.write().expect("cspace poisoned");
             names.retain(|_, s| *s != slot);
-            let mut parents = self.inner.parents.write().expect("cspace poisoned");
             parents.remove(&slot);
             drop(slots);
             drop(names);

@@ -92,38 +92,41 @@ fn activator_for(name: &str) -> Option<Arc<dyn cordis::Plugin>> {
     }
 }
 
-/// Debug-only consistency check: every name in
-/// [`RUNTIME_PLUGINS`] must have an arm in [`activator_for`].
-/// The same is true for [`mint_one_plugin`], but we can't
-/// verify that statically — the closure types differ per
-/// plugin (each one binds a different `Resource` type).
-/// Instead, [`mint_one_plugin`] returns a loud `Err` for any
-/// name it doesn't recognise (the fallthrough arm), and
-/// [`mint_runtime_plugins`] checks that every
-/// `RUNTIME_PLUGINS` entry has a loaded manifest. The two
-/// mechanisms together cover all four
+/// Consistency check: every name in [`RUNTIME_PLUGINS`] must
+/// have an arm in [`activator_for`]. The same is true for
+/// [`mint_one_plugin`], but we can't verify that statically —
+/// the closure types differ per plugin (each one binds a
+/// different `Resource` type). Instead, [`mint_one_plugin`]
+/// returns a loud `Err` for any name it doesn't recognise (the
+/// fallthrough arm), and [`mint_runtime_plugins`] checks that
+/// every `RUNTIME_PLUGINS` entry has a loaded manifest. The
+/// three mechanisms together cover all four
 /// "I added it here but forgot there" cases:
 ///
 /// |                                | activator_for | mint_one_plugin | manifest loaded |
 /// |--------------------------------|---------------|-----------------|-----------------|
-/// | `dispatch_consistency`         | debug_assert  | (runtime error) | (config check)  |
+/// | `dispatch_consistency`         | assert        | (runtime error) | (config check)  |
 /// | `mint_runtime_plugins` config  | n/a           | (runtime error) | error           |
 /// | `mint_one_plugin` fallthrough  | n/a           | error           | n/a             |
+///
+/// The `assert` is unconditional (runs in both debug and
+/// release builds) because the activation loop's
+/// `let Some(plugin) = activator_for(&plugin_id.name) else { continue; };`
+/// would silently skip a missing runtime-plugin arm, leaving
+/// minted slots un-bound to any cordis handler. Test-only
+/// plugins in `plan.mint_order` still hit the `continue`
+/// path (which is documented behaviour).
 ///
 /// So the rule is simple: if you add a name to
 /// `RUNTIME_PLUGINS`, add arms in both `activator_for` and
 /// `mint_one_plugin`, and include the plugin's manifest in
 /// `load_manifests()`.
-#[allow(dead_code)]
 fn dispatch_consistency() {
-    #[cfg(debug_assertions)]
-    {
-        for name in RUNTIME_PLUGINS {
-            debug_assert!(
-                activator_for(name).is_some(),
-                "RUNTIME_PLUGINS lists `{name}` but `activator_for` returns None"
-            );
-        }
+    for name in RUNTIME_PLUGINS {
+        assert!(
+            activator_for(name).is_some(),
+            "RUNTIME_PLUGINS lists `{name}` but `activator_for` returns None"
+        );
     }
 }
 
