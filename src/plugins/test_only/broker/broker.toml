@@ -20,11 +20,5 @@ out_type      = "object"
 streaming     = false
 contract_name = "broker"
 
-# Broker depends on the counter plugin.
-[[consumes]]
-plugin     = "counter"
-version    = "^0.1"
-capability = "counter"
-
 [resources]
 timeout_ms = 5000

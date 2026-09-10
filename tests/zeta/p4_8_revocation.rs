@@ -107,7 +107,7 @@ fn build_world() -> World {
             protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
-        consumes: vec![],
+
         host: vec![],
         resources: Default::default(),
     };
@@ -133,7 +133,7 @@ fn build_world() -> World {
             protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
-        consumes: vec![],
+
         host: vec![],
         resources: Default::default(),
     };
@@ -265,7 +265,7 @@ async fn revoking_streaming_cap_does_not_crash_inflight_receiver() {
             protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
-        consumes: vec![],
+
         host: vec![],
         resources: Default::default(),
     };
@@ -418,7 +418,7 @@ async fn cspace_double_revoke_returns_false() {
             protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
-        consumes: vec![],
+
         host: vec![],
         resources: Default::default(),
     };
@@ -492,7 +492,7 @@ async fn agent_program_completes_then_revocation_is_noop() {
             protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
-        consumes: vec![],
+
         host: vec![],
         resources: Default::default(),
     };

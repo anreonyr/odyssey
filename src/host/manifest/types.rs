@@ -29,19 +29,8 @@ pub struct PluginManifest {
     /// what contract it needs, not which plugin provides it; the
     /// resolver decides. Empty `requires` means the plugin is a
     /// root provider (or has no capability dependencies).
-    ///
-    /// This is the **preferred** way to declare dependencies going
-    /// forward. The legacy `consumes` field (plugin-version-keyed)
-    /// is kept for backward compatibility but new plugins should
-    /// use `requires`.
     #[serde(default)]
     pub requires: Vec<CapabilityRequirement>,
-    /// Legacy plugin-version-keyed dependency declaration.
-    /// Deprecated as of Phase 3 P3.1; use `requires` instead.
-    /// Kept so existing manifests continue to parse until the
-    /// next major version removes the field.
-    #[serde(default)]
-    pub consumes: Vec<DependencyRef>,
     #[serde(default)]
     pub host: Vec<HostServiceRef>,
     #[serde(default)]

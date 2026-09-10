@@ -1,9 +1,9 @@
 //! Manifest for the echo_chain plugin — Phase 3 single-source-of-truth.
 //!
-//! Note the `.consumes(...)` line: it preserves the legacy
-//! `[[consumes]]` block that the boot validation log prints.
-//! The resolver walks `.requires(...)`; the consumes is
-//! informational only.
+//! Phase 6: the legacy `.consumes(...)` call was removed; the
+//! resolver walks `.requires(...)` exclusively. Chain declares
+//! its echo dependency via `requires` so the resolver binds it
+//! at boot.
 
 use std::sync::OnceLock;
 
@@ -16,7 +16,6 @@ pub fn manifest() -> &'static PluginManifest {
     MANIFEST.get_or_init(|| {
         ManifestBuilder::new("echo-chain", "echo_chain", "echo_chain")
             .requires("echo", "echo")
-            .consumes("echo", "^0.1", "echo")
             .host("dispatcher")
             .host("registry")
             .timeout_ms(200)

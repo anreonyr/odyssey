@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Breaking — Phase 6: Drop legacy `consumes`
+
+- **Manifest `[[consumes]]` field removed.** The legacy
+  plugin-version-keyed `consumes` block is gone from
+  `PluginManifest`; the resolver walks `[[requires]]`
+  exclusively. Migration: any `[[consumes]]` block in a
+  manifest must be moved to `[[requires]]` (the contract
+  name, not the plugin name, is the binding key). The only
+  remaining call site, `echo_chain`, now declares its echo
+  dependency via `.requires("echo", "echo")` (the legacy
+  `.consumes(...)` setter is removed from `ManifestBuilder`).
+- **`ManifestBuilder::consumes(...)` removed.** Use
+  `.requires(handle, contract)` instead.
+- **`log_legacy_consumes` removed from `runtime::lifecycle`.**
+  Phase 5 of the boot orchestrator is now a no-op marker;
+  the 8-phase numbering is preserved for diff stability.
+
 ### Added — Phase 3: Capability-Native Runtime
 
 Phase 3 proves the entire runtime can be built on Capability.

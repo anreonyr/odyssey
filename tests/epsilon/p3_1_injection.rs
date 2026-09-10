@@ -112,7 +112,6 @@ fn manifest(
         isolate: IsolationMode::InProc,
         exposes: exp,
         requires: req,
-        consumes: Vec::new(),
         host: Vec::new(),
         resources: ResourceHints::default(),
     }

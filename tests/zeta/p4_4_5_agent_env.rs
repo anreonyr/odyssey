@@ -89,7 +89,7 @@ fn fixture_two_caps() -> (
             protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
-        consumes: vec![],
+
         host: vec![],
         resources: Default::default(),
     };
@@ -120,7 +120,7 @@ fn fixture_two_caps() -> (
             protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
-        consumes: vec![],
+
         host: vec![],
         resources: Default::default(),
     };
@@ -163,7 +163,7 @@ fn agent_consumer_manifest() -> PluginManifest {
             CapabilityRequirement { name: "echo".into(), contract: "echo".into() },
             CapabilityRequirement { name: "database".into(), contract: "database".into() },
         ],
-        consumes: vec![],
+
         host: vec![],
         resources: Default::default(),
     }
@@ -585,7 +585,7 @@ async fn panicking_handler_records_step_fail_not_crash() {
             protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
-        consumes: vec![],
+
         host: vec![],
         resources: Default::default(),
     };

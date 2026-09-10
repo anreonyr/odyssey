@@ -116,7 +116,6 @@ mod tests {
                     contract: c.into(),
                 })
                 .collect(),
-            consumes: vec![],
             host: vec![],
             resources: Default::default(),
         }

@@ -59,7 +59,7 @@ fn build_world() -> (CapabilitySpace, CapabilityFactory, odyssey::kernel::SlotId
             protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
-        consumes: vec![],
+
         host: vec![],
         resources: Default::default(),
     };

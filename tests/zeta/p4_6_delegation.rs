@@ -72,7 +72,7 @@ fn build_world() -> World {
             protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
-        consumes: vec![],
+
         host: vec![],
         resources: Default::default(),
     };
@@ -101,7 +101,7 @@ fn build_world() -> World {
             protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
-        consumes: vec![],
+
         host: vec![],
         resources: Default::default(),
     };

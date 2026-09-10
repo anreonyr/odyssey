@@ -12,7 +12,6 @@
 //! | `out_type`     | `"any"`               |
 //! | `streaming`    | `false`               |
 //! | `requires`     | `[]`                  |
-//! | `consumes`     | `[]`                  |
 //! | `host`         | `[]`                  |
 //! | `timeout_ms`   | `None` → host default |
 //!
@@ -81,7 +80,6 @@ pub struct ManifestBuilder {
     cap_out_type: String,
     cap_streaming: bool,
     requires: Vec<CapabilityRequirement>,
-    consumes: Vec<crate::host::manifest::DependencyRef>,
     host: Vec<HostServiceRef>,
     timeout_ms: Option<u32>,
     actions: Vec<(String, String)>,
@@ -106,7 +104,6 @@ impl ManifestBuilder {
             cap_out_type: "any".into(),
             cap_streaming: false,
             requires: Vec::new(),
-            consumes: Vec::new(),
             host: Vec::new(),
             timeout_ms: None,
             actions: Vec::new(),
@@ -148,27 +145,6 @@ impl ManifestBuilder {
         self.requires.push(CapabilityRequirement {
             name: handle.into(),
             contract: contract.into(),
-        });
-        self
-    }
-
-    /// Append a legacy `[[consumes]]` entry. Plugin-version-keyed
-    /// dependency kept around so existing manifests can still
-    /// describe their old-style dependencies for the audit
-    /// log printed by boot's Phase 5. The resolver does not
-    /// walk `consumes` — new plugins should prefer
-    /// `.requires()` (capability-keyed) so the dependency
-    /// graph picks them up.
-    pub fn consumes(
-        mut self,
-        plugin: impl Into<String>,
-        version: impl Into<String>,
-        capability: impl Into<String>,
-    ) -> Self {
-        self.consumes.push(crate::host::manifest::DependencyRef {
-            plugin: plugin.into(),
-            version: version.into(),
-            capability: capability.into(),
         });
         self
     }
@@ -246,7 +222,6 @@ impl ManifestBuilder {
             cap_out_type,
             cap_streaming,
             requires,
-            consumes,
             host,
             timeout_ms,
             actions,
@@ -269,7 +244,6 @@ impl ManifestBuilder {
                 protocol,
             }],
             requires,
-            consumes,
             host,
             resources: ResourceHints {
                 timeout_ms,

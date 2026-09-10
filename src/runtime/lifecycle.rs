@@ -1,4 +1,4 @@
-//! 7-phase boot orchestrator — load manifests, mint
+//! 8-phase boot orchestrator — load manifests, mint
 //! runtime plugins, activate, bring up the HTTP bridge,
 //! wait for ctrl-C, tear down.
 //!
@@ -9,7 +9,7 @@
 //!   Phase 2  Provide core services
 //!   Phase 3  Resolve capability graph → crate::host::resolver
 //!   Phase 4  Mint runtime plugins → crate::runtime::mint
-//!   Phase 5  Log legacy `consumes` (informational)
+//!   Phase 5  (reserved — was legacy `consumes` log; now no-op)
 //!   Phase 6  Activate runtime plugins → crate::runtime::activate
 //!   Phase 7  HTTP bridge + wait → crate::runtime::http_bridge
 //!   Phase 8  Teardown in reverse mint order → crate::runtime::teardown
@@ -53,8 +53,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    // Phase 5: legacy `consumes` log (informational only).
-    log_legacy_consumes(&manifests);
+    // Phase 5: reserved — was legacy `consumes` log; the
+    // `consumes` field is gone in Phase 6, so this phase is a
+    // no-op marker (preserved so the 8-phase numbering stays
+    // stable across releases).
 
     // Phase 6: Activate runtime plugins in resolved order.
     crate::runtime::activate::activate_runtime_plugins(&ctx, &cspace, &plan).await;
@@ -203,53 +205,6 @@ fn print_manifests(manifests: &[PluginManifest]) {
         println!(
             "  {:<wp$}{:<we$}{:<wc$}{:<wr$}",
             n, e, c, r,
-        );
-    }
-}
-
-/// Print every legacy `consumes` entry as informational only;
-/// the resolver walks `[[requires]]`, not `consumes`.
-fn log_legacy_consumes(manifests: &[PluginManifest]) {
-    println!(
-        "\n[legacy] `consumes` entries (informational; resolver uses `requires`):"
-    );
-    let provided_caps: std::collections::HashSet<String> = manifests
-        .iter()
-        .flat_map(|m| m.exposes.iter().map(|c| c.name.clone()))
-        .collect();
-    let mut legacy_unprovided: Vec<String> = Vec::new();
-    for m in manifests {
-        for dep in &m.consumes {
-            let ok = provided_caps.contains(&dep.capability);
-            let mark = if ok { "✓" } else { "⚠" };
-            println!(
-                "  {} {}@{} consumes {} from {}@{} ({})",
-                mark,
-                m.plugin.name,
-                m.plugin.version,
-                dep.capability,
-                dep.plugin,
-                dep.version,
-                if ok {
-                    "provided"
-                } else {
-                    "unprovided — migrate to [[requires]]"
-                }
-            );
-            if !ok {
-                legacy_unprovided.push(format!(
-                    "{} → {} (from {}@{})",
-                    m.plugin.name, dep.capability, dep.plugin, dep.version
-                ));
-            }
-        }
-    }
-    if !legacy_unprovided.is_empty() {
-        println!(
-            "[legacy] {} `consumes` entry/entries have no provider; boot continues \
-             because the resolver uses `requires`. Consider migrating:\n  - {}",
-            legacy_unprovided.len(),
-            legacy_unprovided.join("\n  - ")
         );
     }
 }
