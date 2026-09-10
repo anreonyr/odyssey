@@ -249,7 +249,7 @@ async fn mint_one_plugin(
                 "[generator] selected model: {:?} (set GENERATOR_MODEL=mock|markov to override)",
                 model
             );
-            let model_arc: Arc<dyn crate::plugins::generator::Model> = Arc::from(model.build());
+            let model_arc = model.build();
             mint_simple::<GeneratorResource, _>(
                 ctx, factory, m, CapKind::Stream, "slot:generate",
                 move |_, _| generator_handler(model_arc.clone()),

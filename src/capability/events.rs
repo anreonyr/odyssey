@@ -58,8 +58,9 @@ use crate::kernel::manifest::PluginId;
 
 /// Default channel capacity. 256 events covers any plausible
 /// boot or teardown sequence (we emit ≤ 4 events per plugin
-/// + 2 shutdown markers, so 64 plugins fit comfortably). Tests
-/// with synthetic bursts use a smaller capacity to verify
+/// + 2 shutdown markers, so 64 plugins fit comfortably).
+///
+/// Tests with synthetic bursts use a smaller capacity to verify
 /// overflow behaviour.
 pub const DEFAULT_CAPACITY: usize = 256;
 

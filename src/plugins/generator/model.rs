@@ -36,11 +36,11 @@
 //! pair → same output stream. Tests can pin the output.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use rand::rngs::StdRng;
 use rand::SeedableRng;
 use rand::seq::SliceRandom;
-use serde_json::Value;
 
 /// The model abstraction. `generator`'s handler dispatches
 /// through this trait; concrete implementations are
@@ -159,7 +159,7 @@ impl MarkovModel {
             // Pad with start-sentinel tokens so the chain has
             // something to look up.
             let pad = vec![START_SENTINEL.to_string(); self.order - prompt_tokens.len()];
-            pad.into_iter().chain(prompt_tokens.into_iter()).collect()
+            pad.into_iter().chain(prompt_tokens).collect()
         };
 
         let mut out: Vec<String> = prefix.clone();
@@ -258,18 +258,26 @@ impl ModelKind {
     /// Parse from the `GENERATOR_MODEL` env var. Returns the
     /// default (`Markov`) if unset or unrecognised. Logging
     /// the unrecognised value is the caller's responsibility.
+    ///
+    /// Reuses [`<Self as FromStr>::from_str`] so the case
+    /// rules match: any case of "mock" or "markov" parses;
+    /// anything else falls back to `Markov`.
     pub fn from_env() -> Self {
-        match std::env::var("GENERATOR_MODEL").ok().as_deref() {
-            Some("mock") | Some("Mock") | Some("MOCK") => Self::Mock,
-            _ => Self::Markov,
+        match std::env::var("GENERATOR_MODEL") {
+            Err(_) => Self::Markov,
+            Ok(s) => s.parse().unwrap_or(Self::Markov),
         }
     }
 
-    /// Build the matching `Model` instance.
-    pub fn build(self) -> Box<dyn Model> {
+    /// Build the matching `Model` instance. Returns an `Arc`
+    /// directly because every consumer (boot, tests) wraps
+    /// it in `Arc<dyn Model>` anyway — the Box-to-Arc
+    /// transition costs an extra allocation if we return
+    /// `Box<dyn Model>` here.
+    pub fn build(self) -> Arc<dyn Model> {
         match self {
-            Self::Mock => Box::new(MockModel),
-            Self::Markov => Box::new(MarkovModel::default()),
+            Self::Mock => Arc::new(MockModel),
+            Self::Markov => Arc::new(MarkovModel::default()),
         }
     }
 }
@@ -366,13 +374,4 @@ mod tests {
         let toks = m.generate("hi", None).unwrap();
         assert!(!toks.is_empty());
     }
-}
-
-// ---------------------------------------------------------------------------
-// Suppress unused-import warnings when only the ModelKind enum is in scope.
-// ---------------------------------------------------------------------------
-
-#[allow(dead_code)]
-fn _value_helper() -> Option<Value> {
-    None
 }
