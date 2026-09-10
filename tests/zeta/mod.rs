@@ -84,6 +84,7 @@ mod p3_6_lifetime;
 mod p3_7_events;
 mod p4_4_5_agent_env;
 mod p4_6_delegation;
+mod p4_7_composition;
 
 #[path = "../common/mod.rs"]
 mod common;

@@ -71,13 +71,31 @@ use crate::kernel::resolver::{ResolvedBinding, ResolvedPlan};
 /// for any other value — the cap author is responsible for
 /// publishing only valid strings in the contract.
 fn parse_operation(s: &str) -> Option<OperationRights> {
-    Some(match s {
-        "READ" => OperationRights::READ,
-        "WRITE" => OperationRights::WRITE,
-        "EXECUTE" => OperationRights::EXECUTE,
-        "ADMIN" => OperationRights::ADMIN,
-        _ => return None,
-    })
+    // Direct match first (Phase 1-3 contract style).
+    if let Some(op) = match s {
+        "READ" => Some(OperationRights::READ),
+        "WRITE" => Some(OperationRights::WRITE),
+        "EXECUTE" => Some(OperationRights::EXECUTE),
+        "ADMIN" => Some(OperationRights::ADMIN),
+        _ => None,
+    } {
+        return Some(op);
+    }
+    // Phase 4 P4.6 — many contracts use a plugin-prefixed
+    // style ("DB_WRITE", "HTTP_REQUEST", "GENERATE"). The
+    // prefix is whatever comes before the final `_`. Strip
+    // it and re-match on the suffix.
+    if let Some((_, suffix)) = s.rsplit_once('_') {
+        match suffix {
+            "READ" => Some(OperationRights::READ),
+            "WRITE" => Some(OperationRights::WRITE),
+            "EXECUTE" => Some(OperationRights::EXECUTE),
+            "ADMIN" => Some(OperationRights::ADMIN),
+            _ => None,
+        }
+    } else {
+        None
+    }
 }
 
 // Reachable moved to crate::capability in Phase 4 P4.1
