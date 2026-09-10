@@ -33,3 +33,4 @@
 mod d2_install_derived_dead_parent;
 mod d3_wall_clock_subtree_accumulates;
 mod d5_dead_quota_fields;
+mod interleaving3_orphan;
