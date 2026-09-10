@@ -34,12 +34,12 @@ use std::sync::Arc;
 
 use serde_json::json;
 
-use crate::capability::{CapabilityBudget, CapabilitySpace, CapKind, Slot};
 use crate::boot::http_bridge::serve;
-use crate::kernel::factory::CapabilityFactory;
-use crate::kernel::manifest::{CapabilityDecl, PluginId, PluginManifest};
-use crate::kernel::registry::Registry;
-use crate::kernel::resolver::{resolve, ResolvedPlan};
+use crate::host::factory::CapabilityFactory;
+use crate::host::manifest::{CapabilityDecl, PluginManifest};
+use crate::kernel::ids::PluginId;
+use crate::host::resolver::{resolve, ResolvedPlan};
+use crate::kernel::{CapabilityBudget, CapabilitySpace, CapKind, Slot};
 use crate::plugins::{
     database::{database_plugin, handler as database_handler, DatabaseResource},
     embedder::{embedder_plugin, handler as embedder_handler, EmbedderResource},
@@ -177,7 +177,7 @@ async fn mint_runtime_plugins(
     cspace: &CapabilitySpace,
     plan: &ResolvedPlan,
     manifests: &[PluginManifest],
-) -> Result<std::collections::HashMap<PluginId, Vec<crate::capability::SlotId>>, Box<dyn std::error::Error>> {
+) -> Result<std::collections::HashMap<PluginId, Vec<crate::kernel::SlotId>>, Box<dyn std::error::Error>> {
     use std::collections::{BTreeMap, BTreeSet, HashMap};
 
     // A3: index manifests by PluginId for O(log n) per-plugin
@@ -206,7 +206,7 @@ async fn mint_runtime_plugins(
         .into());
     }
 
-    let mut minted: HashMap<PluginId, Vec<crate::capability::SlotId>> = HashMap::new();
+    let mut minted: HashMap<PluginId, Vec<crate::kernel::SlotId>> = HashMap::new();
     for plugin_id in &plan.mint_order {
         if !RUNTIME_PLUGINS.contains(&plugin_id.name.as_str()) {
             continue;
@@ -238,7 +238,7 @@ async fn mint_one_plugin(
     cspace: &CapabilitySpace,
     plan: &ResolvedPlan,
     m: &PluginManifest,
-) -> Result<Vec<crate::capability::SlotId>, Box<dyn std::error::Error>> {
+) -> Result<Vec<crate::kernel::SlotId>, Box<dyn std::error::Error>> {
     match m.plugin.name.as_str() {
         "echo" => mint_simple::<EchoResource, _>(
             ctx, factory, m, CapKind::Sync, "slot:echo", |_, _| echo_handler(),
@@ -305,9 +305,9 @@ async fn mint_simple<R, F>(
     kind: CapKind,
     slot_key: &'static str,
     handler_for: F,
-) -> Result<Vec<crate::capability::SlotId>, Box<dyn std::error::Error>>
+) -> Result<Vec<crate::kernel::SlotId>, Box<dyn std::error::Error>>
 where
-    R: crate::capability::Resource + 'static,
+    R: crate::kernel::Resource + 'static,
     F: Fn(&CapabilityDecl, &PluginId) -> Arc<R>,
 {
     // `mint_simple` is also called from `mint_generator`,
@@ -353,7 +353,7 @@ async fn mint_echo_chain(
     cspace: &CapabilitySpace,
     plan: &ResolvedPlan,
     m: &PluginManifest,
-) -> Result<Vec<crate::capability::SlotId>, Box<dyn std::error::Error>> {
+) -> Result<Vec<crate::kernel::SlotId>, Box<dyn std::error::Error>> {
     // 1) Find the binding for echo-chain's `echo` handle.
     let bindings = plan
         .bindings
@@ -385,7 +385,7 @@ async fn mint_echo_chain(
         })?;
     let typed = echo_cap
         .as_any()
-        .downcast_ref::<crate::capability::Capability<EchoResource>>()
+        .downcast_ref::<crate::kernel::Capability<EchoResource>>()
         .ok_or_else(|| {
             format!(
                 "echo-chain: capability \"{}\" has wrong type (expected Capability<EchoResource>)",
@@ -436,7 +436,7 @@ async fn mint_generator(
     cspace: &CapabilitySpace,
     plan: &ResolvedPlan,
     m: &PluginManifest,
-) -> Result<Vec<crate::capability::SlotId>, Box<dyn std::error::Error>> {
+) -> Result<Vec<crate::kernel::SlotId>, Box<dyn std::error::Error>> {
     use crate::plugins::generator::ModelKind;
 
     let model_kind = ModelKind::from_env();
@@ -448,10 +448,10 @@ async fn mint_generator(
     // The binding for the `http` handle (if any). Mock /
     // Markov don't need it but still benefit from being told
     // what the env granted — useful for diagnostics.
-    let reachable: Vec<crate::capability::Reachable> = plan
+    let reachable: Vec<crate::host::Reachable> = plan
         .bindings
         .get(&m.plugin)
-        .map(|bs| bs.iter().map(crate::capability::Reachable::from_binding).collect())
+        .map(|bs| bs.iter().map(crate::host::Reachable::from_binding).collect())
         .unwrap_or_default();
 
     let model_arc: Arc<dyn crate::plugins::generator::Model> = match model_kind {
@@ -494,7 +494,7 @@ async fn mint_agent(
     cspace: &CapabilitySpace,
     plan: &ResolvedPlan,
     m: &PluginManifest,
-) -> Result<Vec<crate::capability::SlotId>, Box<dyn std::error::Error>> {
+) -> Result<Vec<crate::kernel::SlotId>, Box<dyn std::error::Error>> {
     let resource = agent_handler_from_plan(
         m.plugin.name.clone(),
         plan,
@@ -534,7 +534,7 @@ async fn mint_agent(
 async fn ruin_runtime_plugins(
     cspace: &CapabilitySpace,
     plan: &ResolvedPlan,
-    minted: &std::collections::HashMap<PluginId, Vec<crate::capability::SlotId>>,
+    minted: &std::collections::HashMap<PluginId, Vec<crate::kernel::SlotId>>,
 ) {
     println!("\n[shutdown] tearing down runtime plugins (reverse mint order):");
     for plugin_id in plan.mint_order.iter().rev() {
@@ -558,7 +558,7 @@ async fn ruin_runtime_plugins(
         // ζ.17 (multi_slot_plugin_shutdown) for the multi-slot
         // case.
         cspace.publish_event(
-            crate::capability::events::GraphEvent::PluginDeactivated {
+            crate::kernel::space::events::GraphEvent::PluginDeactivated {
                 plugin: plugin_id.clone(),
             },
         );
@@ -667,11 +667,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let ctx = cordis::Context::new();
     let cspace = CapabilitySpace::new();
     let factory = CapabilityFactory::new(cspace.clone());
-    let registry = Arc::new(Registry::default());
 
     ctx.provide("capability_space", cspace.clone()).await?;
     ctx.provide("capability_factory", factory.clone()).await?;
-    ctx.provide("registry", registry.clone()).await?;
     println!("[main] core services provided");
 
     // Phase 3: Resolve the capability dependency graph.
@@ -739,10 +737,12 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
 
-    // Register manifests.
-    for m in &manifests {
-        registry.register(m.clone())?;
-    }
+    // Phase 5: the legacy `Registry` is gone — dedup is a side
+    // effect of `resolve(manifests)`, which already returns
+    // `ResolveError::DuplicateName` if two manifests share a
+    // (name, version). The line above this comment previously
+    // re-registered every manifest into a `Registry`; that path
+    // is now redundant.
 
     // Phase 6: Activate runtime plugins in resolved order.
     println!("\n[plugins] activating (in resolved order):");
@@ -760,7 +760,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 // time; this marks the plugin's lifecycle event
                 // (the cordis handler returned Ok).
                 cspace.publish_event(
-                    crate::capability::events::GraphEvent::PluginActivated {
+                    crate::kernel::space::events::GraphEvent::PluginActivated {
                         plugin: plugin_id.clone(),
                     },
                 );
@@ -797,10 +797,10 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // emit `ShutdownCompleted { remaining_slots }`. Plugin
     // lifecycle events (`PluginDeactivated`) accompany each
     // per-plugin revoke.
-    cspace.publish_event(crate::capability::events::GraphEvent::ShutdownStarted);
+    cspace.publish_event(crate::kernel::space::events::GraphEvent::ShutdownStarted);
     ruin_runtime_plugins(&cspace, &plan, &minted).await;
     cspace.publish_event(
-        crate::capability::events::GraphEvent::ShutdownCompleted {
+        crate::kernel::space::events::GraphEvent::ShutdownCompleted {
             remaining_slots: cspace.len(),
         },
     );

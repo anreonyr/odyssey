@@ -24,7 +24,7 @@ use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
 
-use crate::capability::{CapabilityChunk, Resource, Slot};
+use crate::kernel::{CapabilityChunk, Resource, Slot};
 
 /// Producer-side resource. Holds the sender; calling `invoke`
 /// sends a message. EXECUTE-gated via the holding capability.

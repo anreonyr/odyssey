@@ -13,14 +13,8 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::capability::{AuthorityContract, Protocol};
-
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
-pub struct PluginId {
-    pub name: String,
-    pub version: String,
-}
-
+pub use crate::kernel::ids::PluginId;
+use crate::kernel::meta::{AuthorityContract, Protocol};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PluginManifest {
     pub plugin: PluginId,

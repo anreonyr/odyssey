@@ -7,8 +7,8 @@
 
 use std::sync::OnceLock;
 
-use crate::kernel::manifest::PluginManifest;
-use crate::kernel::manifest_builder::ManifestBuilder;
+use crate::host::manifest::PluginManifest;
+use crate::host::manifest::ManifestBuilder;
 
 static MANIFEST: OnceLock<PluginManifest> = OnceLock::new();
 

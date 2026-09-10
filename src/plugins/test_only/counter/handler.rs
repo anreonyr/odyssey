@@ -17,7 +17,7 @@ use std::sync::Mutex;
 use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::{json, Value};
 
-use crate::capability::{Resource, Slot};
+use crate::kernel::{Resource, Slot};
 
 pub struct CounterResource {
     value: Mutex<i64>,

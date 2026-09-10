@@ -48,7 +48,7 @@ use std::sync::{Arc, RwLock};
 use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::{json, Value};
 
-use crate::capability::{Resource, Slot};
+use crate::kernel::{Resource, Slot};
 
 type Store = Arc<RwLock<HashMap<String, String>>>;
 

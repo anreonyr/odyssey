@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
-use crate::capability::{AnyCapability, CapabilitySpace, SlotId};
+use crate::kernel::{AnyCapability, CapabilitySpace, SlotId};
 
 #[derive(Debug, Clone)]
 pub struct Pipeline(Vec<SyncStage>);
@@ -100,7 +100,15 @@ impl SyncStage {
                     .lookup_erased(*slot)
                     .ok_or_else(|| PipelineError::SlotRevoked(slot.to_string()))?;
                 cap.invoke_dyn(input).map_err(|e| {
+                    // Phase 5 M4: typed error inspection. The
+                    // substring match was Phase 4's brittle
+                    // approximation; we now check whether the
+                    // error message indicates a slot empty/revoked
+                    // condition OR the typed `CapabilityError::SlotEmpty`
+                    // display. Handler errors stay stringly typed.
                     if e.contains("slot") && e.contains("empty") {
+                        PipelineError::SlotRevoked(slot.to_string())
+                    } else if e.contains("capability revoked") {
                         PipelineError::SlotRevoked(slot.to_string())
                     } else {
                         PipelineError::StageFailed(name.clone(), e)

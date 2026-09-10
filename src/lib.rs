@@ -1,20 +1,21 @@
 //! Odyssey library — the capability kernel + plugins.
 //!
-//! Three modules:
+//! Three layers (Phase 5):
 //!
-//! - `capability` — the kernel model (CSpace, slot, capability,
-//!   resource trait, rights, contract metadata).
-//! - `kernel` — minting and composition: factory that turns a
-//!   `PluginManifest` into a typed `Capability<R>`; pipeline that
-//!   composes sync caps into stages; registry for duplicate-name
-//!   detection.
-//! - `boot` — runtime lifecycle: load manifests, mint typed
-//!   tokens, start cordis fibers, serve the HTTP bridge, wait for
-//!   Ctrl-C.
-//! - `plugins` — the plugin bodies themselves (`handler.rs` +
-//!   `<name>.toml` manifest per plugin).
+//! - `kernel` — the pure kernel: capability data types, slot
+//!   algebra, quota accounting, namespace tree, graph events.
+//!   No I/O, no `Instant::now()` direct calls (use `clock::Clock`),
+//!   no filesystem, no cordis.
+//! - `host` — composition layer: parses manifests, resolves
+//!   dependencies, mints typed caps into the cspace. Depends on
+//!   `kernel`.
+//! - `runtime` — adapter layer: lifecycle, HTTP bridge, plugin
+//!   mint dispatch. Depends on `host` and `kernel`.
+//! - `plugins` — plugin bodies. Depend on `kernel` (for the
+//!   `Capability<R>` / `Resource` types they implement) and
+//!   `host` (for `PluginManifest` / `CapabilityFactory`).
 
 pub mod boot;
-pub mod capability;
+pub mod host;
 pub mod kernel;
 pub mod plugins;

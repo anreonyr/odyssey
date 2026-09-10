@@ -57,11 +57,12 @@
 //! }
 //! ```
 
-use crate::capability::AuthorityContract;
-use crate::kernel::manifest::{
-    CapabilityDecl, CapabilityRequirement, HostServiceRef, IsolationMode, PluginId,
-    PluginManifest, ResourceHints,
+use crate::host::manifest::{
+    CapabilityDecl, CapabilityRequirement, HostServiceRef, IsolationMode, PluginManifest,
+    ResourceHints,
 };
+use crate::kernel::ids::PluginId;
+use crate::kernel::meta::AuthorityContract;
 
 /// Fluent builder for [`PluginManifest`]. Construct via
 /// [`ManifestBuilder::new`]; chain `.host()`, `.requires()`,
@@ -80,11 +81,11 @@ pub struct ManifestBuilder {
     cap_out_type: String,
     cap_streaming: bool,
     requires: Vec<CapabilityRequirement>,
-    consumes: Vec<crate::kernel::manifest::DependencyRef>,
+    consumes: Vec<crate::host::manifest::DependencyRef>,
     host: Vec<HostServiceRef>,
     timeout_ms: Option<u32>,
     actions: Vec<(String, String)>,
-    protocol: crate::capability::Protocol,
+    protocol: crate::kernel::Protocol,
 }
 
 impl ManifestBuilder {
@@ -109,7 +110,7 @@ impl ManifestBuilder {
             host: Vec::new(),
             timeout_ms: None,
             actions: Vec::new(),
-            protocol: crate::capability::Protocol::empty(),
+            protocol: crate::kernel::Protocol::empty(),
         }
     }
 
@@ -164,7 +165,7 @@ impl ManifestBuilder {
         version: impl Into<String>,
         capability: impl Into<String>,
     ) -> Self {
-        self.consumes.push(crate::kernel::manifest::DependencyRef {
+        self.consumes.push(crate::host::manifest::DependencyRef {
             plugin: plugin.into(),
             version: version.into(),
             capability: capability.into(),
@@ -222,7 +223,7 @@ impl ManifestBuilder {
     /// `.with_output(...)`, `.with_media_type(...)`,
     /// `.with_version(...)`, `.with_transport(...)` on the
     /// returned `Protocol` to set individual fields.
-    pub fn protocol(mut self, p: crate::capability::Protocol) -> Self {
+    pub fn protocol(mut self, p: crate::kernel::Protocol) -> Self {
         self.protocol = p;
         self
     }

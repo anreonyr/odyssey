@@ -41,7 +41,7 @@ use std::sync::{Arc, RwLock};
 use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::{json, Value};
 
-use crate::capability::{Resource, Slot};
+use crate::kernel::{Resource, Slot};
 
 /// URL → canned response body. Stored as raw JSON so callers
 /// can shape the response exactly (string, object, list).

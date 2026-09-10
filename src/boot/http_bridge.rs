@@ -18,7 +18,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use crate::capability::{CapabilityChunk, CapabilitySpace};
+use crate::kernel::{CapabilityChunk, CapabilitySpace};
 use cordis::Context;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};

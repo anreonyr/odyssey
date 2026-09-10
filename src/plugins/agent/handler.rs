@@ -60,11 +60,11 @@ use std::sync::Arc;
 use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::{json, Value};
 
-use crate::capability::{CapabilityChunk, CapabilitySpace, OperationRights, Resource, Slot, SlotId};
+use crate::kernel::{CapabilityChunk, CapabilitySpace, OperationRights, Resource, Slot, SlotId};
 use crate::plugins::agent::program::ProgramStep;
 use tokio::sync::mpsc;
-use crate::kernel::manifest::PluginId;
-use crate::kernel::resolver::{ResolvedBinding, ResolvedPlan};
+use crate::kernel::ids::PluginId;
+use crate::host::resolver::{ResolvedBinding, ResolvedPlan};
 
 /// Parse a contract-published operation string ("READ", "WRITE",
 /// "EXECUTE", "ADMIN") into the corresponding bit. Returns `None`
@@ -102,7 +102,7 @@ fn parse_operation(s: &str) -> Option<OperationRights> {
 // because Generator's HttpModel and any future consumer
 // need it. The agent test surface still uses it; it just
 // imports from `crate::capability` now.
-pub use crate::capability::Reachable;
+pub use crate::host::Reachable;
 
 /// Holds the agent's identity, the reachable set derived from
 /// its binding table, and a reference to the cspace so it can

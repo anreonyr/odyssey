@@ -402,7 +402,8 @@ mod tests {
 // Phase 4 P4.1 — HttpModel
 // ---------------------------------------------------------------------------
 
-use crate::capability::{Capability, CapabilitySpace, Reachable};
+use crate::host::Reachable;
+use crate::kernel::{Capability, CapabilitySpace};
 use crate::plugins::http::HttpResource;
 
 /// HTTP-backed model. Holds the http capability via the
@@ -508,33 +509,33 @@ impl ModelKind {
 #[cfg(test)]
 mod http_model_tests {
     use super::*;
-    use crate::capability::CapabilitySpace;
+    use crate::kernel::CapabilitySpace;
     use crate::plugins::http::HttpResource;
 
     /// Build a cspace with one http capability pre-installed
     /// (simulates what `mint_http` does at boot, minus the
     /// cordis `provide` step).
-    fn cspace_with_http(seed: Value) -> (CapabilitySpace, crate::capability::SlotId) {
-        use crate::capability::CapKind;
-        use crate::kernel::factory::CapabilityFactory;
+    fn cspace_with_http(seed: Value) -> (CapabilitySpace, crate::kernel::SlotId) {
+        use crate::kernel::CapKind;
+        use crate::host::factory::CapabilityFactory;
         let space = CapabilitySpace::new();
         let factory = CapabilityFactory::new(space.clone());
         let resource = HttpResource::new();
         resource.set("/llm/v1/complete", seed);
-        let plugin = crate::kernel::manifest::PluginId {
+        let plugin = crate::kernel::ids::PluginId {
             name: "http".into(),
             version: "0.1.0".into(),
         };
-        let decl = crate::kernel::manifest::CapabilityDecl {
+        let decl = crate::host::manifest::CapabilityDecl {
             name: "http_request".into(),
             in_type: "http_request".into(),
             out_type: "http_response".into(),
             streaming: false,
             contract_name: "http_request".into(),
-            authority: crate::capability::AuthorityContract::empty(),
-            protocol: crate::capability::Protocol::empty(),
+            authority: crate::kernel::AuthorityContract::empty(),
+            protocol: crate::kernel::Protocol::empty(),
         };
-        let budget = crate::capability::CapabilityBudget::new(5000);
+        let budget = crate::kernel::CapabilityBudget::new(5000);
         let slot_id = factory.mint::<HttpResource>(
             CapKind::Sync,
             &decl,

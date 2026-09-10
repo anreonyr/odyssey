@@ -47,7 +47,7 @@ use std::sync::Arc;
 use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::{json, Value};
 
-use crate::capability::{Resource, Slot};
+use crate::kernel::{Resource, Slot};
 
 pub const DEFAULT_DIM: usize = 8;
 pub const MAX_DIM: usize = 64;

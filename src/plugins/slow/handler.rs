@@ -7,7 +7,7 @@ use std::time::Duration;
 use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::Value;
 
-use crate::capability::{Resource, Slot};
+use crate::kernel::{Resource, Slot};
 
 const SLEEP: Duration = Duration::from_millis(200);
 

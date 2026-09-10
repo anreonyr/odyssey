@@ -17,7 +17,7 @@ use std::sync::Arc;
 use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::{json, Value};
 
-use crate::capability::{
+use crate::kernel::{
     Capability, CapabilityError, CapabilityRights, CapabilitySpace, OperationRights, Resource,
     Slot, SlotId,
 };

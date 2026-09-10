@@ -6,7 +6,7 @@ use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::{json, Value};
 use wasmtime::{Caller, Config, Engine, Linker, Module, Store};
 
-use crate::capability::{Resource, Slot};
+use crate::kernel::{Resource, Slot};
 
 const DEFAULT_FUEL: u64 = 1_000_000;
 

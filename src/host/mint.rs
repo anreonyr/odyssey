@@ -1,8 +1,11 @@
 //! Mint-time helpers — turn a manifest declaration into a
 //! `CapabilityMeta` ready to install in the CSpace.
 
-use crate::capability::{CapabilityBudget, CapabilityId, CapabilityMeta};
-use crate::kernel::manifest::{CapabilityDecl, PluginId};
+use crate::host::manifest::CapabilityDecl;
+use crate::kernel::ids::PluginId;
+use crate::kernel::ids::CapabilityId;
+use crate::kernel::meta::CapabilityMeta;
+use crate::kernel::quota::CapabilityBudget;
 
 /// Construct a `CapabilityMeta` from a manifest declaration + budget.
 /// Used by the factory at mint time.
@@ -30,8 +33,8 @@ pub fn meta_from_decl(
         in_type: decl.in_type.clone(),
         out_type: decl.out_type.clone(),
         streaming: decl.streaming,
-        timeout_ms: budget.timeout_ms,
-        quota: budget.quota_state.spec(),
+        timeout_ms: budget.timeout_ms(),
+        quota: budget.quota_spec(),
         authority: decl.authority.clone(),
         protocol: decl.protocol.clone(),
     }

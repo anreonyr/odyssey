@@ -6,7 +6,7 @@ use std::sync::Arc;
 use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::Value;
 
-use crate::capability::{Capability, Resource, Slot};
+use crate::kernel::{Capability, Resource, Slot};
 use crate::plugins::echo::basic::EchoResource;
 
 pub struct EchoChainResource {
