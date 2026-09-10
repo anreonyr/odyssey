@@ -1,7 +1,8 @@
-//! Sandbox plugin — `SandboxResource: Resource`. Sync only.
-//!
-//! Reads a WAT file and runs it in a wasmtime instance with a fuel
-//! budget. Sample program lives in `sandbox_programs/hello.wat`.
+//! Plugin manifest — Phase 3 single-source-of-truth. See
+//! [`manifest`] for the typed `PluginManifest` returned to the
+//! runtime.
 
 mod handler;
 pub use handler::*;
+mod manifest;
+pub use manifest::manifest;

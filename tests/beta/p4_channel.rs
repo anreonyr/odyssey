@@ -10,7 +10,7 @@ use serde_json::json;
 fn channel_send_fails_after_revoke() {
     let (space, factory) = crate::common::boot();
     let (chan_handler, _cons_handler) =
-        odyssey::plugins::channel::channel_pair("p4", 16);
+        odyssey::plugins::test_only::channel::channel_pair("p4", 16);
     let pid = odyssey::kernel::manifest::PluginId {
         name: "channel".into(),
         version: "0.1.0".into(),
@@ -22,7 +22,7 @@ fn channel_send_fails_after_revoke() {
         streaming: false,
         ..Default::default()
     };
-    let chan_slot = factory.mint::<odyssey::plugins::channel::ChannelResource>(
+    let chan_slot = factory.mint::<odyssey::plugins::test_only::channel::ChannelResource>(
         odyssey::capability::CapKind::Sync,
         &chan_decl,
         &pid,
@@ -30,7 +30,7 @@ fn channel_send_fails_after_revoke() {
         chan_handler,
     );
 
-    let chan = Slot::<odyssey::plugins::channel::ChannelResource>::new(space.clone(), chan_slot);
+    let chan = Slot::<odyssey::plugins::test_only::channel::ChannelResource>::new(space.clone(), chan_slot);
     assert!(chan.invoke(json!({"message": "hi"})).is_ok());
 
     assert!(space.revoke(chan_slot));

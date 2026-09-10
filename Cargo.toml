@@ -52,3 +52,11 @@ path = "tests/gamma/mod.rs"
 [[test]]
 name = "delta"
 path = "tests/delta/mod.rs"
+
+[[test]]
+name = "epsilon"
+path = "tests/epsilon/mod.rs"
+
+[[test]]
+name = "zeta"
+path = "tests/zeta/mod.rs"

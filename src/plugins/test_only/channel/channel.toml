@@ -19,31 +19,39 @@ kind = "in_proc"
 
 
 [[exposes]]
-name      = "channel_a"
-in_type   = "object"
-out_type  = "object"
-streaming = false
+name          = "channel_a"
+in_type       = "object"
+out_type      = "object"
+streaming     = false
+contract_name = "channel"
 
-[exposes.contract]
+[exposes.protocol]
 description = "Producer side of an in-process channel; sends a JSON message on invoke."
 input_schema = { type = "object", required = ["message"] }
 output_schema = { type = "object", required = ["channel", "status"] }
+media_type = "application/json"
+version = "1.0"
+transport = "in-process"
 
-[[exposes.contract.actions]]
+[[exposes.authority.actions]]
 name      = "send"
 operation = "EXECUTE"
 
 [[exposes]]
-name      = "consumer_a"
-in_type   = "null"
-out_type  = "object"
-streaming = true
+name          = "consumer_a"
+in_type       = "null"
+out_type      = "object"
+streaming     = true
+contract_name = "consumer"
 
-[exposes.contract]
+[exposes.protocol]
 description = "Consumer side of an in-process channel; open returns a stream of incoming messages."
 output_schema = { type = "object" }
+media_type = "application/json"
+version = "1.0"
+transport = "in-process"
 
-[[exposes.contract.actions]]
+[[exposes.authority.actions]]
 name      = "subscribe"
 operation = "READ"
 

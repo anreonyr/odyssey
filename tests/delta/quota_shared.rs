@@ -4,7 +4,7 @@
 //! parent's calls debit the same counter the child observes.
 
 use odyssey::capability::{CapabilityRights, OperationRights, QuotaSpec, Slot};
-use odyssey::plugins::counter::CounterResource;
+use odyssey::plugins::test_only::counter::CounterResource;
 use serde_json::json;
 
 #[test]

@@ -13,7 +13,7 @@ use serde_json::json;
 async fn consumer_stream_yields_messages_then_done() {
     let (space, factory) = crate::common::boot();
     let (chan_handler, cons_handler) =
-        odyssey::plugins::channel::channel_pair("p4_stream", 16);
+        odyssey::plugins::test_only::channel::channel_pair("p4_stream", 16);
     let pid = odyssey::kernel::manifest::PluginId {
         name: "channel".into(),
         version: "0.1.0".into(),
@@ -27,7 +27,7 @@ async fn consumer_stream_yields_messages_then_done() {
         streaming: false,
         ..Default::default()
     };
-    let chan_slot = factory.mint::<odyssey::plugins::channel::ChannelResource>(
+    let chan_slot = factory.mint::<odyssey::plugins::test_only::channel::ChannelResource>(
         odyssey::capability::CapKind::Sync,
         &chan_decl,
         &pid,
@@ -44,7 +44,7 @@ async fn consumer_stream_yields_messages_then_done() {
         streaming: true,
         ..Default::default()
     };
-    let cons_slot = factory.mint::<odyssey::plugins::channel::ConsumerResource>(
+    let cons_slot = factory.mint::<odyssey::plugins::test_only::channel::ConsumerResource>(
         odyssey::capability::CapKind::Stream,
         &cons_decl,
         &pid,
@@ -52,8 +52,8 @@ async fn consumer_stream_yields_messages_then_done() {
         cons_handler,
     );
 
-    let chan = Slot::<odyssey::plugins::channel::ChannelResource>::new(space.clone(), chan_slot);
-    let cons = Slot::<odyssey::plugins::channel::ConsumerResource>::new(space.clone(), cons_slot);
+    let chan = Slot::<odyssey::plugins::test_only::channel::ChannelResource>::new(space.clone(), chan_slot);
+    let cons = Slot::<odyssey::plugins::test_only::channel::ConsumerResource>::new(space.clone(), cons_slot);
 
     // Send two messages via the producer before opening the stream.
     chan.invoke(json!({"message": "first"})).unwrap();

@@ -14,10 +14,11 @@ kind = "in_proc"
 
 
 [[exposes]]
-name      = "broker"
-in_type   = "object"
-out_type  = "object"
-streaming = false
+name          = "broker"
+in_type       = "object"
+out_type      = "object"
+streaming     = false
+contract_name = "broker"
 
 # Broker depends on the counter plugin.
 [[consumes]]

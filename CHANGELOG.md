@@ -6,6 +6,448 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Phase 3: Capability-Native Runtime
+
+Phase 3 begins the runtime-substrate experiment: prove the entire
+runtime can be built on Capability. The completion criteria are
+seven experiments P3.1–P3.7 (P3.8 — Sandbox-as-Capability-Env —
+is deferred to Phase 4 research track). This release ships P3.1;
+P3.2–P3.7 follow in subsequent minor versions.
+
+#### P3.1 — Capability Injection
+
+- **`CapabilityRequirement` manifest block** (`src/kernel/manifest.rs`):
+  plugins declare what *contracts* they need, not which plugin
+  versions provide them. `[[requires]] name = "..." contract = "..."`.
+- **`contract_name` on `CapabilityDecl`** (`src/kernel/manifest.rs`,
+  `src/capability/types.rs`): each `[[exposes]]` block now carries
+  a `contract_name` string. Empty string means "no contract
+  published" (legacy caps; only reachable by direct slot lookup).
+- **`CapabilityMeta.contract_name`**: the contract name round-trips
+  from the manifest through `meta_from_decl` into runtime metadata.
+- **`resolver` module** (`src/kernel/resolver.rs`): capability-keyed
+  dependency resolution. Builds a `contract_name → provider`
+  index, walks every `[[requires]]`, runs Kahn's algorithm on the
+  resulting edge graph to produce a deterministic topological
+  mint order, and returns a per-plugin `Vec<ResolvedBinding>`.
+  Detects `Unprovided`, `Ambiguous`, and `Cycle` errors.
+- **Resolver wired into boot** (`src/boot/boot.rs`): the runtime
+  mint sequence is no longer hand-written. After loading manifests
+  and providing core services, `resolver::resolve(&manifests)`
+  produces the mint order; `mint_runtime_plugins` iterates it
+  and dispatches to the typed handler for each runtime plugin.
+  Test-only plugins (counter, broker, channel, agent) are
+  resolved and registered but not minted at boot — they remain
+  test-driven.
+- **PluginId gains `Ord`/`PartialOrd`** to support `BTreeMap`-keyed
+  storage in the resolver. Ordering is `(name, version)` lexicographic.
+- **`tests/epsilon/`** — new integration test crate. Eight tests
+  covering: contract-keyed binding (ε.1), plugin version swappability
+  (ε.2), `CapabilityMeta.contract_name` carry-through (ε.3),
+  unprovided/ambiguous/cycle errors (ε.4–ε.6), diamond topology
+  (ε.7), and a guard test that every runtime manifest declares a
+  non-empty `contract_name` (ε.8).
+- **All 11 runtime manifests updated** with `contract_name = "..."`
+  on every `[[exposes]]` block. The `channel` plugin's two
+  exposes publish distinct contracts (`channel` and `consumer`).
+
+### Migration notes
+
+- Manifests that omit `contract_name` still parse (default empty
+  string) but their capabilities are unreachable via capability
+  injection. Existing test manifests (`tests/common/mod.rs`) still
+  work unchanged.
+- The legacy `[[consumes]]` block (plugin-version-keyed) is still
+  parsed and validated at boot. New plugins should prefer
+  `[[requires]]`.
+- Boot log now includes the resolved mint plan, so operators can
+  see the contract bindings at startup.
+
+#### Manifests as Rust constants
+
+- Each runtime plugin now declares its manifest as a Rust
+  constant returned by `pub fn manifest() -> &'static
+  PluginManifest`. The boot sequence collects these via
+  `boot::load_manifests` instead of parsing a `.toml` file.
+  This:
+    - gives the compiler the full set of fields to check
+      (no more "did you forget `contract_name`?" surprises),
+    - removes the toml parsing step from the runtime path,
+    - lets `cargo doc` and IDE tooling follow plugin
+      identity through the codebase.
+- The `*.toml` files for runtime plugins are **deleted**.
+  Test_only plugins still carry toml manifests because the
+  test crates reach them via `PluginManifest::from_path`,
+  exercising the parser end-to-end as a regression check.
+- Construction pattern: each manifest is cached in a
+  `OnceLock` because `PluginManifest` contains `String`
+  fields and `String::from` is not a `const fn` on stable.
+  Returning `&'static PluginManifest` from a memoised function
+  is the simplest path that works on stable without the
+  `inventory` crate (which requires `const` static
+  initialisers). When Rust stabilises `const_heap` and
+  `inventory` becomes viable, the `OnceLock` indirection
+  can collapse.
+- `tests/epsilon/p3_1_injection::runtime_manifests_have_contract_names`
+  now collects manifests from **both** sources: runtime
+  plugins via their `manifest()` fns (7 plugins), and
+  test_only plugins via the toml walker (4 plugins). It
+  verifies every one of the 11 declares a non-empty
+  `contract_name` and resolves cleanly.
+
+#### Manifest builder (`src/kernel/manifest_builder.rs`)
+
+- A first attempt at a `plugin_manifest!{}` macro hit
+  `macro_rules!` depth restrictions: four overlapping
+  optional fields plus nested optionals inside `expose:
+  { ... }` exceeded the metavariable-depth rules. The
+  macro file (`manifest_macro.rs`) was abandoned.
+- Replaced with `ManifestBuilder`, a fluent builder with
+  per-field setters. Each runtime plugin's `manifest.rs`
+  is now 4-8 lines of builder calls instead of 30+ lines
+  of struct-literal boilerplate:
+  ```rust
+  ManifestBuilder::new("echo", "echo", "echo")
+      .host("dispatcher")
+      .timeout_ms(5000)
+      .build()
+  ```
+  Defaults fill in `version = "0.1.0"`, `in/out_type = "any"`,
+  `streaming = false`, empty `requires/consumes/host`,
+  `timeout_ms = None` (host default 5000ms at mint time).
+  Builder methods: `.version()`, `.in_type()`, `.out_type()`,
+  `.streaming()`, `.requires()`, `.consumes()`,
+  `.host()`, `.timeout_ms()`, `.action(name, op)`,
+  `.build()`.
+
+### P3.4 — Capability-Native Agent
+
+The first consumer of the P3.1 binding table.
+
+**Changes**
+
+- `AgentResource` rewritten: storage is now `Vec<Reachable>`
+  (each entry `{ handle, capability }`) instead of
+  `Vec<(String, SlotId)>`. The reachable set comes from
+  `ResolvedPlan::bindings[consumer]` via the new
+  `AgentResource::from_bindings` constructor; the agent
+  never sees slot identifiers.
+- Dispatch path:
+  `target → find Reachable by handle → cspace.lookup_by_name(reachable.capability)`.
+  If `target` isn't in the reachable set, dispatch rejects
+  with `"not in the binding table"`. If the binding exists
+  but the cap is missing in cspace, dispatch rejects with
+  `"reachable but cap missing in cspace"`.
+- `boot.rs::mint_echo_chain` rewritten to read
+  `plan.bindings[m.plugin]` instead of hardcoding
+  `cspace.lookup_by_name("echo")`. The hardcoded lookup was
+  the last "agent knows a cap name" code in the runtime
+  path — it's gone now.
+- `cspace.name_for_slot(SlotId) -> Option<String>` added:
+  reverse lookup of the `names` map (registered name,
+  not `meta.name`). For derived caps from `restrict`/
+  `grant`, the registered name differs from the cap's own
+  `meta.name` (which inherits from the parent).
+- Legacy `agent::handler(name, slots, cspace)` constructor
+  retained for β.4 back-compat. Internally translates each
+  `(handle, SlotId)` to a `Reachable { handle, capability:
+  cspace.name_for_slot(slot_id) }` so dispatch goes through
+  the new binding-table path.
+- `ManifestBuilder::action(name, operation)` added; folds
+  each call into the capability's `CapabilityContract` at
+  `build()` time.
+
+**New tests** (`tests/zeta/p3_4_capability_native.rs`)
+
+- **ζ.1.a** `same_binary_requires_counter_only_addresses_counter`:
+  manifest `requires=[counter]` → reachable=`[counter]`;
+  dispatch counter works, dispatch echo rejected.
+- **ζ.1.b** `same_binary_requires_empty_addresses_nothing`:
+  manifest `requires=[]` → reachable=`[]`; every target
+  rejected even if a cap exists in cspace.
+- **ζ.1.c** `same_binary_requires_two_handles_addresses_both`:
+  manifest `requires=[counter, echo]` → reachable=`[counter,
+  echo]`; both targets accepted.
+- **ζ.2** `same_handle_different_capability_reaches_different_caps`:
+  two agents with identical handle `"counter"` but
+  bindings pointing at `"counter_read"` vs `"counter_write"`.
+  Same handle, different reachable caps; agent A's
+  `increment` fails (READ-only), agent B's succeeds
+  (READ | WRITE).
+- **ζ.3** `real_resolver_drives_reachable_set`: end-to-end
+  with `kernel::resolver::resolve(&manifests)`, asserting
+  `binding_for` exposes the real provider from the
+  resolved plan.
+
+**Test results**: 46/46 passing (was 41; +5 ζ tests).
+
+### P3.6 — Runtime Lifetime
+
+The runtime lifetime was previously asymmetric: plugins had
+a structured **start** (mint order = topological) but a flat
+**end** (`ctx.stop()` killed everything at once, no cap
+revocation). P3.6 adds ordered teardown.
+
+**Changes**
+
+- `mint_runtime_plugins`, `mint_one_plugin`, `mint_simple`,
+  `mint_echo_chain` now return `Vec<SlotId>` (the slots they
+  minted for this plugin). `mint_runtime_plugins` collects
+  them into `HashMap<PluginId, Vec<SlotId>>` and returns
+  the whole map. The map is what makes the teardown direction
+  explicit: every slot id that should be revoked on plugin X
+  going down is tracked at mint time, not reconstructed later.
+- New `shutdown_runtime_plugins(cspace, plan, minted)` walks
+  `plan.mint_order` in **reverse** (consumers first) and calls
+  `cspace.revoke_tree(slot_id)` for each minted slot.
+- `boot.rs::run` calls `shutdown_runtime_plugins` after the
+  HTTP bridge exits (replaces the bare `ctx.stop()`). End of
+  the boot, cspace has zero runtime slots.
+
+**Why reverse order**: consumers die **before** providers.
+Any in-flight work the consumer was doing on the provider's
+cap sees `Slot::capability() → None` rather than racing the
+provider's teardown. For runtime plugins this is moot today
+(they mint fresh caps and don't derive), but the rule
+generalises cleanly when later phases add real provider
+revocation hooks (think: live model swap, rolling restart).
+
+**New tests** (`tests/zeta/p3_6_lifetime.rs`)
+
+- **ζ.4** `teardown_order_is_reverse_of_mint`: 3 caps in a
+  derived chain (root → 3 children). Teardown in reverse
+  mint order; final `cspace.len() == 0`; every name cleared.
+- **ζ.5** `provider_revoke_invalidates_consumer_reachable`:
+  the **P3.4 ↔ P3.6 handshake**. Mint counter. Build an
+  agent's binding table pointing at it. Dispatch works.
+  Revoke the counter slot. Reachable entry in the agent
+  is unchanged (it's metadata), but `lookup_by_name` returns
+  `None`. Agent's invoke reports:
+  `"reachable (handle=counter, capability=counter) but cap missing in cspace"`.
+- **ζ.6** `revoke_tree_propagates_to_derived_caps`: 4-deep
+  chain (root → read → read-only → write via restrict).
+  `revoke_tree(root)` returns `4`, every level clears.
+- **ζ.7** `consumer_teardown_does_not_revoke_provider`:
+  revoking a phantom consumer slot (id `9999`, not in cspace)
+  is a no-op and leaves the provider alive. Then revoking
+  the provider makes the agent's reachable entry fail.
+
+**End-to-end boot**
+
+```
+[shutdown] tearing down runtime plugins (reverse mint order):
+  ✓ echo-chain@0.1.0  revoked 1 slot(s)
+  ✓ slow@0.1.0  revoked 1 slot(s)
+  ✓ sandbox@0.1.0  revoked 1 slot(s)
+  ✓ reverse@0.1.0  revoked 1 slot(s)
+  ✓ generator@0.1.0  revoked 1 slot(s)
+  ✓ echo_stream@0.1.0  revoked 1 slot(s)
+  ✓ echo@0.1.0  revoked 1 slot(s)
+[shutdown] cspace remaining slots: 0
+```
+
+**Test results**: 50/50 passing (was 46; +4 ζ tests for P3.6).
+
+### P3.2 — Protocol as Metadata
+
+The old `CapabilityContract` struct conflated two concerns:
+the **action vocabulary** (which the runtime path consulted
+via `operation_for(action)` to translate verbs to
+`OperationRights` bits), and the **wire-format metadata**
+(schemas, description, transport hint). P3.2 splits them.
+
+**Why split**
+
+The two audiences are different. Type-agnostic dispatchers
+(`RuleAgent`) need the action vocabulary — that's load-bearing
+authority input. External clients (HTTP bridge, OpenAPI
+generators, future JSON-RPC descriptors) need the wire
+metadata — that's pure documentation. Forcing them into one
+struct meant the wire metadata was implicit at every
+authority-check site, and adding new metadata fields (transport,
+version, media_type) risked polluting the authority path.
+
+**Changes**
+
+- New `AuthorityContract` type (in `capability::types`):
+  - `actions: Vec<CapabilityAction>` (name → operation string)
+  - `operation_for(action) -> Option<&str>` — the agent's
+    only authority source
+- New `Protocol` type:
+  - `description: String`
+  - `input_schema: Value`, `output_schema: Value`
+  - `media_type: String`, `version: String`, `transport: String`
+- `CapabilityMeta` carries both: `pub authority:
+  AuthorityContract`, `pub protocol: Protocol`. The old single
+  `contract` field is gone.
+- `CapabilityDecl` (in `PluginManifest`) carries both; old
+  `contract` field gone.
+- TOML shape updated:
+  - `[exposes.contract]` → `[exposes.protocol]`
+  - `[[exposes.contract.actions]]` → `[[exposes.authority.actions]]`
+- `ManifestBuilder::protocol(Protocol)` setter added.
+  `.action(name, op)` continues to work, building authority.
+- `RuleAgent` (the only authority-checker that uses these
+  fields) reads `cap.meta().authority.operation_for(action)`.
+  `meta.contract` references gone.
+- **`Resource::invoke` trait unchanged.** Still takes raw
+  `Value`; protocol is observable but never validated.
+
+**Tests**
+
+Updated γ.2–γ.6 to read from `protocol` (metadata) and
+`authority` (action vocabulary). The contract_* files are
+renamed in spirit (kept the same filenames for git history
+clarity) but the assertions all read `cap.protocol.*` or
+`cap.authority.*`.
+
+New ζ tests (`tests/zeta/p3_2_protocol.rs`):
+
+- **ζ.8** `dispatch_unchanged_with_or_without_protocol_metadata`:
+  two caps with identical authority but different protocol
+  metadata (different `media_type`, `version`, `transport`)
+  produce identical dispatch results for the same input.
+- **ζ.9** `protocol_queryable_from_cap_meta`: `slot.meta().protocol`
+  carries description, schemas, media_type, version, transport
+  faithfully through mint.
+- **ζ.10** `authority_operation_for_is_action_vocabulary` and
+  `authority_vocabulary_drives_dispatch_authority`: agent reads
+  `meta.authority.operation_for(action)`, gets the bit string,
+  parses it, checks against held ops. End-to-end through
+  agent + cap + resolver.
+- **ζ.11** `manifest_builder_protocol_roundtrips`:
+  `ManifestBuilder::protocol(...)` produces the same fields
+  as a hand-built struct; the `..Default::default()`-style
+  pattern works.
+
+**Test results**: 55/55 passing (was 50; +5 ζ tests for P3.2).
+
+### P3.7 — Graph Events
+
+The runtime had no observability hook — mint/revoke/teardown
+happened silently. P3.7 adds a `GraphEventBus` backed by
+`tokio::sync::broadcast` that cspace mutations and boot
+lifecycle events publish to. Subscribers see the full
+timeline in publish order, non-blocking.
+
+**Why broadcast (not a callback Vec or sink trait)**
+
+- **Non-blocking publish.** `Sender::send` returns
+  immediately. The cspace stays sync; mint never waits on
+  subscribers.
+- **Multi-subscriber.** HTTP bridge SSE, log subscriber,
+  test recorder, future audit log — each gets its own
+  receiver without coordination.
+- **Tokio-native.** The codebase already pulls tokio for
+  the HTTP bridge and signal waits; reusing the runtime's
+  primitives keeps the dependency surface flat.
+
+**Changes**
+
+- `src/capability/events.rs` (new): `GraphEvent` enum,
+  `DeriveKind` enum (`Grant`/`Restrict`/`Transfer`),
+  `GraphEventBus`, `GraphEventReceiver` re-export. Default
+  capacity 256; tests can use smaller capacities.
+- `CapabilitySpace` carries a `GraphEventBus` (defaults
+  to `GraphEventBus::new()`). New convenience methods:
+  `cspace.subscribe()`, `cspace.events()`.
+- All cspace mutations publish events:
+  - `install` → `Minted { plugin, slot, capability, contract }`
+  - `grant`/`restrict`/`transfer` → `Derived { parent, child, kind }`
+  - `revoke` → `Revoked { slot, capability }`
+  - `revoke_tree` → one `Revoked` per slot + one
+    `RevokeTree { root, total }` marker
+- `boot.rs` publishes lifecycle events on the same bus:
+  - `PluginActivated { plugin }` after cordis handler Ok
+  - `PluginDeactivated { plugin }` before revoke
+  - `ShutdownStarted` at the top of teardown
+  - `ShutdownCompleted { remaining_slots }` after teardown
+
+**New tests**
+
+In `src/capability/events.rs` (unit, 4 tests):
+
+- `publish_with_no_subscribers_is_dropped` — no panic,
+  return the dropped event via `Err`
+- `subscribe_then_publish_delivers` — basic fan-out
+- `multiple_subscribers_each_get_event` — fan-out to N
+- `event_ordering_with_single_sender` — pin FIFO ordering
+
+In `tests/zeta/p3_7_events.rs` (5 tests):
+
+- **ζ.12** `mint_fires_minted_event`: single mint produces
+  one `Minted` with right fields
+- **ζ.13** `revoke_tree_fires_revoked_per_slot_plus_one_revoke_tree`:
+  N revokes + 1 RevokeTree per `revoke_tree(root)` call
+- **ζ.14** `derive_paths_fire_distinct_kinds`: `grant` /
+  `restrict` / `transfer` produce distinct `Derived` events
+  in publish order
+- **ζ.15** `every_subscriber_gets_every_event`: two receivers
+  each see the same Minted + Revoked + RevokeTree sequence
+- **ζ.16** `full_lifecycle_event_sequence`: simulated full
+  boot (3 plugins mint → activate → shutdown reverse →
+  completed) produces the expected 17-event timeline.
+
+**Test results**: 64/64 passing (was 55; +4 events unit +
++5 ζ tests for P3.7).
+
+### Added — Phase 2: Capability-Native Composition
+
+#### Plugin directory cleanup
+
+- **`src/plugins/test_only/`** — counter, broker, channel, agent
+  moved here. They are no longer loaded by `boot::run` (the
+  manifest walker skips the `test_only/` subtree) and no longer
+  appear in the `[manifest]` boot log. They remain reachable
+  from tests as `odyssey::plugins::test_only::counter::*` etc.
+- **`src/plugins/echo/` family grouping** — the three
+  echo-family plugins are now nested under one parent:
+  ```
+  src/plugins/echo/
+  ├── mod.rs        — parent, declares submodules
+  ├── basic/        — was src/plugins/echo/         (sync passthrough)
+  ├── chain/        — was src/plugins/echo_chain/   (sync chained)
+  └── echo_stream/  — was src/plugins/stream_echo/  (renamed, streaming passthrough)
+  ```
+  The streaming echo plugin was renamed `stream_echo` →
+  `echo_stream` so the whole family shares the `echo_` prefix
+  (echo / echo_chain / echo_stream) and is greppable as one
+  shape. Plugin identifier, capability name, contract name,
+  struct name (`StreamEchoResource` → `EchoStreamResource`),
+  plugin factory fn (`stream_echo_plugin` →
+  `echo_stream_plugin`), and slot key (`slot:stream_echo` →
+  `slot:echo_stream`) all moved together.
+- **`src/plugins/mod.rs`** — runtime plugins (echo family,
+  generator, reverse, sandbox, slow) are declared at the top
+  level; test-only plugins live under the new
+  `pub mod test_only { ... }` submodule.
+- **`src/plugins/mod.rs`** — runtime plugins (echo family,
+  generator, reverse, sandbox, slow) are declared at the top
+  level; test-only plugins live under the new
+  `pub mod test_only { ... }` submodule.
+- **`src/boot/boot.rs`** dispatch slimmed: a single
+  `RUNTIME_PLUGINS` const drives both the mint gate and the
+  activator dispatch (`activator_for`). The previous triple
+  (`RUNTIME_PLUGINS` + `mint_one_plugin` match + `plugin_factories`
+  HashMap) is now a const + two match arms, with a debug_assert
+  that the activator covers every name in the const. Adding a
+  new runtime plugin still requires touching two places
+  (const + mint arm + activator arm) but the compiler now
+  catches "added to const but forgot activator".
+- **`echo_chain.toml`** now declares its real dependency via
+  `[[requires]]`:
+  ```toml
+  [[requires]]
+  name     = "echo"
+  contract = "echo"
+  ```
+  Boot log proves the resolver binds it: `echo-chain@0.1.0
+  receives: handle=echo contract=echo from=echo@0.1.0
+  (cap=echo)`. The legacy `[[consumes]]` block is kept for
+  back-compat.
+
+### Added — Phase 2: Capability-Native Composition
+
 ### Added — Phase 2: Capability-Native Composition
 
 Phase 2 builds on Phase 1's authority model and asks: **can a system

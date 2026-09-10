@@ -21,7 +21,7 @@ use crate::capability::{
     Capability, CapabilityError, CapabilityRights, CapabilitySpace, OperationRights, Resource,
     Slot, SlotId,
 };
-use crate::plugins::counter::CounterResource;
+use crate::plugins::test_only::counter::CounterResource;
 
 /// Operations the broker accepts on its own capability:
 ///

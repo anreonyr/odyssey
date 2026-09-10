@@ -19,13 +19,13 @@
 use std::sync::{Arc, OnceLock};
 
 use odyssey::capability::{
-    Capability, CapabilityBudget, CapabilityContract, CapabilityRights, CapabilitySpace, CapKind,
-    OperationRights, QuotaSpec, SlotId,
+    Capability, CapabilityBudget, CapabilityRights, CapabilitySpace, CapKind, OperationRights,
+    QuotaSpec, SlotId,
 };
 use odyssey::kernel::factory::CapabilityFactory;
 use odyssey::kernel::manifest::{CapabilityDecl, PluginId, PluginManifest};
-use odyssey::plugins::broker::{handler as broker_handler, BrokerResource};
-use odyssey::plugins::counter::CounterResource;
+use odyssey::plugins::test_only::broker::{handler as broker_handler, BrokerResource};
+use odyssey::plugins::test_only::counter::CounterResource;
 
 /// Default timeout every test budget uses. Generous enough that
 /// real-handler latency (a 200ms `slow` sleep) still finishes, but
@@ -43,8 +43,8 @@ pub const DEFAULT_TIMEOUT_MS: u32 = 5000;
 fn load_counter_manifest() -> &'static PluginManifest {
     static CACHE: OnceLock<PluginManifest> = OnceLock::new();
     CACHE.get_or_init(|| {
-        let toml_src = std::fs::read_to_string("src/plugins/counter/counter.toml")
-            .expect("counter.toml present at src/plugins/counter/counter.toml");
+        let toml_src = std::fs::read_to_string("src/plugins/test_only/counter/counter.toml")
+            .expect("counter.toml present at src/plugins/test_only/counter/counter.toml");
         PluginManifest::from_toml_str(&toml_src).expect("counter.toml parses")
     })
 }
@@ -104,7 +104,7 @@ pub fn mint_counter(factory: &CapabilityFactory) -> SlotId {
         &m.exposes[0],
         &m.plugin,
         CapabilityBudget::new(DEFAULT_TIMEOUT_MS),
-        odyssey::plugins::counter::handler(),
+        odyssey::plugins::test_only::counter::handler(),
     )
 }
 
@@ -121,14 +121,14 @@ pub fn mint_counter_with_quota(
         &counter_decl(name),
         &counter_pid(),
         CapabilityBudget::with_spec(DEFAULT_TIMEOUT_MS, quota),
-        odyssey::plugins::counter::handler(),
+        odyssey::plugins::test_only::counter::handler(),
     )
 }
 
 /// Mint an Echo resource (true passthrough) at the named slot.
 #[allow(dead_code)]
 pub fn mint_echo(factory: &CapabilityFactory, name: &str) -> SlotId {
-    factory.mint::<odyssey::plugins::echo::EchoResource>(
+    factory.mint::<odyssey::plugins::echo::basic::EchoResource>(
         CapKind::Sync,
         &CapabilityDecl {
             name: name.into(),
@@ -142,7 +142,7 @@ pub fn mint_echo(factory: &CapabilityFactory, name: &str) -> SlotId {
             version: "0.1.0".into(),
         },
         CapabilityBudget::new(DEFAULT_TIMEOUT_MS),
-        odyssey::plugins::echo::handler(),
+        odyssey::plugins::echo::basic::handler(),
     )
 }
 
@@ -195,9 +195,13 @@ pub fn mint_broker(
     )
 }
 
-/// "Empty contract" — the default for manifests that don't declare
-/// one. Re-exported so test files don't have to know the import path.
+/// "Empty contract" — kept for back-compat with older tests that
+/// import this helper. Phase 3 P3.2 split the old
+/// `CapabilityContract` into `AuthorityContract` (action → op)
+/// and `Protocol` (wire metadata). This helper now returns an
+/// empty `AuthorityContract`. Tests that want a `Protocol`
+/// should construct one directly.
 #[allow(dead_code)]
-pub fn empty_contract() -> CapabilityContract {
-    CapabilityContract::default()
+pub fn empty_contract() -> odyssey::capability::AuthorityContract {
+    odyssey::capability::AuthorityContract::default()
 }

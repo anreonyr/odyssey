@@ -24,12 +24,12 @@ fn namespace_prefix_matches(namespace: &str, prefix: &str) -> bool {
 use serde_json::Value;
 use tokio::sync::mpsc;
 
+use super::AnyCapability;
 use super::cap::Capability;
 use super::resource::Resource;
 use super::types::{
     CapabilityChunk, CapabilityError, CapabilityId, CapabilityMeta, CapabilityRights, SlotId,
 };
-use super::AnyCapability;
 
 // ---------------------------------------------------------------------------
 // Slot<R> — typed reference to a slot (the unit of possession)
@@ -44,7 +44,11 @@ pub struct Slot<R: Resource> {
 
 impl<R: Resource> Slot<R> {
     pub fn new(space: super::CapabilitySpace, id: SlotId) -> Self {
-        Self { space, id, _phantom: PhantomData }
+        Self {
+            space,
+            id,
+            _phantom: PhantomData,
+        }
     }
 
     pub fn id(&self) -> SlotId {
@@ -183,6 +187,13 @@ struct CSpaceInner {
     /// Parent pointer for every derived slot — used by `revoke_tree`
     /// to recursively sever the entire subtree. `None` for roots.
     parents: RwLock<HashMap<SlotId, SlotId>>,
+    /// Phase 3 P3.7 — graph event bus. Every mutation in the
+    /// cspace (install, revoke, revoke_tree, grant, restrict,
+    /// transfer) publishes here. Subscribers see the full
+    /// timeline. Defaults to `GraphEventBus::new()`; tests
+    /// can pass a smaller-capacity bus via
+    /// [`CapabilitySpace::with_bus`].
+    events: crate::capability::events::GraphEventBus,
     next: AtomicU64,
     next_derived: AtomicU64,
 }
@@ -195,6 +206,14 @@ struct SlotEntry {
 
 impl CapabilitySpace {
     pub fn new() -> Self {
+        Self::with_bus(crate::capability::events::GraphEventBus::new())
+    }
+
+    /// Construct a cspace with a custom event bus. Tests that
+    /// want a small-capacity bus to verify overflow handling
+    /// use this constructor; production code uses
+    /// [`CapabilitySpace::new`].
+    pub fn with_bus(bus: crate::capability::events::GraphEventBus) -> Self {
         Self {
             inner: Arc::new(CSpaceInner {
                 slots: RwLock::new(HashMap::new()),
@@ -202,8 +221,25 @@ impl CapabilitySpace {
                 parents: RwLock::new(HashMap::new()),
                 next: AtomicU64::new(0),
                 next_derived: AtomicU64::new(0),
+                events: bus,
             }),
         }
+    }
+
+    /// Subscribe to the graph event bus. Receives events for
+    /// every mutation (install, revoke, revoke_tree, grant,
+    /// restrict, transfer) plus boot-level events published
+    /// through this bus.
+    pub fn subscribe(&self) -> crate::capability::events::GraphEventReceiver {
+        self.inner.events.subscribe()
+    }
+
+    /// Borrow the event bus directly. Useful for boot to
+    /// publish plugin-level events (`PluginActivated`,
+    /// `ShutdownStarted`, ...) without going through a cspace
+    /// mutation.
+    pub fn events(&self) -> &crate::capability::events::GraphEventBus {
+        &self.inner.events
     }
 
     /// Allocate a new slot id. The slot is empty until `install` is called.
@@ -214,12 +250,15 @@ impl CapabilitySpace {
 
     /// Install a typed capability into a slot, indexed under the cap's
     /// own `name` in the name index.
-    pub fn install<R: Resource>(
-        &self,
-        slot: SlotId,
-        cap: Arc<Capability<R>>,
-    ) {
+    ///
+    /// Phase 3 P3.7 — emits `GraphEvent::Minted` on success.
+    /// The event carries the cap's `plugin`, the slot id, the
+    /// capability name, and the contract name (so subscribers
+    /// can log "who minted what").
+    pub fn install<R: Resource>(&self, slot: SlotId, cap: Arc<Capability<R>>) {
         let name = cap.name().to_string();
+        let contract = cap.meta().contract_name.clone();
+        let plugin = cap.meta().plugin.clone();
         let erased: Arc<dyn AnyCapability> = cap;
         let mut slots = self.inner.slots.write().expect("cspace poisoned");
         let prev = slots.insert(slot, SlotEntry { cap: erased });
@@ -228,7 +267,20 @@ impl CapabilitySpace {
             names.retain(|_, s| *s != slot);
             drop(prev_entry);
         }
-        names.insert(name, slot);
+        names.insert(name.clone(), slot);
+        drop(slots);
+        drop(names);
+        // Publish outside the locks — broadcast::send is
+        // non-blocking but holding the cspace locks across
+        // user code is a footgun.
+        let _ = self.inner.events.publish(
+            crate::capability::events::GraphEvent::Minted {
+                plugin,
+                slot,
+                capability: name,
+                contract,
+            },
+        );
     }
 
     /// Typed lookup. The caller must know `R`; otherwise returns `None`.
@@ -263,6 +315,27 @@ impl CapabilitySpace {
             .expect("cspace poisoned")
             .get(name)?;
         self.lookup_erased(slot)
+    }
+
+    /// Reverse of `lookup_by_name`: given a slot id, return the
+    /// name it's currently registered under in the `names` map.
+    /// Returns `None` if the slot was revoked or never registered.
+    ///
+    /// Note: a slot may have a different name in this map than
+    /// its `meta().name` — derived caps (from `restrict`/`grant`)
+    /// keep the parent's `meta.name` but are registered under a
+    /// fresh name. This method returns the **registered** name,
+    /// which is what `lookup_by_name` keys against.
+    ///
+    /// If multiple names point at the same slot (shouldn't happen
+    /// in normal use), returns the lexicographically first.
+    pub fn name_for_slot(&self, slot: SlotId) -> Option<String> {
+        let names = self.inner.names.read().expect("cspace poisoned");
+        names
+            .iter()
+            .filter(|(_, s)| **s == slot)
+            .map(|(n, _)| n.clone())
+            .min()
     }
 
     /// Capability metadata at a slot.
@@ -304,8 +377,7 @@ impl CapabilitySpace {
     /// tree.
     pub fn namespace_children(&self, prefix: &str) -> Vec<(String, usize)> {
         let all = self.enumerate_namespace(prefix);
-        let mut out: std::collections::BTreeMap<String, usize> =
-            std::collections::BTreeMap::new();
+        let mut out: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
         let base = if prefix.is_empty() {
             String::new()
         } else {
@@ -371,6 +443,26 @@ impl CapabilitySpace {
         new_slot
     }
 
+    /// Phase 3 P3.7 — publish a `Derived` event for a freshly
+    /// installed derived slot. Called from `grant`, `restrict`,
+    /// and `transfer` after `install_derived` registers the
+    /// slot. The `kind` distinguishes the three derivation
+    /// paths so subscribers can audit authority flow.
+    fn publish_derived(
+        &self,
+        parent: SlotId,
+        child: SlotId,
+        kind: crate::capability::events::DeriveKind,
+    ) {
+        let _ = self.inner.events.publish(
+            crate::capability::events::GraphEvent::Derived {
+                parent,
+                child,
+                kind,
+            },
+        );
+    }
+
     /// **Grant**: derive a new slot with the given rights; source slot
     /// is unchanged. New slot is registered under `new_name`.
     ///
@@ -396,7 +488,14 @@ impl CapabilitySpace {
         }
         let new_id = self.next_derived_id();
         let derived = source.derive(rights, new_id);
-        Ok(self.install_derived(from, derived, new_name))
+        let new_slot = self.install_derived(from, derived, new_name);
+        // Phase 3 P3.7 — Derived event for grant.
+        self.publish_derived(
+            from,
+            new_slot,
+            crate::capability::events::DeriveKind::Grant,
+        );
+        Ok(new_slot)
     }
 
     /// **Transfer**: move the capability to a fresh slot with the given
@@ -422,6 +521,12 @@ impl CapabilitySpace {
         let new_id = self.next_derived_id();
         let derived = source.derive(rights, new_id);
         let new_slot = self.install_derived(from, derived, source_name);
+        // Phase 3 P3.7 — Derived event for transfer.
+        self.publish_derived(
+            from,
+            new_slot,
+            crate::capability::events::DeriveKind::Transfer,
+        );
         self.revoke(from);
         Ok(new_slot)
     }
@@ -436,19 +541,59 @@ impl CapabilitySpace {
     /// rights(parent)`; the difference is the seL4-style mental model:
     /// grant = minting a peer's view, restrict = dropping privileges on
     /// yourself.
+    ///
+    /// Phase 3 P3.7 — `restrict` emits a `Derived` event with
+    /// `kind = Restrict` (not `Grant`) so subscribers can
+    /// distinguish the two flows for audit. We don't delegate
+    /// to `grant` here because the Derived event must carry
+    /// the right kind.
     pub fn restrict<R: Resource>(
         &self,
         from: SlotId,
         rights: CapabilityRights,
         new_name: String,
     ) -> Result<SlotId, CapabilityError> {
-        self.grant::<R>(from, rights, new_name)
+        let source: Arc<Capability<R>> = self
+            .lookup_typed::<R>(from)
+            .ok_or(CapabilityError::SlotEmpty(from))?;
+        let held = source.rights();
+        if !held.contains(&rights) {
+            return Err(CapabilityError::AttenuationViolation {
+                from,
+                requested: rights.operations,
+                held: held.operations,
+            });
+        }
+        let new_id = self.next_derived_id();
+        let derived = source.derive(rights, new_id);
+        let new_slot = self.install_derived(from, derived, new_name);
+        self.publish_derived(
+            from,
+            new_slot,
+            crate::capability::events::DeriveKind::Restrict,
+        );
+        Ok(new_slot)
     }
 
     /// **Revoke**: clear a slot. The slot id remains valid (stale
     /// `Slot<R>` references don't panic), but `capability()` /
     /// `invoke()` / `open()` will fail.
+    ///
+    /// Phase 3 P3.7 — emits `GraphEvent::Revoked` on success.
+    /// The event carries the cap's registered name (or
+    /// `None` if it wasn't in the names map) so subscribers
+    /// can log "what died" without re-reading the cspace.
     pub fn revoke(&self, slot: SlotId) -> bool {
+        // Phase 3 P3.7 — capture the registered name before
+        // clearing, so the Revoked event can carry it.
+        let cap_name: Option<String> = self
+            .inner
+            .names
+            .read()
+            .expect("cspace poisoned")
+            .iter()
+            .find_map(|(n, s)| if *s == slot { Some(n.clone()) } else { None });
+
         let mut slots = self.inner.slots.write().expect("cspace poisoned");
         let removed = slots.remove(&slot);
         if removed.is_some() {
@@ -456,6 +601,15 @@ impl CapabilitySpace {
             names.retain(|_, s| *s != slot);
             let mut parents = self.inner.parents.write().expect("cspace poisoned");
             parents.remove(&slot);
+            drop(slots);
+            drop(names);
+            drop(parents);
+            let _ = self.inner.events.publish(
+                crate::capability::events::GraphEvent::Revoked {
+                    slot,
+                    capability: cap_name,
+                },
+            );
             true
         } else {
             false
@@ -467,6 +621,13 @@ impl CapabilitySpace {
     /// removed. This makes revocation propagate down multi-hop
     /// delegation chains (Broker A → Broker B → ...) so that an
     /// intermediate revocation severs every downstream authority.
+    ///
+    /// Phase 3 P3.7 — emits one `Revoked` event per slot that
+    /// was cleared (via the inner `revoke` call) plus one
+    /// `RevokeTree` event with the total at the end. The
+    /// `RevokeTree` event marks the operation as a whole so
+    /// subscribers can distinguish "single revoke" from
+    /// "subtree wipe".
     pub fn revoke_tree(&self, root: SlotId) -> usize {
         let mut removed = 0usize;
         let mut frontier = vec![root];
@@ -484,11 +645,15 @@ impl CapabilitySpace {
             for c in children {
                 frontier.push(c);
             }
-            // Now revoke this slot.
+            // Now revoke this slot. Each successful revoke
+            // publishes its own Revoked event (P3.7).
             if self.revoke(slot) {
                 removed += 1;
             }
         }
+        let _ = self.inner.events.publish(
+            crate::capability::events::GraphEvent::RevokeTree { root, total: removed },
+        );
         removed
     }
 
@@ -508,3 +673,4 @@ impl CapabilitySpace {
             .collect()
     }
 }
+

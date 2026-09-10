@@ -1,4 +1,8 @@
-//! stream_echo plugin — `StreamEchoResource: Resource`. Stream only.
+//! echo_stream plugin — `EchoStreamResource: Resource`. Stream only.
+//!
+//! Renamed from `stream_echo` to `echo_stream` to group it
+//! under the echo family more naturally (echo / echo_chain /
+//! echo_stream all share the `echo_` prefix).
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,13 +16,13 @@ use crate::capability::{CapabilityChunk, Resource, Slot};
 const CHANNEL_CAPACITY: usize = 8;
 const TICK: Duration = Duration::from_millis(20);
 
-pub struct StreamEchoResource;
+pub struct EchoStreamResource;
 
-impl Resource for StreamEchoResource {
+impl Resource for EchoStreamResource {
     fn open(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
         let text = input
             .as_str()
-            .ok_or_else(|| "stream_echo: input must be a string".to_string())?
+            .ok_or_else(|| "echo_stream: input must be a string".to_string())?
             .to_string();
 
         let (tx, rx) = mpsc::channel(CHANNEL_CAPACITY);
@@ -35,20 +39,20 @@ impl Resource for StreamEchoResource {
     }
 }
 
-pub fn handler() -> Arc<StreamEchoResource> {
-    Arc::new(StreamEchoResource)
+pub fn handler() -> Arc<EchoStreamResource> {
+    Arc::new(EchoStreamResource)
 }
 
-pub fn stream_echo_plugin() -> Arc<dyn Plugin> {
+pub fn echo_stream_plugin() -> Arc<dyn Plugin> {
     plugin_with(
-        "stream_echo",
-        vec![Injection::from("slot:stream_echo")],
+        "echo_stream",
+        vec![Injection::from("slot:echo_stream")],
         |ctx: Context, _cfg: ()| async move {
-            let slot: Arc<Slot<StreamEchoResource>> = ctx.require("slot:stream_echo")?;
+            let slot: Arc<Slot<EchoStreamResource>> = ctx.require("slot:echo_stream")?;
             ctx.logger().log(
                 LogLevel::Info,
                 format!(
-                    "stream_echo plugin: slot={} cap_id={}",
+                    "echo_stream plugin: slot={} cap_id={}",
                     slot.id().raw(),
                     slot.capability()
                         .map(|c| c.id().to_string())

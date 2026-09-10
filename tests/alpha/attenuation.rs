@@ -4,7 +4,7 @@
 //! Same invariant applies to `grant` and `transfer`.
 
 use odyssey::capability::{CapabilityError, CapabilityRights, OperationRights};
-use odyssey::plugins::counter::CounterResource;
+use odyssey::plugins::test_only::counter::CounterResource;
 
 #[test]
 fn amplification_rejected_across_all_ops() {

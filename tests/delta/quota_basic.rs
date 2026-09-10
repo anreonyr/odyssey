@@ -4,7 +4,7 @@
 //! (N+1)-th call.
 
 use odyssey::capability::{OperationRights, QuotaSpec, Slot};
-use odyssey::plugins::counter::CounterResource;
+use odyssey::plugins::test_only::counter::CounterResource;
 use serde_json::json;
 
 #[test]

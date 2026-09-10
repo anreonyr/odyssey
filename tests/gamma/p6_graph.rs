@@ -4,7 +4,7 @@
 //! parent→child attenuation tree to runtime code.
 
 use odyssey::capability::{CapabilityRights, OperationRights};
-use odyssey::plugins::counter::CounterResource;
+use odyssey::plugins::test_only::counter::CounterResource;
 
 #[test]
 fn graph_walks_attenuation_tree() {

@@ -1,12 +1,12 @@
-//! γ.4 — Contract defaults when manifest omits it.
+//! γ.4 — Protocol metadata defaults when manifest omits it.
 //!
-//! Missing `[exposes.contract]` falls back to
-//! `CapabilityContract::default()`.
+//! Phase 3 P3.2 — missing `[exposes.protocol]` and
+//! `[exposes.authority]` both fall back to empty structs.
 
 use serde_json::Value;
 
 #[test]
-fn missing_contract_defaults_to_empty() {
+fn missing_protocol_defaults_to_empty() {
     let (space, factory) = crate::common::boot();
     let decl = odyssey::kernel::manifest::CapabilityDecl {
         name: "demo".into(),
@@ -15,7 +15,7 @@ fn missing_contract_defaults_to_empty() {
         streaming: false,
         ..Default::default()
     };
-    let slot = factory.mint::<odyssey::plugins::counter::CounterResource>(
+    let slot = factory.mint::<odyssey::plugins::test_only::counter::CounterResource>(
         odyssey::capability::CapKind::Sync,
         &decl,
         &odyssey::kernel::manifest::PluginId {
@@ -23,9 +23,16 @@ fn missing_contract_defaults_to_empty() {
             version: "0.1.0".into(),
         },
         odyssey::capability::CapabilityBudget::new(crate::common::DEFAULT_TIMEOUT_MS),
-        odyssey::plugins::counter::handler(),
+        odyssey::plugins::test_only::counter::handler(),
     );
     let observed = space.slot_meta(slot).unwrap();
-    assert_eq!(observed.contract.description, "");
-    assert_eq!(observed.contract.input_schema, Value::Null);
+    // Phase 3 P3.2 — both `protocol` and `authority` default
+    // to empty. Description is "", input_schema is Null, no
+    // actions published.
+    assert_eq!(observed.protocol.description, "");
+    assert_eq!(observed.protocol.input_schema, Value::Null);
+    assert_eq!(observed.protocol.media_type, "");
+    assert_eq!(observed.protocol.version, "");
+    assert_eq!(observed.protocol.transport, "");
+    assert!(observed.authority.actions.is_empty());
 }

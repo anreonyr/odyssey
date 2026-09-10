@@ -13,9 +13,9 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::capability::CapabilityContract;
+use crate::capability::{AuthorityContract, Protocol};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd, Serialize, Deserialize)]
 pub struct PluginId {
     pub name: String,
     pub version: String,
@@ -30,12 +30,58 @@ pub struct PluginManifest {
     pub isolate: IsolationMode,
     #[serde(default)]
     pub exposes: Vec<CapabilityDecl>,
+    /// Phase 3 P3.1 — capability-keyed dependencies. The resolver
+    /// matches each `requires[*].contract` against another
+    /// manifest's `[[exposes]] contract_name`. A plugin declares
+    /// what contract it needs, not which plugin provides it; the
+    /// resolver decides. Empty `requires` means the plugin is a
+    /// root provider (or has no capability dependencies).
+    ///
+    /// This is the **preferred** way to declare dependencies going
+    /// forward. The legacy `consumes` field (plugin-version-keyed)
+    /// is kept for backward compatibility but new plugins should
+    /// use `requires`.
+    #[serde(default)]
+    pub requires: Vec<CapabilityRequirement>,
+    /// Legacy plugin-version-keyed dependency declaration.
+    /// Deprecated as of Phase 3 P3.1; use `requires` instead.
+    /// Kept so existing manifests continue to parse until the
+    /// next major version removes the field.
     #[serde(default)]
     pub consumes: Vec<DependencyRef>,
     #[serde(default)]
     pub host: Vec<HostServiceRef>,
     #[serde(default)]
     pub resources: ResourceHints,
+}
+
+/// Phase 3 P3.1 — a capability-keyed dependency.
+///
+/// A plugin's runtime behaviour is determined by which contracts
+/// it can bind to. The resolver at boot time scans every loaded
+/// manifest, builds a `contract_name → provider plugin` index,
+/// then walks each plugin's `requires` list to determine mint
+/// order and bindings.
+///
+/// Example:
+/// ```toml
+/// [[requires]]
+/// name     = "embedder"      # handle inside this plugin
+/// contract = "embedder"      # the contract to bind against
+/// ```
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CapabilityRequirement {
+    /// Local handle name. The plugin code uses this string to
+    /// look up the received slot reference. By convention,
+    /// matches the provider's capability name but isn't required
+    /// to — the handle is purely local.
+    pub name: String,
+    /// Contract name to bind against. Must match exactly one
+    /// `[[exposes]] contract_name` from another loaded manifest,
+    /// or boot fails with `ResolveError::Unprovided` (no
+    /// provider) or `ResolveError::Ambiguous` (multiple providers
+    /// without a priority hint).
+    pub contract: String,
 }
 
 /// Isolation mode for a plugin. The runtime currently supports
@@ -66,16 +112,30 @@ pub struct CapabilityDecl {
     #[allow(dead_code)]
     pub out_type: String,
     pub streaming: bool,
-    /// JSON-Schema-style contract for input / output, an action
-    /// table that names the RPC verbs the cap accepts and the
-    /// `OperationRights` bit each requires, and a one-line
-    /// description. Optional — missing field deserialises to an
-    /// empty contract so existing manifests keep parsing unchanged.
-    /// `CapabilityMeta.contract` carries it from the factory into
-    /// the runtime, where the HTTP bridge and any type-aware
-    /// caller (the `RuleAgent` in particular) can read it.
+    /// Phase 3 P3.1 — the contract name this capability publishes.
+    /// Other plugins declare a matching `contract` in their
+    /// `[[requires]]` block to be bound to this capability at boot.
+    /// Empty string means "no contract published" — such caps are
+    /// only reachable by direct slot lookup, not by capability
+    /// injection. Conventional form is lowercase dotted, e.g.
+    /// `"generator"`, `"embedder"`, `"database"`, `"agent"`.
     #[serde(default)]
-    pub contract: CapabilityContract,
+    pub contract_name: String,
+    /// Phase 3 P3.2 — Authority vocabulary (action →
+    /// `OperationRights` map). The runtime path's only
+    /// authority input; `RuleAgent` reads
+    /// `authority.operation_for(action)` to translate verbs
+    /// to bits. Optional — empty authority means "no
+    /// enumerable action surface".
+    #[serde(default)]
+    pub authority: AuthorityContract,
+    /// Phase 3 P3.2 — Wire-protocol metadata (schemas,
+    /// description, transport, version, media_type). Pure
+    /// metadata; the runtime never validates against it.
+    /// Optional — empty protocol means "no advertised wire
+    /// metadata".
+    #[serde(default)]
+    pub protocol: Protocol,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

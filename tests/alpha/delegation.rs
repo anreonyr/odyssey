@@ -4,8 +4,8 @@
 //! slot via `cspace.restrict`.
 
 use odyssey::capability::{OperationRights, Slot, SlotId};
-use odyssey::plugins::broker::BrokerResource;
-use odyssey::plugins::counter::CounterResource;
+use odyssey::plugins::test_only::broker::BrokerResource;
+use odyssey::plugins::test_only::counter::CounterResource;
 use serde_json::json;
 
 #[test]

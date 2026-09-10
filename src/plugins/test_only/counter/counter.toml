@@ -17,30 +17,40 @@ kind = "in_proc"
 
 
 [[exposes]]
-name      = "counter"
-in_type   = "object"
-out_type  = "object"
-streaming = false
+name          = "counter"
+in_type       = "object"
+out_type      = "object"
+streaming     = false
+contract_name = "counter"
 
 # Capability contract — JSON Schema for input / output, surfaced by
 # the HTTP bridge and any type-aware caller. The `actions` field
 # publishes the action → OperationRights vocabulary that the
 # RuleAgent (and any other type-agnostic orchestrator) reads to
 # dispatch without hardcoding the mapping.
-[exposes.contract]
+#
+# Phase 3 P3.2: split the old `[exposes.contract]` block into
+# `[exposes.protocol]` (wire metadata — schemas, description,
+# media_type, version, transport) and `[[exposes.authority.actions]]`
+# (action → OperationRights map, the load-bearing authority
+# vocabulary).
+[exposes.protocol]
 description = "Shared integer behind a mutex. Three actions: read, increment, reset."
 input_schema = { type = "object", required = ["op"], properties = { op = { type = "string", enum = ["read", "increment", "reset"] } } }
 output_schema = { type = "object", required = ["value"], properties = { value = { type = "integer" } } }
+media_type = "application/json"
+version = "1.0"
+transport = "in-process"
 
-[[exposes.contract.actions]]
+[[exposes.authority.actions]]
 name      = "read"
 operation = "READ"
 
-[[exposes.contract.actions]]
+[[exposes.authority.actions]]
 name      = "increment"
 operation = "WRITE"
 
-[[exposes.contract.actions]]
+[[exposes.authority.actions]]
 name      = "reset"
 operation = "ADMIN"
 

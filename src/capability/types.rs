@@ -82,13 +82,29 @@ pub struct CapabilityMeta {
     /// `"odyssey.model.llama3"` or `"org.example.db.read"`. Empty
     /// string means "root namespace" (legacy single-name caps).
     pub namespace: String,
+    /// Phase 3 P3.1 — the contract name this capability
+    /// publishes. Set from the manifest's `[[exposes]] contract_name`
+    /// and copied verbatim into the runtime meta so the resolver,
+    /// HTTP bridge, and any introspection layer can match
+    /// `requires[*].contract` against it. Empty string means
+    /// "no contract published" (legacy caps; not reachable via
+    /// capability injection).
+    pub contract_name: String,
     pub plugin: PluginId,
     pub in_type: String,
     pub out_type: String,
     pub streaming: bool,
     pub timeout_ms: u32,
     pub quota: QuotaSpec,
-    pub contract: CapabilityContract,
+    /// Authority vocabulary (action → OperationRights map).
+    /// Phase 3 P3.2 — extracted from the old `contract` field.
+    /// `RuleAgent` reads `authority.operation_for(action)` to
+    /// translate verbs to bits. Load-bearing at runtime.
+    pub authority: AuthorityContract,
+    /// Wire-protocol metadata (schemas, description, transport).
+    /// Phase 3 P3.2 — split out of the old `contract` field.
+    /// Pure metadata; the runtime never validates against it.
+    pub protocol: Protocol,
 }
 
 // ---------------------------------------------------------------------------
@@ -117,31 +133,39 @@ pub struct CapabilityAction {
     pub operation: String,
 }
 
-/// JSON-Schema-style contract for a capability's input and output.
-/// Stored as `serde_json::Value` so any schema dialect can ride along.
+// ---------------------------------------------------------------------------
+// Phase 3 P3.2 — split contract into AuthorityContract (action → op map) and
+// Protocol (wire metadata). The two concerns had been folded into one
+// `CapabilityContract`, but they serve different audiences:
+//
+//   - `AuthorityContract` is consumed by type-agnostic dispatchers
+//     (the `RuleAgent`) to translate action verbs to OperationRights bits.
+//     It's load-bearing for runtime authority checks: a missing entry here
+//     means "the cap refuses this action"; an unknown bit means "the cap
+//     publishes a vocabulary the agent can't honour."
+//
+//   - `Protocol` is pure metadata: schemas, description, transport hint,
+//     wire version. It doesn't drive any dispatch path. The HTTP bridge
+//     (and future OpenAPI/JSON-RPC descriptors) read it to advertise what
+//     the cap accepts; the runtime never validates against it.
+//
+// `Resource::invoke(Value)` still takes raw JSON. Protocol is observable
+// but not enforced.
+// ---------------------------------------------------------------------------
+
+/// Authority vocabulary published by a capability: the set of
+/// action verbs a caller may invoke, each tagged with the
+/// `OperationRights` bit the caller must hold.
 ///
-/// The contract is *descriptive*, not enforced at runtime — `Resource`
-/// stays the runtime shape. But the contract lets the HTTP bridge
-/// render a typed form, lets discovery answer "what does this cap
-/// accept?", and lets future versions of `Resource` become generic
-/// over `R + Contract`.
-///
-/// The `actions` field is the per-capability RPC vocabulary: the
-/// list of action verbs a caller may invoke, each tagged with the
-/// `OperationRights` bit the caller must hold. Type-agnostic
-/// orchestrators (the `RuleAgent` plugin in particular) read this
-/// instead of guessing the action → bit mapping themselves.
+/// This is the **only** part of the original
+/// `CapabilityContract` that the runtime path actually
+/// consulted — the `RuleAgent` reads it via
+/// `AuthorityContract::operation_for(action)`. Splitting it
+/// out makes "what authority do I need to perform X?" a
+/// first-class question answerable from a small focused
+/// struct, separate from "what does the wire look like?".
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct CapabilityContract {
-    /// JSON Schema (or similar) for the input object.
-    #[serde(default)]
-    pub input_schema: Value,
-    /// JSON Schema (or similar) for the output value.
-    #[serde(default)]
-    pub output_schema: Value,
-    /// Optional one-line description, surfaced by the HTTP bridge.
-    #[serde(default)]
-    pub description: String,
+pub struct AuthorityContract {
     /// Per-capability RPC vocabulary. Empty means "no enumerable
     /// action surface" — callers must already know how to talk to
     /// the cap, or the type-agnostic dispatcher will refuse to
@@ -150,9 +174,89 @@ pub struct CapabilityContract {
     pub actions: Vec<CapabilityAction>,
 }
 
-impl CapabilityContract {
+impl AuthorityContract {
     pub fn empty() -> Self {
         Self::default()
+    }
+
+    /// Append an action to the vocabulary.
+    pub fn with_action(mut self, name: impl Into<String>, operation: impl Into<String>) -> Self {
+        self.actions.push(CapabilityAction {
+            name: name.into(),
+            operation: operation.into(),
+        });
+        self
+    }
+
+    /// Look up the operation bit string published for `action`.
+    /// Returns `None` if the action isn't in the cap's vocabulary
+    /// — callers (e.g. the type-agnostic `RuleAgent`) treat that
+    /// as a "no such method" error.
+    pub fn operation_for(&self, action: &str) -> Option<&str> {
+        self.actions
+            .iter()
+            .find(|a| a.name == action)
+            .map(|a| a.operation.as_str())
+    }
+}
+
+/// Wire-protocol metadata published by a capability. **Does
+/// not drive dispatch.** `Resource::invoke(Value)` accepts raw
+/// JSON and the handler parses internally; this struct
+/// describes the surface so external clients (HTTP bridge,
+/// OpenAPI generators, JSON-RPC descriptors) can advertise
+/// what the cap accepts without modifying the runtime.
+///
+/// All fields are optional with sensible defaults so an empty
+/// `Protocol` means "no advertised metadata":
+///
+/// - `description`: free-text one-liner; surfaces in docs.
+/// - `input_schema` / `output_schema`: JSON Schema (or any
+///   dialect that rides along as `serde_json::Value`).
+/// - `media_type`: wire encoding. Default empty string means
+///   "not advertised"; the HTTP bridge defaults to
+///   `application/json` for JSON-typed caps.
+/// - `version`: wire format version, independent of the
+///   plugin's own version. Bumping protocol version means the
+///   byte layout changed, not the capability's behaviour.
+/// - `transport`: hint of where this cap is reachable
+///   (`in-process`, `http`, `grpc`, ...). Empty means "not
+///   advertised". The HTTP bridge uses this to decide
+///   whether to register a route; in-process caps skip it.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct Protocol {
+    /// One-line description. Surfaces in HTTP bridge docs and
+    /// OpenAPI generators.
+    #[serde(default)]
+    pub description: String,
+    /// JSON Schema (or similar) for the input object.
+    #[serde(default)]
+    pub input_schema: Value,
+    /// JSON Schema (or similar) for the output value.
+    #[serde(default)]
+    pub output_schema: Value,
+    /// Wire encoding. Empty means "not advertised".
+    #[serde(default)]
+    pub media_type: String,
+    /// Wire format version. Independent of the plugin's own
+    /// version. Bumping protocol.version means the byte layout
+    /// changed, not the capability's behaviour.
+    #[serde(default)]
+    pub version: String,
+    /// Hint of where this cap is reachable (`in-process`,
+    /// `http`, `grpc`, ...). Empty means "not advertised".
+    #[serde(default)]
+    pub transport: String,
+}
+
+impl Protocol {
+    pub fn empty() -> Self {
+        Self::default()
+    }
+
+    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
+        self.description = desc.into();
+        self
     }
 
     pub fn with_input(mut self, schema: Value) -> Self {
@@ -165,29 +269,19 @@ impl CapabilityContract {
         self
     }
 
-    pub fn with_description(mut self, desc: impl Into<String>) -> Self {
-        self.description = desc.into();
+    pub fn with_media_type(mut self, mt: impl Into<String>) -> Self {
+        self.media_type = mt.into();
         self
     }
 
-    /// Append an action to the vocabulary.
-    pub fn with_action(mut self, name: impl Into<String>, operation: impl Into<String>) -> Self {
-        self.actions.push(CapabilityAction {
-            name: name.into(),
-            operation: operation.into(),
-        });
+    pub fn with_version(mut self, v: impl Into<String>) -> Self {
+        self.version = v.into();
         self
     }
 
-    /// Look up the operation bit string published for `action`. Returns
-    /// `None` if the action isn't in the cap's vocabulary — callers
-    /// (e.g. the type-agnostic `RuleAgent`) treat that as a
-    /// "no such method" error.
-    pub fn operation_for(&self, action: &str) -> Option<&str> {
-        self.actions
-            .iter()
-            .find(|a| a.name == action)
-            .map(|a| a.operation.as_str())
+    pub fn with_transport(mut self, t: impl Into<String>) -> Self {
+        self.transport = t.into();
+        self
     }
 }
 

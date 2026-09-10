@@ -34,6 +34,7 @@
 
 pub mod cap;
 pub mod cspace;
+pub mod events;
 pub mod graph;
 pub mod resource;
 pub mod types;
@@ -42,9 +43,9 @@ pub use cap::{AnyCapability, Capability};
 pub use cspace::{CapabilitySpace, Slot};
 pub use resource::Resource;
 pub use types::{
-    CapabilityBudget, CapabilityChunk, CapabilityContract, CapabilityError, CapabilityId,
-    CapabilityMeta, CapabilityRights, CapKind, OperationRights, QuotaKind, QuotaSnapshot,
-    QuotaSpec, QuotaState, SlotId,
+    AuthorityContract, CapabilityAction, CapabilityBudget, CapabilityChunk,
+    CapabilityError, CapabilityId, CapabilityMeta, CapabilityRights, CapKind, OperationRights,
+    Protocol, QuotaKind, QuotaSnapshot, QuotaSpec, QuotaState, SlotId,
 };
 #[allow(unused_imports)]
 use CapabilityError as _;

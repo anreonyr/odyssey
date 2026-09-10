@@ -4,8 +4,8 @@
 //! capability environments produce different observable behaviour.
 
 use odyssey::capability::{CapabilityRights, OperationRights, Slot};
-use odyssey::plugins::agent::{handler as agent_handler, AgentResource};
-use odyssey::plugins::counter::CounterResource;
+use odyssey::plugins::test_only::agent::{handler as agent_handler, AgentResource};
+use odyssey::plugins::test_only::counter::CounterResource;
 use serde_json::json;
 
 #[test]
