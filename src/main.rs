@@ -1,29 +1,15 @@
-//! Odyssey entry point — single binary, 7-phase boot + HTTP bridge.
+//! Odyssey entry point — boots the capability kernel + HTTP bridge.
 //!
-//! ```text
-//! cargo run -- boot    # default; load manifests, mint caps, start HTTP server
-//! cargo run -- odyssey # alias for boot
-//! ```
+//! Loads every manifest under `src/plugins/`, mints a typed
+//! `Capability<R>` for each `[[exposes]]`, registers slots, and
+//! serves the HTTP bridge on 127.0.0.1:3030 until Ctrl-C.
 //!
-//! Without a subcommand the binary prints usage. The 10 Phase 1+2
-//! capability experiments that used to live at `cargo run -- lab <name>`
-//! are now exercised as `#[test]` functions under `tests/{alpha,beta,
-//! gamma,delta}/`; run them with `cargo test` (or `cargo test --
-//! --nocapture` for printed transcripts).
+//! The capability experiments are run via `cargo test
+//! tests/{alpha,beta,gamma,delta}/` — this binary is the runtime.
 
 use odyssey::host::boot;
 
-const USAGE: &str = "usage:
-  cargo run -- boot
-  cargo run -- odyssey";
-
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    match std::env::args().nth(1).as_deref() {
-        Some("boot") | Some("odyssey") | None => boot::run().await,
-        _ => {
-            eprintln!("{USAGE}");
-            std::process::exit(2);
-        }
-    }
+    boot::run().await
 }

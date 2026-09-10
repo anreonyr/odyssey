@@ -1,4 +1,4 @@
-//! Odyssey — seL4-style capability kernel, manifest-driven boot.
+//! Odyssey — manifest-driven capability kernel boot.
 //!
 //! ## Possession model
 //!
@@ -10,54 +10,37 @@
 //!
 //! ## Boot order
 //!
-//!   Phase 1  Parse manifests
-//!   Phase 2  Provide core services (capability_space, capability_factory, registry)
-//!   Phase 3  Mint typed tokens, allocate slots, install + provide slots
-//!   Phase 4  Validate graph — fail-fast on missing providers
-//!   Phase 5  Start plugins — cordis resolves slot inject declarations
-//!   Phase 6  Demo harness — invoke via typed slots
-//!   Phase 7  HTTP bridge — enumerates via CSpace
+//!   Phase 1  Parse manifests (split by runtime support)
+//!   Phase 2  Provide core services (cspace, factory, registry)
+//!   Phase 3  Mint typed tokens + provide slots to cordis
+//!   Phase 4  Validate the dependency graph (fail-fast on missing
+//!            providers)
+//!   Phase 5  Start plugins
+//!   Phase 6  Bring up the HTTP bridge and wait for Ctrl-C
+//!
+//! Phase 6 in earlier versions exercised the caps with a demo
+//! transcript; that has moved to `tests/{alpha,beta,gamma,delta}/`,
+//! so the boot here stops at "kernel + plugins running".
 
 use std::collections::HashSet;
-use std::io::Write as _;
 use std::sync::Arc;
 
-use crate::capability::{Capability, CapabilityBudget, CapabilitySpace, CapKind, Slot};
+use crate::capability::{CapabilityBudget, CapabilitySpace, CapKind, Slot};
 use crate::host::factory::CapabilityFactory;
 use crate::host::http_bridge::serve;
 use crate::host::manifest::{CapabilityDecl, PluginId, PluginManifest};
-use crate::plugins::{
-    echo::{EchoResource, echo_plugin},
-    echo_chain::{EchoChainResource, echo_chain_plugin},
-    generator::{GeneratorResource, generator_plugin},
-    reverse::{ReverseResource, reverse_plugin},
-    sandbox::{SandboxResource, sandbox_plugin},
-    slow::{SlowResource, slow_plugin},
-    stream_echo::{StreamEchoResource, stream_echo_plugin},
-};
 use crate::host::registry::Registry;
-use serde_json::json;
+use crate::plugins::{
+    echo::{echo_plugin, EchoResource},
+    echo_chain::{echo_chain_plugin, EchoChainResource},
+    generator::{generator_plugin, GeneratorResource},
+    reverse::{reverse_plugin, ReverseResource},
+    sandbox::{sandbox_plugin, SandboxResource},
+    slow::{slow_plugin, SlowResource},
+    stream_echo::{stream_echo_plugin, StreamEchoResource},
+};
 
 const MANIFEST_DIR: &str = "src/plugins";
-
-// ---------------------------------------------------------------------------
-// Streaming output helper
-// ---------------------------------------------------------------------------
-
-async fn print_stream(mut rx: tokio::sync::mpsc::Receiver<crate::capability::CapabilityChunk>) {
-    while let Some(chunk) = rx.recv().await {
-        match chunk {
-            crate::capability::CapabilityChunk::Item(v) => {
-                print!("{}", v.as_str().unwrap_or("?"));
-                let _ = std::io::stdout().flush();
-            }
-            crate::capability::CapabilityChunk::Done => {
-                println!("\n   [done]");
-                break;
-            }
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Mint helpers
@@ -97,8 +80,6 @@ where
 // Boot
 // ---------------------------------------------------------------------------
 
-/// 7-phase boot orchestration. Called by `main` in the top-level
-/// `main.rs`; runs inside the `#[tokio::main]` runtime.
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 1: Parse manifests.
     let LoadedManifests { ready, deferred } = load_manifests(MANIFEST_DIR)?;
@@ -114,7 +95,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     for m in &deferred {
         println!(
-            "  - {}@{}  {:?}  [skip: {} — manifest on disk but no runtime loader]",
+            "  - {}@{}  {:?}  [skip: {}]",
             m.plugin.name,
             m.plugin.version,
             m.isolate,
@@ -134,64 +115,25 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     ctx.provide("registry", registry.clone()).await?;
     println!("[main] core services provided");
 
-    // Phase 3 + 4: Mint typed tokens, allocate slots, install + provide to cordis.
+    // Phase 3: Mint typed tokens + provide slots to cordis.
     println!("\n[mint] capability tokens:");
 
     let echo_slot_id = mint_and_provide::<EchoResource, _>(
-        &ctx,
-        &factory,
-        &manifests,
-        "echo",
-        CapKind::Sync,
-        "slot:echo",
+        &ctx, &factory, &manifests, "echo", CapKind::Sync, "slot:echo",
         |_, _| crate::plugins::echo::handler(),
-    )
-    .await?;
-    if let Some(id) = echo_slot_id {
-        println!("  echo  →  slot={id}");
-    }
-
-    let reverse_slot_id = mint_and_provide::<ReverseResource, _>(
-        &ctx,
-        &factory,
-        &manifests,
-        "reverse",
-        CapKind::Sync,
-        "slot:reverse",
+    ).await?;
+    let _reverse_slot_id = mint_and_provide::<ReverseResource, _>(
+        &ctx, &factory, &manifests, "reverse", CapKind::Sync, "slot:reverse",
         |_, _| crate::plugins::reverse::handler(),
-    )
-    .await?;
-    if let Some(id) = reverse_slot_id {
-        println!("  reverse  →  slot={id}");
-    }
-
-    let slow_slot_id = mint_and_provide::<SlowResource, _>(
-        &ctx,
-        &factory,
-        &manifests,
-        "slow",
-        CapKind::Sync,
-        "slot:slow",
+    ).await?;
+    let _slow_slot_id = mint_and_provide::<SlowResource, _>(
+        &ctx, &factory, &manifests, "slow", CapKind::Sync, "slot:slow",
         |_, _| crate::plugins::slow::handler(),
-    )
-    .await?;
-    if let Some(id) = slow_slot_id {
-        println!("  slow  →  slot={id}");
-    }
-
-    let sandbox_slot_id = mint_and_provide::<SandboxResource, _>(
-        &ctx,
-        &factory,
-        &manifests,
-        "sandbox",
-        CapKind::Sync,
-        "slot:exec",
+    ).await?;
+    let _sandbox_slot_id = mint_and_provide::<SandboxResource, _>(
+        &ctx, &factory, &manifests, "sandbox", CapKind::Sync, "slot:exec",
         |_, _| crate::plugins::sandbox::handler(),
-    )
-    .await?;
-    if let Some(id) = sandbox_slot_id {
-        println!("  exec  →  slot={id}");
-    }
+    ).await?;
 
     // Echo-chain — depends on the typed Capability<EchoResource>.
     if let (Some(echo_id), Some(m)) = (
@@ -202,7 +144,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         let budget = CapabilityBudget::new(m.resources.timeout_ms.unwrap_or(5000));
         let echo_cap = cspace
             .lookup_typed::<EchoResource>(echo_id)
-            .ok_or_else(|| "echo-chain: typed echo capability missing")?;
+            .expect("echo cap present at the slot we just minted");
         let slot_id = factory.mint::<EchoChainResource>(
             CapKind::Sync,
             decl,
@@ -215,33 +157,14 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         println!("  echo_chain  →  slot={slot_id}");
     }
 
-    let stream_echo_slot_id = mint_and_provide::<StreamEchoResource, _>(
-        &ctx,
-        &factory,
-        &manifests,
-        "stream_echo",
-        CapKind::Stream,
-        "slot:stream_echo",
+    mint_and_provide::<StreamEchoResource, _>(
+        &ctx, &factory, &manifests, "stream_echo", CapKind::Stream, "slot:stream_echo",
         |_, _| crate::plugins::stream_echo::handler(),
-    )
-    .await?;
-    if let Some(id) = stream_echo_slot_id {
-        println!("  stream_echo  →  slot={id}");
-    }
-
-    let gen_slot_id = mint_and_provide::<GeneratorResource, _>(
-        &ctx,
-        &factory,
-        &manifests,
-        "generator",
-        CapKind::Stream,
-        "slot:generate",
+    ).await?;
+    mint_and_provide::<GeneratorResource, _>(
+        &ctx, &factory, &manifests, "generator", CapKind::Stream, "slot:generate",
         |_, _| crate::plugins::generator::handler(),
-    )
-    .await?;
-    if let Some(id) = gen_slot_id {
-        println!("  generate  →  slot={id}");
-    }
+    ).await?;
 
     // Track which capabilities ended up installed.
     let provided_caps: HashSet<String> = manifests
@@ -320,186 +243,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // Phase 6: Demo — typed invocation via Slot.
-    println!("\n[demo] capability invocations:");
-
-    if let Some(echo_slot) = ctx
-        .require::<Slot<EchoResource>>("slot:echo")
-        .ok()
-    {
-        match echo_slot.invoke(json!({"message": "hello", "n": 42})) {
-            Ok(v) => println!("  echo: {v}"),
-            Err(e) => println!("  echo error: {e}"),
-        }
-    }
-    if let Some(rev_slot) = ctx.require::<Slot<ReverseResource>>("slot:reverse").ok() {
-        match rev_slot.invoke(json!("pipeline")) {
-            Ok(v) => println!("  reverse: {v}"),
-            Err(e) => println!("  reverse error: {e}"),
-        }
-    }
-    if let Some(stream_slot) = ctx
-        .require::<Slot<StreamEchoResource>>("slot:stream_echo")
-        .ok()
-    {
-        match stream_slot.open(json!("hello world from stream_echo")) {
-            Ok(rx) => {
-                println!("  stream_echo:");
-                print!("   ");
-                print_stream(rx).await;
-            }
-            Err(e) => println!("  stream_echo error: {e}"),
-        }
-    }
-    if let Some(slow_slot) = ctx.require::<Slot<SlowResource>>("slot:slow").ok() {
-        println!(
-            "\n  slow slot (timeout={}ms, will timeout):",
-            slow_slot.meta().map(|m| m.timeout_ms).unwrap_or(0)
-        );
-        match slow_slot.invoke(json!({"hi": "limiter"})) {
-            Ok(v) => println!("  [unexpected success] {v}"),
-            Err(e) => println!("  [expected timeout] {e}"),
-        }
-    }
-
-    // Factory mint snapshots.
-    println!("\n[budget] minted token snapshots:");
-    for snap in factory.snapshots() {
-        println!(
-            "  {}@{}: id={} timeout={}ms",
-            snap.plugin.name, snap.plugin.version, snap.id, snap.timeout_ms
-        );
-    }
-
-    // Pipeline — hold typed Capability<R> in stages.
-    println!("\n[pipeline] token-based composition:");
-    if let (Some(rev_slot), Some(echo_slot)) = (
-        ctx.require::<Slot<ReverseResource>>("slot:reverse").ok(),
-        ctx.require::<Slot<EchoResource>>("slot:echo").ok(),
-    ) {
-        let rev_cap: Arc<Capability<ReverseResource>> = rev_slot
-            .capability()
-            .ok_or("rev slot empty")?;
-        let echo_cap: Arc<Capability<EchoResource>> = echo_slot
-            .capability()
-            .ok_or("echo slot empty")?;
-        let stages = vec![
-            crate::host::pipeline::SyncStage::new(rev_cap)?,
-            crate::host::pipeline::SyncStage::new(echo_cap)?,
-        ];
-        let p = crate::host::pipeline::Pipeline::new(stages);
-        match p.run(json!("hello")) {
-            Ok(v) => println!("  reverse(echo(\"hello\")) = {v}"),
-            Err(e) => println!("  [pipeline error] {e}"),
-        }
-    }
-
-    // Generator streaming.
-    if let Some(gen_slot) = ctx
-        .require::<Slot<GeneratorResource>>("slot:generate")
-        .ok()
-    {
-        match gen_slot.open(json!("hello there")) {
-            Ok(rx) => {
-                println!("  generate streaming:");
-                print!("   ");
-                print_stream(rx).await;
-            }
-            Err(e) => println!("  generate error: {e}"),
-        }
-    }
-
-    // Sandbox via slot.
-    println!("\n[sandbox] exec via slot (fuel=1_000_000):");
-    if let Some(sandbox_slot) = ctx.require::<Slot<SandboxResource>>("slot:exec").ok() {
-        match sandbox_slot.invoke(json!({
-            "path": "src/plugins/sandbox/sandbox_programs/hello.wat",
-            "fuel": 1_000_000
-        })) {
-            Ok(v) => println!("  {}", serde_json::to_string_pretty(&v).unwrap()),
-            Err(e) => println!("  error: {e}"),
-        }
-    }
-
-    // Demonstrate revocation: revoke echo's slot, then the plugin's lookup fails.
-    if let Some(echo_slot_id) = echo_slot_id {
-        println!("\n[revoke] clearing echo slot={echo_slot_id}...");
-        cspace.revoke(echo_slot_id);
-        if let Some(echo_slot) = ctx.require::<Slot<EchoResource>>("slot:echo").ok() {
-            match echo_slot.invoke(json!({"after": "revoke"})) {
-                Ok(v) => println!("  [unexpected] {v}"),
-                Err(e) => println!("  [expected after revoke] {e}"),
-            }
-        }
-    }
-
-    // Demonstrate the four capability operations: grant / transfer /
-    // restrict / revoke. Operates on the typed `Slot<R>` references
-    // already in scope.
-    println!("\n[ops] grant / transfer / restrict / revoke:");
-
-    if let (Some(echo_id), Some(slow_id)) = (echo_slot_id, slow_slot_id) {
-        // Re-mint echo for the demo since the slot above was just revoked.
-        let echo_remint_id = factory.mint::<EchoResource>(
-            CapKind::Sync,
-            manifests.iter().find(|m| m.plugin.name == "echo").unwrap().exposes.first().unwrap(),
-            &manifests.iter().find(|m| m.plugin.name == "echo").unwrap().plugin,
-            CapabilityBudget::new(5000),
-            crate::plugins::echo::handler(),
-        );
-        let _ = echo_id;
-        let echo_slot = Slot::<EchoResource>::new(cspace.clone(), echo_remint_id);
-
-        // 1) Grant: derive a new slot "echo_lite" with reduced timeout.
-        let lite_rights = crate::capability::CapabilityRights::root(100);
-        let lite_id = echo_slot.grant(lite_rights, "echo_lite".to_string())?;
-        let lite_slot = Slot::<EchoResource>::new(cspace.clone(), lite_id);
-        println!("  grant:    slot={lite_id} timeout=100ms (source preserved)");
-        match echo_slot.invoke(json!({"via": "source"})) {
-            Ok(_) => println!("    source echo still works"),
-            Err(e) => println!("    source echo error: {e}"),
-        }
-        let lite_cap = lite_slot.capability().expect("lite slot populated");
-        println!(
-            "    lite cap timeout_ms={} ops={:?} id={}",
-            lite_cap.rights().timeout_ms,
-            lite_cap.operations(),
-            lite_cap.id()
-        );
-
-        // 2) Restrict: same operation semantically, different intent.
-        let strict_rights = crate::capability::CapabilityRights::root(50);
-        let strict_id = echo_slot.restrict(strict_rights, "echo_strict".to_string())?;
-        println!("  restrict: slot={strict_id} timeout=50ms");
-
-        // 3) Transfer: move slow to a new slot "slow_moved" with new
-        //    timeout. Source slot is cleared.
-        //
-        //    The slow slot was minted from slow.toml with
-        //    `timeout_ms = 50`, so the transferred slot must use a
-        //    subset of that budget (real attenuation, enforced by
-        //    Phase 1's restrict/grant/transfer). 25ms is a valid
-        //    subset.
-        let slow_slot = Slot::<SlowResource>::new(cspace.clone(), slow_id);
-        let moved_id = slow_slot.transfer(crate::capability::CapabilityRights::root(25))?;
-        println!("  transfer: slot={moved_id} name=slow (source cleared)");
-        match slow_slot.invoke(json!({})) {
-            Ok(_) => println!("    [unexpected] source still works"),
-            Err(e) => println!("    [expected] source empty: {e}"),
-        }
-        let moved_slot = Slot::<SlowResource>::new(cspace.clone(), moved_id);
-        match moved_slot.invoke(json!({})) {
-            Ok(_) => println!("    [unexpected] moved works (handler is 200ms, budget 1000ms)"),
-            Err(e) => println!("    moved slot invoke: {e}"),
-        }
-
-        // 4) Revoke: drop the new strict slot.
-        let _ = lite_slot.revoke();
-        let _ = Slot::<EchoResource>::new(cspace.clone(), strict_id).revoke();
-        println!("  revoke:   lite + strict slots cleared");
-    }
-
-    // Phase 7: HTTP bridge.
+    // Phase 6: HTTP bridge + wait.
     let ctx_clone = ctx.clone();
     let cspace_clone = cspace.clone();
     let server_handle = tokio::spawn(async move {
@@ -524,16 +268,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Manifests ready for the runtime, plus manifests that parsed
-/// cleanly but are not currently wired in (deferred to Phase 3).
+/// cleanly but are not currently wired in.
 struct LoadedManifests {
     ready: Vec<PluginManifest>,
     deferred: Vec<PluginManifest>,
 }
 
 /// `true` when the runtime knows how to actually instantiate this
-/// manifest. Today only `InProc` plugins are wired; `Wasm` (cdylib /
-/// WASM) and `Subprocess` are part of the Phase 3 isolation work and
-/// are reported as `[skip]` at boot, not silently dropped.
+/// manifest. Today only `InProc` plugins are wired; `Wasm` and
+/// `Subprocess` are deferred.
 fn is_runtime_supported(m: &PluginManifest) -> bool {
     matches!(m.isolate, crate::host::manifest::IsolationMode::InProc)
 }
