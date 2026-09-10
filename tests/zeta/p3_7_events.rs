@@ -401,6 +401,99 @@ fn full_lifecycle_event_sequence() {
 }
 
 // =========================================================================
+// ζ.21 — Multi-slot plugin shutdown emits per-slot events
+// =========================================================================
+//
+//     Complement to ζ.16 (single-slot plugins). For a plugin
+//     with N [[exposes]] blocks, the shutdown loop emits:
+//       1  PluginDeactivated
+//     + N  (1 Revoked + 1 RevokeTree) per slot
+//     = 1 + 2N events for the per-plugin portion of the
+//     shutdown sequence (plus the global ShutdownStarted /
+//     ShutdownCompleted bracketing). The single-slot ζ.16 case
+//     is N=1: 1 + 2*1 = 3, matching its `n*3` formula.
+//     Per-slot granularity gives audit logs a record of each
+//     individual cap revocation.
+
+#[test]
+fn multi_slot_plugin_shutdown_emits_per_slot_events() {
+    let space = CapabilitySpace::new();
+    let factory = CapabilityFactory::new(space.clone());
+    let mut rx = space.subscribe();
+
+    // Mint two caps for the same logical plugin. The
+    // shutdown loop treats a multi-slot plugin as one
+    // PluginDeactivated followed by per-slot revoke_tree
+    // calls.
+    let (_slot_a, _) = mint_counter(&factory, "counter_a");
+    let (_slot_b, _) = mint_counter(&factory, "counter_b");
+
+    let plugin = PluginId { name: "multi".into(), version: "0.1.0".into() };
+    let _ = space.events().publish(GraphEvent::PluginActivated {
+        plugin: plugin.clone(),
+    });
+
+    // Shutdown sequence (mirrors what `lifecycle::shutdown_runtime_plugins`
+    // does for a plugin with 2 [[exposes]]).
+    let _ = space.events().publish(GraphEvent::ShutdownStarted);
+    let _ = space.events().publish(GraphEvent::PluginDeactivated {
+        plugin: plugin.clone(),
+    });
+    let n_a = space.revoke_tree(_slot_a);
+    let n_b = space.revoke_tree(_slot_b);
+    assert_eq!(n_a, 1, "single-slot revoke_tree returns 1");
+    assert_eq!(n_b, 1, "single-slot revoke_tree returns 1");
+    let _ = space.events().publish(GraphEvent::ShutdownCompleted {
+        remaining_slots: space.len(),
+    });
+
+    // Drain and assert the shape.
+    let mut events: Vec<GraphEvent> = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        events.push(ev);
+    }
+
+    // Expected timeline (10 events for 2 slots):
+    //   0..2    : 2 × Minted (one per slot)
+    //   2       : PluginActivated
+    //   3       : ShutdownStarted
+    //   4       : PluginDeactivated
+    //   5..6    : slot_a → Revoked + RevokeTree
+    //   7..8    : slot_b → Revoked + RevokeTree
+    //   9       : ShutdownCompleted
+    assert_eq!(events.len(), 10, "2× Minted + Activated + Started + Deactivated + 2×(Revoked + RevokeTree) + Completed");
+
+    match &events[0] {
+        GraphEvent::Minted { capability, .. } => assert_eq!(capability, "counter_a"),
+        other => panic!("events[0] expected Minted(counter_a), got {other:?}"),
+    }
+    match &events[1] {
+        GraphEvent::Minted { capability, .. } => assert_eq!(capability, "counter_b"),
+        other => panic!("events[1] expected Minted(counter_b), got {other:?}"),
+    }
+    assert!(matches!(&events[2], GraphEvent::PluginActivated { .. }));
+    assert!(matches!(&events[3], GraphEvent::ShutdownStarted));
+    assert!(matches!(&events[4], GraphEvent::PluginDeactivated { .. }));
+
+    // Per-slot Revoked + RevokeTree — order within a slot is
+    // Revoked first (the inner revoke emits it), then
+    // RevokeTree (emitted by revoke_tree at the end).
+    match (&events[5], &events[6]) {
+        (GraphEvent::Revoked { .. }, GraphEvent::RevokeTree { total, .. }) => {
+            assert_eq!(*total, 1, "single-slot subtree has total=1");
+        }
+        other => panic!("events[5..7] expected (Revoked, RevokeTree), got {other:?}"),
+    }
+    match (&events[7], &events[8]) {
+        (GraphEvent::Revoked { .. }, GraphEvent::RevokeTree { total, .. }) => {
+            assert_eq!(*total, 1, "single-slot subtree has total=1");
+        }
+        other => panic!("events[7..9] expected (Revoked, RevokeTree), got {other:?}"),
+    }
+    assert!(matches!(&events[9], GraphEvent::ShutdownCompleted { .. }));
+}
+
+// =========================================================================
 // Helpers
 // =========================================================================
 

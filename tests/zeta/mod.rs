@@ -61,6 +61,10 @@
 //! - **ζ.16** ([`p3_7_events`]): full lifecycle event sequence
 //!   matches the expected boot shape (mint order → activate →
 //!   shutdown reverse order → completed).
+//! - **ζ.21** ([`p3_7_events`]): multi-slot plugin shutdown
+//!   emits per-slot Revoked + RevokeTree events (1 + 2N events
+//!   for a plugin with N [[exposes]] blocks), not the single-
+//!   RevokeTree shape a one-per-plugin reader might assume.
 //!
 //! ## Phase 3.3 — Real AI Resources
 //!

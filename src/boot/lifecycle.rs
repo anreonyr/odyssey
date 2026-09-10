@@ -426,10 +426,18 @@ async fn shutdown_runtime_plugins(
         // revoking. The subsequent `revoke_tree` calls emit
         // Revoked + RevokeTree events from cspace. Order:
         //   PluginDeactivated { plugin }
-        //   Revoked { slot, capability }
-        //   RevokeTree { root, total }
-        // — one PluginDeactivated per plugin, then N Revoked +
-        // 1 RevokeTree per plugin.
+        //   (per slot:)
+        //     Revoked { slot, capability }
+        //     RevokeTree { root, total }
+        // — one PluginDeactivated per plugin, then per-slot
+        // pairs of Revoked + RevokeTree. So a plugin with N
+        // [[exposes]] blocks emits 1 + 2*N events from this
+        // loop (plus any Revoked events from descendants
+        // reached via revoke_tree). The per-slot granularity
+        // gives audit logs a record of each individual cap
+        // revocation; see ζ.16 for the single-slot case and
+        // ζ.17 (multi_slot_plugin_shutdown) for the multi-slot
+        // case.
         cspace.publish_event(
             crate::capability::events::GraphEvent::PluginDeactivated {
                 plugin: plugin_id.clone(),

@@ -256,16 +256,24 @@ pub enum ModelKind {
 
 impl ModelKind {
     /// Parse from the `GENERATOR_MODEL` env var. Returns the
-    /// default (`Markov`) if unset or unrecognised. Logging
-    /// the unrecognised value is the caller's responsibility.
+    /// default (`Markov`) if unset or unrecognised. On an
+    /// unrecognised value, logs a warning to stderr so the
+    /// operator can spot a typo (`GENERATOR_MODEL=mockk`
+    /// silently falling back to `Markov` is a bad day).
     ///
     /// Reuses [`<Self as FromStr>::from_str`] so the case
     /// rules match: any case of "mock" or "markov" parses;
-    /// anything else falls back to `Markov`.
+    /// anything else falls back to `Markov` with a warning.
     pub fn from_env() -> Self {
         match std::env::var("GENERATOR_MODEL") {
             Err(_) => Self::Markov,
-            Ok(s) => s.parse().unwrap_or(Self::Markov),
+            Ok(s) => s.parse().unwrap_or_else(|_| {
+                eprintln!(
+                    "[generator] GENERATOR_MODEL={s:?} is not 'mock' or 'markov'; \
+                     falling back to 'markov'"
+                );
+                Self::Markov
+            }),
         }
     }
 

@@ -187,17 +187,29 @@ impl ManifestBuilder {
     /// type-agnostic dispatchers (RuleAgent) consult. Call once
     /// per action. The authority defaults to `empty()` if never
     /// called.
+    ///
+    /// Empty name or operation are rejected with `assert!`:
+    /// an empty action name is unreachable from any dispatch
+    /// (silent dead row), and an empty operation string is
+    /// unknown to `OperationRights::parse` (dispatch fails with
+    /// a confusing 'not a known operation' error). Fail loud at
+    /// manifest-build time instead.
     pub fn action(
         mut self,
         name: impl Into<String>,
         operation: impl Into<String>,
     ) -> Self {
-        // Stash action name + operation on the builder; we'll
-        // fold them into an `AuthorityContract` at `build()`.
-        self.actions.push((
-            name.into(),
-            operation.into(),
-        ));
+        let name = name.into();
+        let operation = operation.into();
+        assert!(
+            !name.is_empty(),
+            "ManifestBuilder::action: action name cannot be empty"
+        );
+        assert!(
+            !operation.is_empty(),
+            "ManifestBuilder::action: operation for action {name:?} cannot be empty"
+        );
+        self.actions.push((name, operation));
         self
     }
 
