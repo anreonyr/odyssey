@@ -20,6 +20,7 @@ use std::sync::Arc;
 
 use serde_json::Value;
 
+use crate::kernel::error::CapabilityError;
 use crate::kernel::{AnyCapability, CapabilitySpace, SlotId};
 
 #[derive(Debug, Clone)]
@@ -90,30 +91,30 @@ impl SyncStage {
 
     fn run(&self, input: Value) -> Result<Value, PipelineError> {
         match self {
-            Self::Pinned { cap, name } => cap
-                .invoke_dyn(input)
-                .map_err(|e| PipelineError::StageFailed(name.clone(), e)),
+            Self::Pinned { cap, name } => cap.invoke_dyn_typed(input).map_err(|e| match e {
+                CapabilityError::Revoked(s) | CapabilityError::SlotEmpty(s) => {
+                    PipelineError::SlotRevoked(s.to_string())
+                }
+                other => PipelineError::StageFailed(name.clone(), other.to_string()),
+            }),
             Self::Slot { cspace, slot, name } => {
                 // Fresh lookup every call — this is what makes
                 // revocation observable from inside the pipeline.
                 let cap = cspace
                     .lookup_erased(*slot)
                     .ok_or_else(|| PipelineError::SlotRevoked(slot.to_string()))?;
-                cap.invoke_dyn(input).map_err(|e| {
-                    // Phase 5 M4: typed error inspection. The
-                    // substring match was Phase 4's brittle
-                    // approximation; we now check whether the
-                    // error message indicates a slot empty/revoked
-                    // condition OR the typed `CapabilityError::SlotEmpty`
-                    // display. Handler errors stay stringly typed.
-                    let lowered = e.to_lowercase();
-                    if lowered.contains("slot") && lowered.contains("empty")
-                        || e.contains("capability revoked")
-                    {
-                        PipelineError::SlotRevoked(slot.to_string())
-                    } else {
-                        PipelineError::StageFailed(name.clone(), e)
+                // Phase 5 M4: typed error inspection. The typed
+                // `CapabilityError` variants let us pattern-match
+                // on `Revoked(SlotId)` / `SlotEmpty(SlotId)` to
+                // decide whether the run failed because the slot
+                // was revoked mid-flight (PipelineError::SlotRevoked)
+                // or for some other reason (PipelineError::StageFailed).
+                // No substring matching on Display output.
+                cap.invoke_dyn_typed(input).map_err(|e| match e {
+                    CapabilityError::Revoked(s) | CapabilityError::SlotEmpty(s) => {
+                        PipelineError::SlotRevoked(s.to_string())
                     }
+                    other => PipelineError::StageFailed(name.clone(), other.to_string()),
                 })
             }
         }

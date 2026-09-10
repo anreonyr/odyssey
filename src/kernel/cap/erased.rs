@@ -19,6 +19,7 @@ use tokio::sync::mpsc;
 
 use crate::kernel::cap::Capability;
 use crate::kernel::chunk::CapabilityChunk;
+use crate::kernel::error::CapabilityError;
 use crate::kernel::kind::CapKind;
 use crate::kernel::meta::CapabilityMeta;
 use crate::kernel::resource::Resource;
@@ -39,6 +40,26 @@ pub trait AnyCapability: Any + Send + Sync {
     ) -> Result<Value, String>;
     fn open_dyn(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String>;
     fn as_any(&self) -> &dyn Any;
+
+    /// Sync invoke that returns the typed `CapabilityError`. The
+    /// default impl wraps `invoke_dyn`'s string error via
+    /// `CapabilityError::from_string_lossy`, but the typed
+    /// `Capability<R>` impl returns the real typed variant so
+    /// callers (the host pipeline, the agent dispatch) can
+    /// pattern-match on `Revoked(SlotId)` / `SlotEmpty(SlotId)`
+    /// without resorting to substring matching on `Display`.
+    ///
+    /// Phase 5 M4: the only consumer that needed typed matching
+    /// was the pipeline. Now that the kernel exposes the typed
+    /// variant here, the pipeline can stop doing substring
+    /// checks against the rendered error message.
+    fn invoke_dyn_typed(&self, input: Value) -> Result<Value, CapabilityError> {
+        self.invoke_dyn(input)
+            .map_err(|message| CapabilityError::Handler {
+                name: self.meta().name.clone(),
+                message,
+            })
+    }
 
     /// Revocable marker. Phase 5 M2: default impl panics. Every
     /// `AnyCapability` impl MUST override this to flip a marker
@@ -76,6 +97,9 @@ impl<R: Resource> AnyCapability for Capability<R> {
         input: Value,
     ) -> Result<Value, String> {
         self.invoke_op(op, input).map_err(|e| e.to_string())
+    }
+    fn invoke_dyn_typed(&self, input: Value) -> Result<Value, CapabilityError> {
+        self.invoke(input)
     }
     fn open_dyn(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
         self.open(input).map_err(|e| e.to_string())
