@@ -715,6 +715,131 @@ is real before building Agent / LLM / Embedder on top of it.
 - `libloading` dependency (no cdylib loader wired).
 - 78 compiler warnings dropped to 0.
 
+### Added — Phase 5: kernel / host / runtime split
+
+Phase 5 reorganises the source tree into three orthogonal
+layers — `kernel` (pure capability algebra), `host` (manifest
+composition + dependency resolution), and `runtime` (lifecycle
+adapter + HTTP bridge). The split is the prerequisite for
+shipping the kernel as a library that does not depend on
+`tokio::time::Instant::now()` direct calls, on the filesystem,
+or on the cordis plugin bus.
+
+```
+src/
+├── kernel/   pure capability kernel (no I/O, no Instant::now)
+├── host/     manifest loader + resolver + factory + pipeline
+├── runtime/  lifecycle + activate + teardown + http_bridge
+└── plugins/  plugin bodies (depend on kernel + host)
+```
+
+#### Defect fixes landed in this phase
+
+- **D1** — `kernel/cap/typed.rs::derive` doc compressed to a
+  tripwire `debug_assert!`; precondition is now `cspace::install_derived`
+  has already verified `held.contains(&rights)`.
+- **D2** — `kernel/space/mod.rs::install_derived` refuses when the
+  parent id is no longer in `slots` (race-condition guard against
+  Interleaving 2). The check is against `slots`, not `parents`,
+  so root caps are not wrongly rejected.
+- **D3** — `kernel/quota/state.rs::CapabilityBudget::share_with`
+  clones the parent's `Arc<AtomicU64>` and `Arc<QuotaState>`
+  rather than allocating fresh. Derived caps now report
+  subtree-wide wall-clock usage; the per-minute call window is
+  global across the subtree.
+- **M1** — `kernel/space/mod.rs::install` takes `parents.write()` as
+  a no-op lock first, matching the canonical `parents → slots →
+  names` order so concurrent `revoke_tree` waits on the write
+  lock until the insert completes.
+- **M2** — `kernel/cap/erased.rs::AnyCapability::set_revoked_dyn`
+  default impl panics. Every `AnyCapability` impl MUST override
+  this to flip a marker that the dispatch path checks — silent
+  fall-through was the original soundness gap.
+- **M3** — `kernel/cap/typed.rs::invoke` + `invoke_op` reorder:
+  handler runs first, wall-clock recorded, then quota debited,
+  then timeout check. Successful handler results are not silently
+  discarded on a late timeout. `CapabilityError::Timeout` variant
+  added for the late-timeout case.
+- **M4** — typed `CapabilityError` variants replace substring
+  matching on the rendered error message. `host/pipeline.rs`
+  pattern-matches on `Revoked(SlotId)` / `SlotEmpty(SlotId)` via
+  the new `AnyCapability::invoke_dyn_typed` method (returns
+  `Result<Value, CapabilityError>`).
+- **m3** — `kernel/slot.rs::Slot::kind()` removed; callers use
+  `cap.kind()` on the capability itself.
+- **m6** — `runtime/http_bridge.rs::router` no longer takes a
+  `cordis::Context` parameter that was always suppressed.
+- **n1** — `kernel/slot.rs` three `"slot X empty or revoked"`
+  format! strings replaced with `CapabilityError::SlotEmpty(id).to_string()`.
+- **n3** — `kernel/quota/state.rs::quota_state` field is now
+  private; the public surface is `snapshot()` + `pub(crate) try_call()`.
+- **R1** — `kernel/space/namespace.rs` is the single home for
+  `namespace_prefix_matches`. The Phase 4
+  `capability::graph::namespace_starts_with` is gone.
+- **R4** — `kernel/space/derivation.rs::grant`/`transfer`/`restrict`
+  share the same `derive_with` body. Phase 4's
+  `revoke_with_sweep` is gone.
+- **R5** — `host/resolver/{error,index,topo,plan}.rs` split; each
+  phase independently testable.
+- **R6** — `kernel/space/revocation.rs::revoke` takes a
+  `RevokeMode::{Single, Tree}` selector.
+- **R7** — `kernel/space/derivation.rs` shared `derive_with`
+  body for grant / transfer / restrict.
+
+#### Phase 5 breaking changes
+
+- **Manifest fields removed (D5):** `tokens_per_minute` /
+  `bytes_per_minute` (and their `with_*` builders) are gone
+  from `QuotaSpec`. The kernel no longer tracks these quotas.
+  `QuotaKind::Tokens` / `QuotaKind::Bytes` variants are gone;
+  `QuotaState::try_tokens` / `try_bytes` are gone. Manifests
+  that previously set those fields now have the limits
+  dropped on load with a stderr warning (the loader emits a
+  per-field diagnostic so operators on upgraded manifests
+  see the change).
+- Import paths: `odyssey::capability::*` is gone. The kernel
+  types live at `odyssey::kernel::*`, the cspace at
+  `odyssey::kernel::space::*`, the host composition layer at
+  `odyssey::host::*`. There is no `odyssey::capability::*`
+  namespace alias — every test file and plugin was migrated to
+  the canonical paths.
+- `Capability<R, K>` is now `Capability<R>` with `CapKind`
+  tracking Sync vs Stream at runtime instead of at the type
+  level. Slot references drop the `K` parameter (`Slot<R>`).
+- `invoke_op` returns `Result<Value, CapabilityError>` instead
+  of `Result<Value, String>`. The typed variants are the
+  canonical error shape; stringly-typed errors only surface
+  from `invoke_dyn` (and the host pipeline's `StageFailed`
+  carries the inner `String` so handlers can still raise
+  domain-specific failures).
+- `set_revoked(bool)` replaces `mark_revoked` / `reset_revoked`
+  on `Capability<R>`; `set_revoked_dyn(bool)` replaces
+  `mark_revoked_dyn` on `AnyCapability`. The default `set_revoked_dyn`
+  impl panics (M2 invariant preserved).
+- `ModelKind::with_http(cspace, reachable)` replaces
+  `ModelKind::build_http(...)`. The builder pattern uses `build`
+  for the no-cap variant and `with_*` for variants that need a
+  cap.
+- `host/pipeline.rs::PipelineError::SlotRevoked` is now
+  decided by pattern-matching on the typed `CapabilityError`
+  variant, not by substring matching on the rendered message.
+- `runtime/` no longer carries the Phase 4 `boot/` submodule;
+  the boot path moved into `runtime::lifecycle` + `runtime::activate`
+  + `runtime::mint`.
+- `plugins/agent/handler.rs` (712 LOC) split into five focused
+  files: `handler.rs` (struct + constructors + parse_operation),
+  `dispatch.rs` (sync `Resource::invoke` body), `stream.rs`
+  (async `Resource::open` body + `run_program` + `RunStats` +
+  event-emission helpers), `plugin.rs` (cordis glue), `panic.rs`
+  (`panic_payload_to_str`). Public surface (`agent_handler`,
+  `handler_from_plan`, `agent_plugin`, `AgentResource`,
+  `ProgramStep`) unchanged.
+- `kernel/space/graph.rs::NamespaceNode::capabilities` field
+  removed. The flat `CapabilityGraph::nodes` array is the
+  single source of truth for capability nodes; consumers
+  join by `namespace` when they need a per-namespace
+  grouping.
+
 ## [0.1.0] — initial
 
 - Initial seL4-style capability kernel with `CapabilityToken` and

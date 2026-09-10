@@ -71,37 +71,82 @@ POST /api/stream  →  open a streaming capability by name (SSE)
 
 ## Layout
 
+Phase 5 splits the codebase into three layers (kernel / host /
+runtime); plugins live in a fourth directory that depends on
+the first two.
+
 ```
 src/
-├── capability.rs        — CapabilitySpace, Slot<R, K>, Capability<R, K>, types
-├── dispatcher.rs        — CapabilityFactory (mint + install into CSpace)
-├── http_bridge.rs       — axum HTTP server (enumeration + invocation)
-├── main.rs              — 7-phase boot, demo harness
-├── manifest.rs          — TOML plugin descriptor
-├── pipeline.rs          — linear composition of typed stages
-├── registry.rs          — manifest dedup
-└── plugins/             — one file per plugin (resource + handler + plugin())
-    ├── echo.rs
-    ├── echo_chain.rs    — wraps Capability<EchoResource, SyncKind>
-    ├── generator.rs
-    ├── reverse.rs
-    ├── sandbox.rs       — WASM-isolated execution with fuel
-    ├── slow.rs          — exceeds its budget to exercise timeout
-    └── stream_echo.rs
+├── lib.rs               — root module: pub mod host/kernel/plugins/runtime
+├── main.rs              — entry point (boot the runtime)
+├── kernel/              — pure capability kernel (no I/O, no Instant::now)
+│   ├── ids.rs           — CapabilityId, SlotId, PluginId
+│   ├── kind.rs          — CapKind (Sync vs Stream)
+│   ├── rights.rs        — OperationRights, CapabilityRights, parse_operation
+│   ├── meta.rs          — CapabilityMeta, AuthorityContract, Protocol
+│   ├── chunk.rs         — CapabilityChunk (stream item enum)
+│   ├── clock.rs         — Clock trait + SystemClock + MockClock
+│   ├── resource.rs      — Resource trait
+│   ├── error.rs         — CapabilityError (typed variants)
+│   ├── slot.rs          — Slot<R> (unforgeable typed reference)
+│   ├── cap/             — Capability<R> (typed) + AnyCapability (erased)
+│   ├── quota/           — QuotaSpec + QuotaState + CapabilityBudget
+│   └── space/           — CapabilitySpace + derivation + revocation +
+│                          graph + events + namespace
+├── host/                — composition: parse manifests, mint, resolve
+│   ├── manifest/        — TOML loader + ManifestBuilder + types
+│   ├── factory.rs       — CapabilityFactory (mint + install into CSpace)
+│   ├── mint.rs          — meta_from_decl + namespace_for helpers
+│   ├── resolver/        — index + topo + plan (capability-keyed resolve)
+│   └── pipeline.rs      — linear composition of typed sync stages
+├── runtime/             — adapter: lifecycle, HTTP bridge, plugin mint
+│   ├── lifecycle.rs     — 7-phase orchestrator (boot sequence)
+│   ├── activate.rs      — activator_for + per-arm const asserts
+│   ├── teardown.rs      — ruin_runtime_plugins (reverse-order shutdown)
+│   ├── http_bridge.rs   — axum router + SSE serve loop
+│   └── mint/            — mint_runtime_plugins dispatch table
+└── plugins/             — plugin bodies (depend on kernel + host)
+    ├── mod.rs           — re-exports
+    ├── echo/            — basic + chain + stream sub-plugins
+    ├── generator/       — http-backed Markov/mock model
+    ├── database/        — key-value store
+    ├── embedder/        — placeholder for embedding-model integration
+    ├── http/            — HTTP bridge capability
+    ├── reverse/         — string reversal demo
+    ├── sandbox/         — WASM-isolated execution with fuel
+    ├── slow/            — exceeds its budget to exercise timeout
+    ├── agent/           — generic program interpreter (Phase 4 P4.4)
+    │   ├── handler.rs   — struct + constructors + parse_operation
+    │   ├── dispatch.rs  — sync Resource::invoke body
+    │   ├── stream.rs    — async Resource::open body + run_program
+    │   ├── plugin.rs    — cordis glue (handler, handler_from_plan,
+    │   │                  agent_plugin)
+    │   ├── panic.rs     — panic_payload_to_str formatter
+    │   ├── program.rs   — ProgramStep (per-step action spec)
+    │   └── manifest.rs  — TOML descriptor
+    └── test_only/       — fixtures used only by the test suite
+        ├── broker/      — delegates to counter via a require handle
+        ├── channel/     — streaming channel fixture
+        └── counter/     — shared integer behind a Mutex
 
 plugins/                 — one TOML manifest per plugin
+├── agent.toml
+├── database.toml
 ├── echo.toml
 ├── echo_chain.toml
+├── echo_stream.toml
+├── embedder.toml
 ├── generator.toml
+├── http.toml
 ├── reverse.toml
 ├── sandbox.toml
-├── sandbox_programs/    — WAT source for the WASM sandbox
-│   └── hello.wat
-├── slow.toml
-└── stream_echo.toml
+└── slow.toml
 
 echo-cdylib/             — workspace member; cdylib loader deferred
 frontend/index.html      — minimal HTTP bridge UI
+tests/                   — integration test suites (alpha/beta/...)
+                           cargo test --features loom-tests runs the
+                           concurrency/D-test loom gate
 ```
 
 ## Build
