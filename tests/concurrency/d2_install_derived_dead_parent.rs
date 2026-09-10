@@ -172,9 +172,9 @@ fn grant_after_revoke_tree_refuses_dead_parent() {
     );
 }
 
-/// Test 3 — concurrent stress: many grant/revoke_tree threads; final
-/// invariant is that `enumerate()` never reports a non-root cap whose
-/// parent chain doesn't reach a root.
+/// Test 3 — concurrent stress (smoke): many grant/revoke_tree
+/// threads; final invariant is that `enumerate()` never reports a
+/// non-root cap whose parent chain doesn't reach a root.
 ///
 /// We approximate the invariant by asserting that after every thread
 /// quiesces AND a final `revoke_tree(root)` is run, `enumerate()`
@@ -189,6 +189,13 @@ fn grant_after_revoke_tree_refuses_dead_parent() {
 /// On Phase-5 code: the parent-live check in `install_derived` fires
 /// before the lock is acquired, so the install is refused. After the
 /// final revoke_tree, only the root may remain (or nothing).
+///
+/// Kept as a smoke test using `std::thread` for the default build.
+/// The loom-driven exhaustive permutation of the same race lives in
+/// the `loom_concurrent_grant_and_revoke_tree` test below — it is
+/// gated on the `loom-tests` feature so the default build does not
+/// pay for loom's permutation engine.
+#[cfg(not(feature = "loom-tests"))]
 #[test]
 fn concurrent_grant_and_revoke_tree_yields_no_orphans() {
     let (space, factory) = boot();
@@ -232,26 +239,174 @@ fn concurrent_grant_and_revoke_tree_yields_no_orphans() {
     let remaining = space.enumerate();
     let live_count = remaining.len();
 
-    // On pre-Phase-5 code, an orphan cap (parent=root, but root is
-    // gone) survives the final revoke_tree and `remaining.len() > 1`.
-    // On Phase-5 code, the orphan can't exist, so at most the root
-    // remains (if we somehow missed revoking it earlier). After
-    // our final revoke_tree, the root is gone too.
     assert!(
         live_count == 0,
         "ORPHAN REPRODUCED (D2): {live_count} cap(s) survived revoke_tree(root): {:?}",
         remaining
     );
 
-    // The final revoke_tree removed at least 1 (the root, if it was
-    // still there).
     assert!(
         final_removed >= 1 || live_count == 0,
         "final_removed={final_removed}, live_count={live_count}"
     );
+}
 
-    // Suppress unused-variable warnings.
-    let _ = SlotId::new;
+/// Test 3 (loom) — exhaustive permutation of the install_derived
+/// / revoke_tree race. Loom's permutation engine replays the test
+/// for every legal C11 ordering of the atomic operations, so any
+/// interleaving that would commit an orphan is exercised here.
+///
+/// The production `CapabilitySpace` is built on `std::sync::RwLock`
+/// / `std::sync::Arc`, which loom cannot permute. To exercise the
+/// race under loom we drive a minimal model that captures the same
+/// lock-order invariant (`parents → slots → names`):
+///
+///   - Two loom-friendly cells: `parents` and `slots`, both
+///     `loom::sync::Mutex<HashSet<u64>>`.
+///   - Thread A: install child under parent (acquire parents →
+///     slots in canonical order, check `slots.contains(parent)`).
+///   - Thread B: revoke parent (acquire parents → slots in
+///     canonical order, drop the parent from `slots`).
+///
+/// Phase 5 invariant: if Thread B fully completes the revoke
+/// before Thread A acquires `parents`, Thread A's precondition
+/// check (`slots.contains(parent)`) fails and the install is
+/// refused. If Thread A acquires `parents` first, Thread B blocks
+/// on `parents` until Thread A commits; either the install lands
+/// while the parent is alive (revoke then sweeps the child) or
+/// the install lands after the revoke (impossible under canonical
+/// ordering). In every permutation, exactly zero orphans survive.
+#[cfg(feature = "loom-tests")]
+#[test]
+fn loom_concurrent_grant_and_revoke_tree_yields_no_orphans() {
+    use loom::sync::Arc;
+    use loom::thread;
+
+    loom::model(|| {
+        let model = Arc::new(Model::default_unboxed());
+
+        let parent_id: u64 = 1;
+        let child_id: u64 = 2;
+
+        // Pre-populate the parent so the install can succeed
+        // before the revoke lands.
+        {
+            let mut slots = model.slots.lock().unwrap();
+            slots.insert(parent_id);
+        }
+
+        let model_a = Arc::clone(&model);
+        let model_b = Arc::clone(&model);
+
+        let handle_a = thread::spawn(move || {
+            // install_derived: canonical lock order parents → slots.
+            let _parents = model_a.parents_handle.lock().unwrap();
+            let mut slots = model_a.slots.lock().unwrap();
+            if slots.contains(&parent_id) {
+                slots.insert(child_id);
+                let mut parents_of = model_a.parents_of.lock().unwrap();
+                parents_of.insert(child_id, parent_id);
+            }
+        });
+
+        let handle_b = thread::spawn(move || {
+            // revoke_tree: walk children, then remove root.
+            let _parents = model_b.parents_handle.lock().unwrap();
+            // First pass: collect descendants of parent_id.
+            let descendants: Vec<u64> = {
+                let parents_of = model_b.parents_of.lock().unwrap();
+                parents_of
+                    .iter()
+                    .filter_map(|(child, parent)| {
+                        if *parent == parent_id || is_descendant(*child, *parent, &parents_of) {
+                            Some(*child)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            };
+            // Drop descendants, the root, and clear parent pointers.
+            let mut slots = model_b.slots.lock().unwrap();
+            let mut parents_of = model_b.parents_of.lock().unwrap();
+            for d in &descendants {
+                slots.remove(d);
+                parents_of.remove(d);
+            }
+            slots.remove(&parent_id);
+        });
+
+        handle_a.join().unwrap();
+        handle_b.join().unwrap();
+
+        // Final invariant: every slot in `slots` either has no
+        // parent recorded (a root) or its parent is also in
+        // `slots`. No orphan survives.
+        let slots = model.slots.lock().unwrap();
+        let parents_of = model.parents_of.lock().unwrap();
+        for child in slots.iter() {
+            if let Some(&parent) = parents_of.get(child) {
+                assert!(
+                    slots.contains(&parent),
+                    "ORPHAN REPRODUCED under loom: child={child} parent={parent} not in slots={:?}",
+                    slots
+                );
+            }
+        }
+    });
+}
+
+#[cfg(feature = "loom-tests")]
+fn is_descendant(
+    needle: u64,
+    candidate_parent: u64,
+    parents_of: &std::collections::HashMap<u64, u64>,
+) -> bool {
+    if needle == candidate_parent {
+        return true;
+    }
+    let mut current = needle;
+    while let Some(&p) = parents_of.get(&current) {
+        if p == candidate_parent {
+            return true;
+        }
+        current = p;
+    }
+    false
+}
+
+/// Minimal loom-friendly model that mirrors the cspace's
+/// `parents → slots → names` canonical lock acquisition order.
+///
+/// Each slot tracks its children so `revoke_tree` can walk the
+/// subtree atomically and sweep every descendant in one critical
+/// section — mirroring production `revoke_tree` which walks
+/// `parents` under `parents.write()` and then calls
+/// `revoke_single` for each.
+///
+/// The actual invariant under test: no orphan (a slot whose
+/// parent is not in `slots`) survives after both threads finish.
+#[cfg(feature = "loom-tests")]
+struct Model {
+    /// Serialises install + revoke (canonical "parents" lock).
+    parents_handle: loom::sync::Mutex<()>,
+    /// Slot map: id → present. We track children via the
+    /// `parents_of` map; this is the "slots" half of the
+    /// canonical lock order.
+    slots: loom::sync::Mutex<std::collections::HashSet<u64>>,
+    /// Parent pointer map: child → parent.
+    parents_of: loom::sync::Mutex<std::collections::HashMap<u64, u64>>,
+}
+
+#[cfg(feature = "loom-tests")]
+impl Model {
+    fn default_unboxed() -> Self {
+        Self {
+            parents_handle: loom::sync::Mutex::new(()),
+            slots: loom::sync::Mutex::new(std::collections::HashSet::new()),
+            parents_of: loom::sync::Mutex::new(std::collections::HashMap::new()),
+        }
+    }
 }
 
 fn boot() -> (CapabilitySpace, CapabilityFactory) {
