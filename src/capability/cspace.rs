@@ -128,13 +128,30 @@ impl<R: Resource> Slot<R> {
         self.space.transfer::<R>(self.id, rights)
     }
 
-    /// **Revoke**: clear this slot.
+    /// **Revoke**: clear the slot this handle points at.
+    ///
+    /// Note that the typed `Slot<R>` is just a `(CSpace, slot_id)`
+    /// pair — it does *not* hold the underlying `Arc<R>`. The
+    /// `Arc<R>` lives inside the CSpace at the slot id. So dropping
+    /// a `Slot<R>` handle does **not** revoke the cap; the cap is
+    /// only released when something calls `cspace.revoke(slot_id)`
+    /// (this method is a thin wrapper for that).
+    ///
+    /// Why it matters: if you hold a producer `Slot<ChannelResource>`
+    /// and you want the consumer's stream to terminate, dropping the
+    /// producer's `Slot` handle is not enough — the consumer's
+    /// `Receiver<CapabilityChunk>` keeps reading because the cap's
+    /// `Arc` is still alive inside the cspace. You must call
+    /// `cspace.revoke(channel_slot)` (or `Slot::revoke()`) so the
+    /// `Arc` count drops to zero and the underlying `mpsc::Sender`
+    /// is dropped.
     pub fn revoke(&self) -> bool {
         self.space.revoke(self.id)
     }
 
     /// **Revoke tree**: clear this slot and every descendant.
-    /// Phase 2 P3 — multi-hop revocation propagation.
+    /// Phase 2 P3 — multi-hop revocation propagation. Same Arc
+    /// ownership note as [`Self::revoke`].
     pub fn revoke_tree(&self) -> usize {
         self.space.revoke_tree(self.id)
     }
