@@ -98,8 +98,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 /// reached by the test crates directly via `factory.mint`, not
 /// through boot.
 ///
-/// We keep the `dir` parameter for back-compat with the
-/// previous signature; it's now ignored.
+/// The `dir` parameter is preserved as a positional argument
+/// for callers that pass it; the loader walks the workspace
+/// from `CARGO_MANIFEST_DIR` directly and ignores the value.
 fn load_manifests(_dir: &str) -> Result<Vec<PluginManifest>, Box<dyn std::error::Error>> {
     use crate::plugins::{
         agent::manifest as agent_manifest,

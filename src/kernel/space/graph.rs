@@ -147,7 +147,8 @@ fn build_namespace_tree(metas: &[crate::kernel::meta::CapabilityMeta]) -> Vec<Na
         .collect()
 }
 
-/// Back-compat alias for the previous Phase 4 `CapabilityNode`.
-/// `GraphNode` is the canonical name now; existing code that
+/// Phase 4 alias kept as a type alias: the canonical name is
+/// `GraphNode`; code that referenced `CapabilityNode` compiles
+/// through this alias.
 /// referenced `CapabilityNode` keeps compiling through this alias.
 pub type CapabilityNode = GraphNode;

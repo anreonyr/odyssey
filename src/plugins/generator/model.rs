@@ -6,8 +6,7 @@
 //! implementations:
 //!
 //! - [`MockModel`] — keeps the canned-response behaviour for
-//!   back-compat and for tests that want deterministic
-//!   canned output.
+//!   tests that want deterministic canned output.
 //! - [`MarkovModel`] — a real n-gram generator trained on a
 //!   built-in tech/programming corpus. Different prompts
 //!   produce different, locally-coherent output. Deterministic
@@ -16,7 +15,7 @@
 //! The boot pipeline selects which model to install via the
 //! `GENERATOR_MODEL` env var (`mock` or `markov`, default
 //! `markov`). Tests that need specific behaviour pass the
-//! model directly to [`handler::handler`].
+//! model directly to [`crate::plugins::generator::handler`].
 //!
 //! ## Why not a real LLM?
 //!
@@ -64,9 +63,8 @@ pub trait Model: Send + Sync {
     fn generate(&self, prompt: &str, seed: Option<u64>) -> Result<Vec<String>, String>;
 }
 
-/// Back-compat: the canned-response behaviour the original
-/// `generator` had. Keeps the same surface so existing tests
-/// don't change behaviour.
+/// Canned-response `Model` for tests. Deterministic; ignores
+/// the prompt beyond a few keyword checks.
 pub struct MockModel;
 
 impl Model for MockModel {
@@ -408,7 +406,7 @@ use crate::plugins::http::HttpResource;
 
 /// HTTP-backed model. Holds the http capability via the
 /// binding table: `Reachable { handle, capability }` says
-/// "the http handle is provided by the slot named <capability>".
+/// "the http handle is provided by the slot named `<capability>`".
 ///
 /// At generate time, [`HttpModel`] does the standard Phase 4
 /// dispatch:

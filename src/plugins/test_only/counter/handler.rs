@@ -7,7 +7,7 @@
 //!
 //! Phase 1 invariant:
 //!   * CounterResource itself never inspects authority.
-//!   * Capability<CounterResource>::invoke_op(bit, ...) is the only gate.
+//!   * `Capability<CounterResource>::invoke_op(bit, ...)` is the only gate.
 //!   * If you can reach the handler at all, the kernel has already
 //!     verified the bit.
 

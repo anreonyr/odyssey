@@ -34,15 +34,15 @@ use crate::plugins::{
 /// Runtime plugins that get the full mint + provide + activate
 /// treatment at boot. Test-only plugins (under
 /// `src/plugins/test_only/`) are skipped by both the manifest
-/// walker and the dispatch in [`mint_runtime_plugins`] — they're
+/// walker and the dispatch in [`crate::runtime::mint`] — they're
 /// reached through the test crates directly via `factory.mint`.
 ///
-/// The typed-mint match in [`mint_one_plugin`] and the
+/// The typed-mint match in [`crate::runtime::mint::mint_one_plugin`] and the
 /// activator match in [`activator_for`] both reference this
 /// list. The `const _` assertions below verify at compile time
 /// that every name has an arm in `activator_for`; the
 /// activator/mint sync is otherwise enforced by the runtime
-/// assertions in [`mint_runtime_plugins`].
+/// assertions in [`crate::runtime::mint::mint_runtime_plugins`].
 pub const RUNTIME_PLUGINS: &[&str] = &[
     "echo",
     "reverse",

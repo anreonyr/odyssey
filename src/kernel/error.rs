@@ -24,7 +24,8 @@ pub enum CapabilityError {
     /// from `SlotEmpty` so callers (and tests) can distinguish
     /// "slot was never installed" from "slot was installed then
     /// revoked". The display message contains "capability
-    /// revoked" for substring back-compat with Phase 4 callers.
+    /// revoked" so the substring predicate that Phase 4 callers
+    /// relied on keeps working.
     Revoked(SlotId),
     /// `restrict` (or `grant`) asked for rights the parent does not have.
     /// This is the "you cannot amplify authority" invariant.
@@ -110,11 +111,10 @@ impl fmt::Display for CapabilityError {
 impl std::error::Error for CapabilityError {}
 
 impl CapabilityError {
-    /// Back-compat shim: tests written against the Phase 4
-    /// `String`-returning surface call `err.contains(...)`
-    /// directly on the error. To keep those tests compiling
-    /// without forcing them through `to_string()`, expose a
-    /// `contains` that delegates to the `Display` impl.
+    /// Substring predicate that delegates to the `Display`
+    /// impl. Tests assert against the rendered message ("capability
+    /// revoked", "operation denied", …) without going through
+    /// `to_string()` first.
     pub fn contains(&self, pat: &str) -> bool {
         self.to_string().contains(pat)
     }
