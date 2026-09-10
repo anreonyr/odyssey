@@ -126,6 +126,33 @@ pub fn mint_counter_with_quota(
     )
 }
 
+/// Same as [`mint_counter_with_quota`] but with the
+/// capability's budget taking its `Clock` from the factory's
+/// pre-installed clock (rather than a fresh `SystemClock`).
+/// Tests that need a `MockClock` injected into the quota's
+/// `QuotaState` (so `MockClock::advance` slides the
+/// per-minute window deterministically) use this helper.
+#[allow(dead_code)]
+pub fn mint_counter_with_quota_clocked(
+    factory: &CapabilityFactory,
+    name: &str,
+    quota: QuotaSpec,
+) -> SlotId {
+    let clock = factory.clock();
+    let budget = CapabilityBudget::with_clock(
+        DEFAULT_TIMEOUT_MS,
+        quota,
+        std::sync::Arc::clone(clock),
+    );
+    factory.mint::<CounterResource>(
+        CapKind::Sync,
+        &counter_decl(name),
+        &counter_pid(),
+        budget,
+        odyssey::plugins::test_only::counter::handler(),
+    )
+}
+
 /// Mint an Echo resource (true passthrough) at the named slot.
 #[allow(dead_code)]
 pub fn mint_echo(factory: &CapabilityFactory, name: &str) -> SlotId {

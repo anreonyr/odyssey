@@ -8,6 +8,7 @@
 //!   parent's calls debit the same counter the child observes.
 
 mod quota_basic;
+mod quota_clock_eviction;
 mod quota_shared;
 
 #[path = "../common/mod.rs"]
