@@ -43,8 +43,8 @@
 //!
 //! ```no_run
 //! use std::sync::OnceLock;
-//! use odyssey::kernel::manifest::PluginManifest;
-//! use odyssey::kernel::manifest_builder::ManifestBuilder;
+//! use odyssey::host::manifest::PluginManifest;
+//! use odyssey::host::manifest::ManifestBuilder;
 //!
 //! pub fn manifest() -> &'static PluginManifest {
 //!     static M: OnceLock<PluginManifest> = OnceLock::new();

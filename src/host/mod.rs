@@ -18,13 +18,6 @@ pub mod mint;
 pub mod pipeline;
 pub mod resolver;
 
-// Back-compat: the Phase 4 `host::Reachable` path stays
-// compiling until every plugin has migrated to
-// `host::resolver::Reachable`.
-pub mod reachable {
-    pub use crate::host::resolver::plan::Reachable;
-}
-
 // Curated re-exports.
 pub use factory::CapabilityFactory;
 pub use manifest::{

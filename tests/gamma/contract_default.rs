@@ -8,7 +8,7 @@ use serde_json::Value;
 #[test]
 fn missing_protocol_defaults_to_empty() {
     let (space, factory) = crate::common::boot();
-    let decl = odyssey::kernel::manifest::CapabilityDecl {
+    let decl = odyssey::host::manifest::CapabilityDecl {
         name: "demo".into(),
         in_type: "any".into(),
         out_type: "any".into(),
@@ -16,13 +16,13 @@ fn missing_protocol_defaults_to_empty() {
         ..Default::default()
     };
     let slot = factory.mint::<odyssey::plugins::test_only::counter::CounterResource>(
-        odyssey::capability::CapKind::Sync,
+        odyssey::kernel::CapKind::Sync,
         &decl,
-        &odyssey::kernel::manifest::PluginId {
+        &odyssey::kernel::PluginId {
             name: "demo".into(),
             version: "0.1.0".into(),
         },
-        odyssey::capability::CapabilityBudget::new(crate::common::DEFAULT_TIMEOUT_MS),
+        odyssey::kernel::CapabilityBudget::new(crate::common::DEFAULT_TIMEOUT_MS),
         odyssey::plugins::test_only::counter::handler(),
     );
     let observed = space.slot_meta(slot).unwrap();
