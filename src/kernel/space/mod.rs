@@ -396,6 +396,30 @@ impl CapabilitySpace {
         cap.set_revoked_dyn(revoked);
     }
 
+    /// Test-only accessor for `install_derived`. The public
+    /// surface (grant / transfer / restrict) goes through
+    /// `derive_with`, which short-circuits on a missing parent
+    /// via `lookup_typed` before reaching `install_derived` —
+    /// so the integration test for the D2 race condition would
+    /// never exercise the install_derived precondition check.
+    /// This wrapper exists so the integration test can call
+    /// `install_derived` directly, with the parent slot revoked
+    /// beforehand, and assert that the precondition fires.
+    ///
+    /// `pub` (not `pub(crate)`) because integration tests
+    /// link against this crate as an external user. `#[doc(hidden)]`
+    /// keeps it out of the rendered rustdoc; the production path
+    /// for callers is still `grant` / `transfer` / `restrict`.
+    #[doc(hidden)]
+    pub fn install_derived_for_test<R: Resource>(
+        &self,
+        parent: SlotId,
+        new_cap: Capability<R>,
+        new_name: String,
+    ) -> Result<SlotId, CapabilityError> {
+        self.install_derived(parent, new_cap, new_name)
+    }
+
     // -----------------------------------------------------------------
     // Internal lock-guard helpers used by submodules.
     // -----------------------------------------------------------------
