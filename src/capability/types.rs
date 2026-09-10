@@ -555,6 +555,13 @@ impl CapabilityBudget {
         }
     }
 
+    /// Load the current wall-clock total. Phase 5 D3 verification:
+    /// derived caps share the parent's `Arc<AtomicU64>` after the fix,
+    /// so this returns the subtree total rather than a fresh counter.
+    pub fn wall_clock_total_ms(&self) -> u64 {
+        self.wall_clock_total_ms.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
     /// Construct a budget whose `QuotaState` is **shared** with an
     /// existing budget. Used when the host mints a derived cap that
     /// should draw from the parent's quota bucket.

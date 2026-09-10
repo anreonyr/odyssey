@@ -33,6 +33,18 @@ bitflags = { version = "2", features = ["serde"] }
 # dep, no std RNG re-implementation in-tree.
 rand = { version = "0.8", features = ["std_rng"] }
 
+# Phase 5 — concurrency test gate (loom-tests feature).
+# Lives under [dependencies] rather than [dev-dependencies]
+# because cargo forbids optional dev-deps; the feature flag
+# gates it out of the default build, and `tests/concurrency/`
+# is `required-features = ["loom-tests"]` so the test
+# binary only compiles when the feature is on.
+loom = { version = "0.7", optional = true }
+
+[features]
+default = []
+loom-tests = ["dep:loom"]
+
 [[bin]]
 name = "odyssey"
 path = "src/main.rs"
@@ -68,3 +80,10 @@ path = "tests/zeta/mod.rs"
 [[test]]
 name = "capability"
 path = "tests/capability/mod.rs"
+
+# Phase 5 — concurrency test gate for the kernel.
+# Opt-in via `--features loom-tests`; not built by default.
+[[test]]
+name = "concurrency"
+path = "tests/concurrency/mod.rs"
+required-features = ["loom-tests"]

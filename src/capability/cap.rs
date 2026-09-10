@@ -110,6 +110,13 @@ impl<R: Resource> Capability<R> {
         self.kind
     }
 
+    /// Borrow the budget for introspection (snapshot, timeout).
+    /// Phase 5 D3: callers in the test gate use this to verify
+    /// that derived caps share the parent's wall-clock counter.
+    pub fn budget(&self) -> &super::types::CapabilityBudget {
+        &self.budget
+    }
+
     /// Operations currently held. Can only be a subset of the parent's.
     pub fn operations(&self) -> OperationRights {
         self.operations
@@ -261,7 +268,11 @@ impl<R: Resource> Capability<R> {
         }
         let start = Instant::now();
         let result = self.handler.invoke(input);
-        let elapsed_ms = start.elapsed().as_millis() as u64;
+        // Round up so that sub-millisecond calls register as ≥1ms.
+        // Without the rounding, a fast handler (`elapsed = 0`) leaves
+        // the wall-clock counter stuck at 0 and the HTTP bridge
+        // reports 0ms for calls that did happen — see D3 reproducer.
+        let elapsed_ms = start.elapsed().as_micros().div_ceil(1000) as u64;
         self.budget
             .wall_clock_total_ms
             .fetch_add(elapsed_ms, std::sync::atomic::Ordering::Relaxed);
