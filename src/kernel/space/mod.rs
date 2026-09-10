@@ -114,7 +114,7 @@ impl CapabilitySpace {
         let mut owned = (*cap).clone();
         owned.bind_slot(slot);
         let cap = Arc::new(owned);
-        cap.reset_revoked();
+        cap.set_revoked(false);
         let erased: Arc<dyn AnyCapability> = cap;
 
         // Phase 5 M1: canonical lock order.
@@ -392,8 +392,8 @@ impl CapabilitySpace {
         Ok(new_slot)
     }
 
-    pub(crate) fn mark_revoked_for(&self, cap: &Arc<dyn AnyCapability>) {
-        cap.mark_revoked_dyn();
+    pub(crate) fn set_revoked(&self, cap: &Arc<dyn AnyCapability>, revoked: bool) {
+        cap.set_revoked_dyn(revoked);
     }
 
     // -----------------------------------------------------------------

@@ -3,7 +3,7 @@
 //!
 //! Phase 5 fixes embedded in this file:
 //!
-//! - **M2** (`mark_revoked_dyn` default): the default implementation
+//! - **M2** (`set_revoked_dyn` default): the default implementation
 //!   is now `panic!`. A future `AnyCapability` impl that forgets to
 //!   override this method fails loudly at the first revoke, instead
 //!   of silently continuing to dispatch past revocation. The kernel's
@@ -66,9 +66,17 @@ pub trait AnyCapability: Any + Send + Sync {
     /// that the dispatch path checks — otherwise the capability
     /// continues to dispatch past revocation, defeating the
     /// unforgeable-capability invariant.
-    fn mark_revoked_dyn(&self) {
+    ///
+    /// Phase 7 naming audit: the previous name was
+    /// `mark_revoked_dyn`; the unified convention is
+    /// `set_revoked(bool)` so install and revoke share a single
+    /// entry point. The bool argument is `true` for "mark
+    /// revoked" and `false` for "reset to live". The default
+    /// panicked for both — silent fall-through was the original
+    /// soundness gap — so the unified default still panics.
+    fn set_revoked_dyn(&self, _revoked: bool) {
         panic!(
-            "AnyCapability impl for `{}` did not override mark_revoked_dyn; \
+            "AnyCapability impl for `{}` did not override set_revoked_dyn; \
              caps of this type will continue to dispatch past revocation. \
              Implement the marker flip in the impl block.",
             self.meta().name
@@ -107,7 +115,7 @@ impl<R: Resource> AnyCapability for Capability<R> {
     fn as_any(&self) -> &dyn Any {
         self
     }
-    fn mark_revoked_dyn(&self) {
-        self.mark_revoked();
+    fn set_revoked_dyn(&self, revoked: bool) {
+        self.set_revoked(revoked);
     }
 }

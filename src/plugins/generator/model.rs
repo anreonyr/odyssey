@@ -288,7 +288,7 @@ impl ModelKind {
     /// Build the matching `Model` instance **without** a
     /// capability dependency. Used by `Mock` and `Markov`,
     /// which are self-contained. For `Http`, callers must use
-    /// [`Self::build_http`] so the model can be wired to the
+    /// [`Self::with_http`] so the model can be wired to the
     /// http capability slot.
     pub fn build(self) -> Arc<dyn Model> {
         match self {
@@ -296,7 +296,7 @@ impl ModelKind {
             Self::Markov => Arc::new(MarkovModel::default()),
             Self::Http => {
                 panic!("ModelKind::Http requires the http capability; \
-                        use ModelKind::build_http(cspace, reachable) instead");
+                        use ModelKind::with_http(cspace, reachable) instead");
             }
         }
     }
@@ -497,7 +497,7 @@ impl ModelKind {
     /// capability space at mint time; `reachable` is the
     /// binding table entry for `http`. Caller is `mint_generator`,
     /// which already pulled both from the resolved plan.
-    pub fn build_http(cspace: CapabilitySpace, reachable: Vec<Reachable>) -> Arc<dyn Model> {
+    pub fn with_http(cspace: CapabilitySpace, reachable: Vec<Reachable>) -> Arc<dyn Model> {
         Arc::new(HttpModel::new(cspace, reachable))
     }
 }

@@ -127,16 +127,15 @@ impl<R: Resource> Capability<R> {
         }
     }
 
-    /// Reset the revocation marker. Called by the cspace on `install`
-    /// so a re-installed cap starts fresh. Internal kernel API.
-    pub(crate) fn reset_revoked(&self) {
-        self.revoked.store(false, Ordering::Release);
-    }
-
-    /// Flip the revocation marker. Called by the cspace on `revoke`
-    /// paths. Internal kernel API.
-    pub(crate) fn mark_revoked(&self) {
-        self.revoked.store(true, Ordering::Release);
+    /// Set the revocation marker. Called by the cspace on
+    /// `install` (with `false`, so a re-installed cap starts
+    /// fresh) and on `revoke` (with `true`). Internal kernel
+    /// API. Phase 7 naming audit: replaces the prior
+    /// `mark_revoked` / `reset_revoked` pair with a single
+    /// bool-typed setter so the install and revoke paths share
+    /// an entry point.
+    pub(crate) fn set_revoked(&self, revoked: bool) {
+        self.revoked.store(revoked, Ordering::Release);
     }
 
     /// Derive a child cap with reduced rights. Internal — only the

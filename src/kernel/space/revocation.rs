@@ -49,7 +49,7 @@ fn revoke_single(space: &CapabilitySpace, slot: SlotId) -> bool {
         drop(parents);
 
         if let Some(cap) = cap_for_marker {
-            space.mark_revoked_for(&cap);
+            space.set_revoked(&cap, true);
         }
         space.publish_event(GraphEvent::Revoked {
             slot,

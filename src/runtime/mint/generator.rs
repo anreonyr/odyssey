@@ -61,7 +61,7 @@ pub async fn mint_generator(
                 );
                 ModelKind::Markov.build()
             } else {
-                ModelKind::build_http(cspace.clone(), reachable.clone())
+                ModelKind::with_http(cspace.clone(), reachable.clone())
             }
         }
     };
