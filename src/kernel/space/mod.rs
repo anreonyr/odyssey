@@ -342,24 +342,45 @@ impl CapabilitySpace {
 
     /// Install a derived capability. Phase 5 D2 fix: refuses when
     /// `parent` is no longer in `slots` (Interleaving 2 race).
+    ///
+    /// P1-E follow-up: the previous implementation read `slots`
+    /// under a read lock, dropped it, then acquired the write
+    /// locks in canonical order (`parents → slots → names`).
+    /// That left a window where another thread could revoke the
+    /// parent (which also takes `parents → slots → names`) between
+    /// the read and the write acquisition. The fix holds the
+    /// `parents` write lock across the precondition check so
+    /// any concurrent `revoke_single` / `revoke_tree` serializes
+    /// against us. `revoke_tree` walks children under the same
+    /// `parents` write guard, so the parent's continued presence
+    /// in `slots` after we observe it is guaranteed: nobody can
+    /// delete the parent without first acquiring the parents
+    /// write lock that we're already holding.
     pub(crate) fn install_derived<R: Resource>(
         &self,
         parent: SlotId,
         new_cap: Capability<R>,
         new_name: String,
     ) -> Result<SlotId, CapabilityError> {
-        // D2 precondition: parent must be live. We check under a
-        // brief read lock; the race window between this read and
-        // the write below is benign because the canonical lock
-        // order (`parents → slots → names`) ensures any
-        // concurrent `revoke_tree` waits on the write lock
-        // until our insert completes.
-        //
-        // The check is against `slots`, not `parents`: a parent
-        // is just "a slot in the cspace", which means it's in
-        // `slots`. The `parents` map only contains entries for
-        // derived slots (child → parent), so checking `parents`
-        // would wrongly reject every root cap.
+        // Take `parents.write()` FIRST as the serialisation point.
+        // `revoke_single` and `revoke_tree` (which walk the
+        // parent pointer tree) both take `parents.write()` as
+        // the first lock; holding it here means any concurrent
+        // revoke is blocked until our insert commits, which
+        // closes the TOCTOU window between the parent-live
+        // check and the slot insertion.
+        let mut parents = self.inner.parents.write().expect("cspace poisoned");
+
+        // Parent-live precondition. The check is against `slots`,
+        // not `parents` — a parent is a slot in the cspace
+        // (i.e. an entry in `slots`); the `parents` map only
+        // contains entries for *derived* slots (child → parent),
+        // so checking `parents` would wrongly reject every root
+        // cap. We read `slots` briefly here; because we hold
+        // `parents.write()`, the canonical lock order
+        // (`parents → slots → names`) means no concurrent
+        // revoker can interleave between the read below and
+        // the write acquisition that follows.
         {
             let slots = self.inner.slots.read().expect("cspace poisoned");
             if !slots.contains_key(&parent) {
@@ -374,7 +395,11 @@ impl CapabilitySpace {
         new_cap.bind_slot(new_slot);
         let cap: Arc<dyn AnyCapability> = Arc::new(new_cap);
 
-        let mut parents = self.inner.parents.write().expect("cspace poisoned");
+        // Continue to hold `parents.write()` while we take the
+        // remaining locks in canonical order. `revoke_single`
+        // and `revoke_tree` both also acquire `slots.write()`
+        // and `names.write()` after `parents.write()`, so the
+        // lock-order invariant is preserved across callers.
         let mut slots = self.inner.slots.write().expect("cspace poisoned");
         let mut names = self.inner.names.write().expect("cspace poisoned");
 
