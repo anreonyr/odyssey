@@ -60,7 +60,9 @@ use std::sync::Arc;
 use cordis::{plugin_with, Context, Injection, LogLevel, Plugin};
 use serde_json::{json, Value};
 
-use crate::capability::{CapabilitySpace, OperationRights, Resource, Slot, SlotId};
+use crate::capability::{CapabilityChunk, CapabilitySpace, OperationRights, Resource, Slot, SlotId};
+use crate::plugins::agent::program::ProgramStep;
+use tokio::sync::mpsc;
 use crate::kernel::manifest::PluginId;
 use crate::kernel::resolver::{ResolvedBinding, ResolvedPlan};
 
@@ -276,6 +278,187 @@ impl Resource for AgentResource {
             "meta_name": cap.meta().name.clone(),
         }))
     }
+
+    /// Phase 4 P4.4 — streaming program interpreter.
+    ///
+    /// Input: `{"program": [ProgramStep, ...]}`.
+    ///
+    /// For each step, the agent emits a `step_start` event,
+    /// then one of:
+    ///
+    /// - `step_ok`   — handle in reachable, slot in cspace, invoke ok
+    /// - `step_skip` — handle not in reachable (env doesn't grant)
+    /// - `step_deny` — handle in reachable, but cap's authority
+    ///                 doesn't include the step's `op` (when set)
+    /// - `step_fail` — invoke itself returned an Err
+    ///
+    /// The agent never aborts on a failed step — it records
+    /// the outcome and proceeds to the next. This is the
+    /// Phase 4 thesis property: capability failure is data,
+    /// not crash. The final `done` event summarises counts.
+    fn open(
+        &self,
+        input: Value,
+    ) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
+        let program_val = input
+            .get("program")
+            .cloned()
+            .ok_or_else(|| format!("{}: input must contain 'program'", self.name))?;
+        let program: Vec<ProgramStep> = serde_json::from_value(program_val)
+            .map_err(|e| format!("{}: program parse: {e}", self.name))?;
+
+        let (tx, rx) = mpsc::channel(16);
+        let name = self.name.clone();
+        let reachable = self.reachable.clone();
+        let cspace = self.cspace.clone();
+
+        tokio::spawn(async move {
+            run_program(name, reachable, cspace, program, tx).await;
+        });
+        Ok(rx)
+    }
+}
+
+/// Outcome counters for one program run. Used to build the
+/// final `done` event.
+#[derive(Default)]
+struct RunStats {
+    ok: usize,
+    skipped: usize,
+    denied: usize,
+    failed: usize,
+}
+
+/// The actual streaming interpreter. Pulled out of the impl
+/// block so it can be tested as a plain function.
+async fn run_program(
+    name: String,
+    reachable: Vec<Reachable>,
+    cspace: CapabilitySpace,
+    program: Vec<ProgramStep>,
+    tx: mpsc::Sender<CapabilityChunk>,
+) {
+    let mut stats = RunStats::default();
+    for (i, step) in program.iter().enumerate() {
+        // step_start
+        if tx
+            .send(CapabilityChunk::Item(json!({
+                "event":   "step_start",
+                "index":   i,
+                "handle":  step.handle,
+                "op":      step.op,
+            })))
+            .await
+            .is_err()
+        {
+            return;
+        }
+
+        // 1) Reachable check
+        let entry = match reachable.iter().find(|r| r.handle == step.handle) {
+            Some(e) => e,
+            None => {
+                emit_skip(&tx, i, &step.handle, "env doesn't grant this capability", &mut stats).await;
+                continue;
+            }
+        };
+
+        // 2) Slot check
+        let cap = match cspace.lookup_by_name(&entry.capability) {
+            Some(c) => c,
+            None => {
+                emit_skip(&tx, i, &step.handle, "reachable but cap missing in cspace", &mut stats).await;
+                continue;
+            }
+        };
+
+        // 3) Authority check (only if step specifies an op)
+        if let Some(op_name) = &step.op {
+            match cap.meta().authority.operation_for(op_name) {
+                None => {
+                    emit_event(&tx, json!({
+                        "event": "step_deny",
+                        "index": i,
+                        "handle": step.handle,
+                        "op": op_name,
+                        "reason": "op not in cap's published authority",
+                    }))
+                    .await;
+                    stats.denied += 1;
+                    continue;
+                }
+                Some(_op_str) => {
+                    // op_str is "READ"/"WRITE"/etc. Phase 4
+                    // does not enforce the held-bits check
+                    // here — that lives at the kernel level
+                    // (`invoke_op_dyn`). If the cap holds the
+                    // bit, the invoke will succeed; if not, the
+                    // invoke returns Err and we record fail.
+                }
+            }
+        }
+
+        // 4) Dispatch via invoke_dyn.
+        match cap.invoke_dyn(step.input.clone()) {
+            Ok(output) => {
+                emit_event(&tx, json!({
+                    "event": "step_ok",
+                    "index": i,
+                    "handle": step.handle,
+                    "output": output,
+                }))
+                .await;
+                stats.ok += 1;
+            }
+            Err(e) => {
+                emit_event(&tx, json!({
+                    "event": "step_fail",
+                    "index": i,
+                    "handle": step.handle,
+                    "error": e,
+                }))
+                .await;
+                stats.failed += 1;
+            }
+        }
+    }
+
+    // done summary
+    let _ = tx
+        .send(CapabilityChunk::Item(json!({
+            "event":   "done",
+            "steps":   program.len(),
+            "ok":      stats.ok,
+            "skipped": stats.skipped,
+            "denied":  stats.denied,
+            "failed":  stats.failed,
+        })))
+        .await;
+    let _ = tx.send(CapabilityChunk::Done).await;
+}
+
+async fn emit_event(tx: &mpsc::Sender<CapabilityChunk>, payload: Value) {
+    let _ = tx.send(CapabilityChunk::Item(payload)).await;
+}
+
+async fn emit_skip(
+    tx: &mpsc::Sender<CapabilityChunk>,
+    index: usize,
+    handle: &str,
+    reason: &str,
+    stats: &mut RunStats,
+) {
+    emit_event(
+        tx,
+        json!({
+            "event":  "step_skip",
+            "index":  index,
+            "handle": handle,
+            "reason": reason,
+        }),
+    )
+    .await;
+    stats.skipped += 1;
 }
 
 /// Backwards-compatible constructor used by tests that build

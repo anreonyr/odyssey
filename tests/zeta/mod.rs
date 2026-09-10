@@ -82,6 +82,7 @@ mod p3_3_real_models;
 mod p3_4_capability_native;
 mod p3_6_lifetime;
 mod p3_7_events;
+mod p4_4_5_agent_env;
 
 #[path = "../common/mod.rs"]
 mod common;

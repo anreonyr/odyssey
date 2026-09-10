@@ -143,7 +143,7 @@ fn authority_vocabulary_drives_dispatch_authority() {
     //     finds the cap holds READ, and invokes).
     use odyssey::kernel::manifest::PluginId;
     use odyssey::kernel::resolver::{ResolvedBinding, ResolvedPlan};
-    use odyssey::plugins::test_only::agent::handler_from_plan;
+    use odyssey::plugins::agent::handler_from_plan;
 
     let (space, factory) = crate::common::boot();
     let m = MB::new("counter", "counter", "counter")

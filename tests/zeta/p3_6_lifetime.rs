@@ -31,7 +31,7 @@ use odyssey::kernel::manifest::{CapabilityDecl, PluginId};
 use odyssey::kernel::manifest_builder::ManifestBuilder;
 use odyssey::kernel::resolver::{ResolvedBinding, ResolvedPlan};
 use odyssey::plugins::echo::basic::{handler as echo_handler, EchoResource};
-use odyssey::plugins::test_only::agent::handler_from_plan;
+use odyssey::plugins::agent::handler_from_plan;
 use odyssey::plugins::test_only::counter::{handler as counter_handler, CounterResource};
 use serde_json::json;
 

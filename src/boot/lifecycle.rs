@@ -48,6 +48,7 @@ use crate::plugins::{
         chain::{echo_chain_plugin, EchoChainResource},
         stream::{echo_stream_plugin, handler as echo_stream_handler, EchoStreamResource},
     },
+    agent::{agent_plugin, handler_from_plan as agent_handler_from_plan, AgentResource},
     generator::{generator_plugin, handler as generator_handler, GeneratorResource},
     http::{handler as http_handler, http_plugin, HttpResource},
     reverse::{handler as reverse_handler, reverse_plugin, ReverseResource},
@@ -79,6 +80,7 @@ const RUNTIME_PLUGINS: &[&str] = &[
     "database",
     "embedder",
     "http",
+    "agent",
 ];
 
 /// Returns the cordis `Plugin` activator for a runtime plugin
@@ -99,6 +101,7 @@ fn activator_for(name: &str) -> Option<Arc<dyn cordis::Plugin>> {
         "database" => Some(database_plugin()),
         "embedder" => Some(embedder_plugin()),
         "http" => Some(http_plugin()),
+        "agent" => Some(agent_plugin()),
         _ => None,
     }
 }
@@ -253,6 +256,7 @@ async fn mint_one_plugin(
             ctx, factory, m, CapKind::Stream, "slot:echo_stream", |_, _| echo_stream_handler(),
         ).await,
         "generator" => mint_generator(ctx, factory, cspace, plan, m).await,
+        "agent" => mint_agent(ctx, factory, cspace, plan, m).await,
         "echo-chain" => mint_echo_chain(ctx, factory, cspace, plan, m).await,
         "http" => {
             // Phase 4 P4.1 — boot seeds the mock HTTP backend
@@ -469,6 +473,37 @@ async fn mint_generator(
     mint_simple::<GeneratorResource, _>(
         ctx, factory, m, CapKind::Stream, "slot:generate",
         move |_, _| generator_handler(model_arc.clone()),
+    ).await
+}
+
+
+/// Phase 4 P4.4 — mint the Capability-Native Agent.
+///
+/// Like echo-chain, the agent has no `[[requires]]` of its own —
+/// it depends on the runtime to grant capabilities via the
+/// binding table. At mint time, we hand it the cspace + a
+/// consumer plugin id (this agent's own PluginId). Its reachable
+/// set is whatever the resolver put in `plan.bindings[&m.plugin]`.
+///
+/// If the agent has no bindings (env grants nothing), the
+/// reachable set is empty and every program step will skip —
+/// the operator sees an empty world.
+async fn mint_agent(
+    ctx: &cordis::Context,
+    factory: &CapabilityFactory,
+    cspace: &CapabilitySpace,
+    plan: &ResolvedPlan,
+    m: &PluginManifest,
+) -> Result<Vec<crate::capability::SlotId>, Box<dyn std::error::Error>> {
+    let resource = agent_handler_from_plan(
+        m.plugin.name.clone(),
+        plan,
+        &m.plugin,
+        cspace.clone(),
+    );
+    mint_simple::<AgentResource, _>(
+        ctx, factory, m, CapKind::Stream, "slot:agent",
+        move |_, _| resource.clone(),
     ).await
 }
 
@@ -793,6 +828,7 @@ fn load_manifests(_dir: &str) -> Result<Vec<PluginManifest>, Box<dyn std::error:
         database::manifest as database_manifest,
         echo::{basic::manifest as echo_basic_manifest, chain::manifest as echo_chain_manifest, stream::manifest as echo_stream_manifest},
         embedder::manifest as embedder_manifest,
+        agent::manifest as agent_manifest,
         generator::manifest as generator_manifest,
         http::manifest as http_manifest,
         reverse::manifest as reverse_manifest,
@@ -806,6 +842,7 @@ fn load_manifests(_dir: &str) -> Result<Vec<PluginManifest>, Box<dyn std::error:
         echo_basic_manifest(),
         echo_chain_manifest(),
         echo_stream_manifest(),
+        agent_manifest(),
         generator_manifest(),
         http_manifest(),
         reverse_manifest(),

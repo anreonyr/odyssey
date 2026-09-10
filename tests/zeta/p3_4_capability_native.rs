@@ -23,8 +23,9 @@ use odyssey::capability::{CapabilitySpace, Resource, Slot};
 use odyssey::kernel::manifest::{CapabilityDecl, PluginId};
 use odyssey::kernel::manifest_builder::ManifestBuilder;
 use odyssey::kernel::resolver::{resolve, ResolvedBinding, ResolvedPlan};
-use odyssey::plugins::test_only::agent::{
-    handler_from_plan, AgentResource, Reachable,
+use odyssey::capability::Reachable;
+use odyssey::plugins::agent::{
+    handler_from_plan, AgentResource,
 };
 use odyssey::plugins::test_only::counter::CounterResource;
 use serde_json::json;

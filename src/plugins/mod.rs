@@ -22,6 +22,7 @@
 //! When the loader lands, the manifest moves back to
 //! `src/plugins/<name>/` and gains a real `mod.rs`.
 
+pub mod agent;
 pub mod database;
 pub mod echo;
 pub mod embedder;
@@ -34,7 +35,6 @@ pub mod slow;
 /// Plugins exercised by the test crates but not loaded at boot.
 /// Reachable from tests as `odyssey::plugins::test_only::counter` etc.
 pub mod test_only {
-    pub mod agent;
     pub mod broker;
     pub mod channel;
     pub mod counter;
