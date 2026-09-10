@@ -5,8 +5,9 @@
 //! 1. Cached typed `Arc<Capability<R>>` (the path plugins use via
 //!    `Slot::capability()`) must observe `cspace.revoke`.
 //! 2. After `revoke`, `is_revoked()` is `true`.
-//! 3. After `revoke`, `invoke_op(READ, ...)` returns `Err`
-//!    containing `"capability revoked"`.
+//! 3. After `revoke`, `invoke_op(READ, ...)` returns
+//!    `Err(CapabilityError::Revoked(slot))` (Phase 5 M4: typed
+//!    match, was: substring match on `"capability revoked"`).
 //! 4. A fresh `Arc<Capability<R>>` from `cspace::install` has
 //!    `is_revoked() == false` (lifecycle reset).
 //! 5. Cloning a typed `Arc<Capability<R>>` shares the marker —
@@ -14,7 +15,7 @@
 
 use std::sync::Arc;
 
-use odyssey::kernel::{Capability, OperationRights, Slot};
+use odyssey::kernel::{Capability, CapabilityError, OperationRights, Slot};
 use odyssey::plugins::test_only::counter::CounterResource;
 
 #[test]
@@ -41,9 +42,10 @@ fn typed_cap_arc_observes_cspace_revoke() {
     let err = typed
         .invoke_op(OperationRights::READ, serde_json::json!({"op": "read"}))
         .expect_err("invoke on revoked cap must error");
+    // Phase 5 M4: typed match on CapabilityError::Revoked(slot).
     assert!(
-        err.contains("capability revoked"),
-        "unexpected error message: {err}"
+        matches!(err, CapabilityError::Revoked(s) if s == slot),
+        "expected typed Revoked(slot) variant; got {err:?}"
     );
 }
 

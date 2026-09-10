@@ -2,8 +2,11 @@
 //!
 //! Derived caps draw from the parent's rate-limit bucket, so the
 //! parent's calls debit the same counter the child observes.
+//! Phase 5 M4: the quota-denial assertion pattern-matches on
+//! the typed `CapabilityError::QuotaExceeded` variant instead of
+//! substring matching on the rendered error message.
 
-use odyssey::kernel::{CapabilityRights, OperationRights, QuotaSpec, Slot};
+use odyssey::kernel::{CapabilityError, CapabilityRights, OperationRights, QuotaKind, QuotaSpec, Slot};
 use odyssey::plugins::test_only::counter::CounterResource;
 use serde_json::json;
 
@@ -44,8 +47,9 @@ fn restrict_inherits_parent_quota() {
         third.is_err(),
         "child must hit shared quota denial, got {third:?}"
     );
+    // Phase 5 M4: typed match on CapabilityError::QuotaExceeded.
     assert!(
-        third.as_ref().unwrap_err().contains("quota"),
-        "expected 'quota' in error, got {third:?}"
+        matches!(third, Err(CapabilityError::QuotaExceeded { kind: QuotaKind::Calls, .. })),
+        "expected typed QuotaExceeded::Calls variant; got {third:?}"
     );
 }

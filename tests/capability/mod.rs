@@ -9,6 +9,7 @@
 
 mod m2_panic_default;
 mod m3_invoke_op_timeout;
+mod m4_typed_variants;
 mod revocable_marker;
 
 #[path = "../common/mod.rs"]

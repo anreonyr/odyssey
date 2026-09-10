@@ -30,7 +30,7 @@
 //!   receive slices of the same parent).
 
 use odyssey::host::resolver::Reachable;
-use odyssey::kernel::{CapabilityChunk, CapabilityRights, OperationRights, Resource};
+use odyssey::kernel::{CapabilityChunk, CapabilityError, CapabilityRights, OperationRights, Resource};
 use odyssey::plugins::agent::{AgentResource, ProgramStep};
 use odyssey::plugins::database::{handler as database_handler, DatabaseResource};
 use odyssey::plugins::echo::basic::{handler as echo_handler, EchoResource};
@@ -243,10 +243,10 @@ async fn restrict_cannot_amplify_authority() {
         "database_amplified".into(),
     );
     assert!(result.is_err(), "amplification must be rejected");
-    let err_msg = format!("{:?}", result.unwrap_err());
+    // Phase 5 M4: typed match on CapabilityError::AttenuationViolation.
     assert!(
-        err_msg.contains("AttenuationViolation"),
-        "expected AttenuationViolation, got: {err_msg}"
+        matches!(result, Err(CapabilityError::AttenuationViolation { .. })),
+        "expected typed AttenuationViolation variant; got {result:?}"
     );
 }
 
@@ -329,9 +329,9 @@ async fn restrict_on_already_revoked_cap_returns_error() {
         "after_revoke".into(),
     );
     assert!(result.is_err(), "restrict on revoked slot must fail; got {:?}", result);
-    let err_msg = format!("{:?}", result.unwrap_err());
+    // Phase 5 M4: typed match on CapabilityError::SlotEmpty(slot).
     assert!(
-        err_msg.contains("SlotEmpty") || err_msg.contains("empty") || err_msg.contains("revoked"),
-        "expected SlotEmpty-ish error; got {err_msg}"
+        matches!(result, Err(CapabilityError::SlotEmpty(s)) if s == world.database_slot),
+        "expected typed SlotEmpty(database_slot) variant; got {result:?}"
     );
 }
