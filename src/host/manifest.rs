@@ -1,8 +1,14 @@
 //! Plugin manifest — the data contract between plugin author and host kernel.
 //!
-//! TOML describes identity, isolation, source, exposed capabilities,
-//! dependencies, host services, and resource hints. The host reads the
-//! manifest to know how to load and bind the plugin.
+//! TOML describes identity, the exposed capability surface
+//! (including the JSON-Schema contract the `RuleAgent` and HTTP
+//! bridge consult), dependencies on other plugins' capabilities,
+//! host services the plugin needs, and resource hints.
+//!
+//! Today every plugin compiles into the host binary as an in-proc
+//! module (`InProc` isolation). Designs for WASM / cdylib /
+//! subprocess loaders — including the manifest shapes those
+//! loaders must honour — live under `docs/deferred/`.
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -18,8 +24,10 @@ pub struct PluginId {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PluginManifest {
     pub plugin: PluginId,
+    /// Always `InProc` today. The variants for Wasm / Subprocess
+    /// live in `docs/deferred/`; when those loaders ship they'll
+    /// be added back here as additional variants.
     pub isolate: IsolationMode,
-    pub source: PluginSource,
     #[serde(default)]
     pub exposes: Vec<CapabilityDecl>,
     #[serde(default)]
@@ -30,49 +38,20 @@ pub struct PluginManifest {
     pub resources: ResourceHints,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+/// Isolation mode for a plugin. The runtime currently supports
+/// only `InProc` — the plugin's `handler.rs` is compiled into
+/// the host binary and the factory mints a typed
+/// `Capability<MyResource>` directly. Designs for WASM (cdylib
+/// or wasmtime) and subprocess transports are tracked under
+/// `docs/deferred/` and will mint into this enum when they ship.
+///
+/// TOML shape: `[isolate] kind = "in_proc"`. Tagged-enum so adding
+/// new variants later is a non-breaking change to existing
+/// manifests.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum IsolationMode {
-    /// Compiled into the host binary — no separate artifact.
     InProc,
-    /// A C-ABI cdylib, dlopen'd at runtime.
-    Wasm {
-        path: String,
-        #[serde(default)]
-        content_hash: Option<String>,
-    },
-    /// An out-of-process plugin talking over stdio / tcp / uds.
-    Subprocess {
-        cmd: String,
-        #[serde(default)]
-        args: Vec<String>,
-        transport: Transport,
-    },
-}
-
-/// Alias so manifest authors can write `isolate = { kind = "wasm", path = ... }`.
-impl IsolationMode {
-    #[allow(dead_code)]
-    pub fn is_dynamic(&self) -> bool {
-        matches!(self, Self::Wasm { .. } | Self::Subprocess { .. })
-    }
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum PluginSource {
-    /// A `.so` / `.dylib` (cdylib) path.
-    Path { path: String },
-    /// Inline source descriptor (e.g. for WASM bytes embedded in a parent crate).
-    Inline,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum Transport {
-    Stdio,
-    Tcp { addr: String },
-    Uds { path: String },
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -87,12 +66,14 @@ pub struct CapabilityDecl {
     #[allow(dead_code)]
     pub out_type: String,
     pub streaming: bool,
-    /// JSON-Schema-style contract for input / output and a one-line
-    /// description. Optional — missing field deserialises to an empty
-    /// contract so existing manifests keep parsing unchanged.
-    /// `CapabilityMeta.contract` carries it from the factory into the
-    /// runtime, where the HTTP bridge and any type-aware caller (the
-    /// RuleAgent in particular) can read it.
+    /// JSON-Schema-style contract for input / output, an action
+    /// table that names the RPC verbs the cap accepts and the
+    /// `OperationRights` bit each requires, and a one-line
+    /// description. Optional — missing field deserialises to an
+    /// empty contract so existing manifests keep parsing unchanged.
+    /// `CapabilityMeta.contract` carries it from the factory into
+    /// the runtime, where the HTTP bridge and any type-aware
+    /// caller (the `RuleAgent` in particular) can read it.
     #[serde(default)]
     pub contract: CapabilityContract,
 }

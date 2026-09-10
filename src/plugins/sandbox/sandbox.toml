@@ -7,8 +7,6 @@ version = "0.1.0"
 [isolate]
 kind = "in_proc"
 
-[source]
-kind = "inline"
 
 [[exposes]]
 name      = "exec"

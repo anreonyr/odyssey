@@ -11,10 +11,7 @@ version = "0.1.0"
 [isolate]
 kind = "in_proc"
 
-[source]
-kind = "inline"
 
-# Capabilities this plugin exposes.
 [[exposes]]
 name      = "echo"
 in_type   = "any"
