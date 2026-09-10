@@ -24,7 +24,9 @@ use super::types::{ManifestError, PluginManifest};
 /// removed `tokens_per_minute` or `bytes_per_minute` quota
 /// fields. The fields are ignored on the new `QuotaSpec`.
 pub fn from_toml_str(s: &str) -> Result<PluginManifest, ManifestError> {
-    warn_on_removed_quota_fields(s);
+    for warning in removed_quota_field_warnings(s) {
+        eprintln!("{warning}");
+    }
     let m: PluginManifest = toml::from_str(s)?;
     m.validate()?;
     Ok(m)
@@ -36,25 +38,34 @@ pub fn from_path(p: impl AsRef<Path>) -> Result<PluginManifest, ManifestError> {
     from_toml_str(&text)
 }
 
-/// Scan the TOML source for the removed quota fields and emit
-/// a warning for each. The check is intentionally permissive:
-/// any line mentioning either key, in any context, triggers the
-/// warning. Operators reading the warning then check whether
-/// their manifest genuinely carried the field or whether the
-/// comment mentioning the field was just historical context.
-fn warn_on_removed_quota_fields(s: &str) {
+/// Scan the TOML source for the removed quota fields and return
+/// the warning strings. `from_toml_str` prints each via
+/// `eprintln!`; tests call this function directly to assert
+/// that the right warning fired without capturing stderr.
+///
+/// The check is intentionally permissive: any line mentioning
+/// either key, in any context, triggers the warning. Operators
+/// reading the warning then check whether their manifest
+/// genuinely carried the field or whether the comment
+/// mentioning the field was just historical context.
+#[doc(hidden)]
+pub fn removed_quota_field_warnings(s: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
     if s.contains("tokens_per_minute") {
-        eprintln!(
+        out.push(
             "[manifest] WARN: source contains the removed `tokens_per_minute` quota \
              field; Phase 5 removed it from QuotaSpec — limit is dropped"
+                .to_string(),
         );
     }
     if s.contains("bytes_per_minute") {
-        eprintln!(
+        out.push(
             "[manifest] WARN: source contains the removed `bytes_per_minute` quota \
              field; Phase 5 removed it from QuotaSpec — limit is dropped"
+                .to_string(),
         );
     }
+    out
 }
 
 impl PluginManifest {

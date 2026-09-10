@@ -64,3 +64,85 @@ bytes_per_minute = 1000
     let _ = PluginManifest::from_toml_str(toml_src)
         .expect("manifest loads even with dead quota fields (loader must skip with warn)");
 }
+
+/// Phase 5 P2-P: assert that the loader emits the per-field
+/// diagnostic. The loader returns a `Vec<String>` of warning
+/// lines via `removed_quota_field_warnings`; the public
+/// `from_toml_str` prints each via `eprintln!`. We exercise
+/// the warning builder directly so the test doesn't have to
+/// capture stderr (which the standard test harness doesn't
+/// support cleanly).
+#[test]
+fn d5_warning_capture_tokens_field_fires() {
+    use odyssey::host::manifest::load::removed_quota_field_warnings;
+
+    let toml = r#"
+[exposes.quota]
+calls_per_minute = 60
+tokens_per_minute = 100
+"#;
+    let warnings = removed_quota_field_warnings(toml);
+    assert!(
+        warnings.iter().any(|w| w.contains("tokens_per_minute")),
+        "expected a warning containing 'tokens_per_minute'; got {warnings:?}"
+    );
+    assert!(
+        !warnings.iter().any(|w| w.contains("bytes_per_minute")),
+        "manifest without bytes_per_minute must NOT trigger that warning; got {warnings:?}"
+    );
+}
+
+#[test]
+fn d5_warning_capture_bytes_field_fires() {
+    use odyssey::host::manifest::load::removed_quota_field_warnings;
+
+    let toml = r#"
+[exposes.quota]
+calls_per_minute = 60
+bytes_per_minute = 1000
+"#;
+    let warnings = removed_quota_field_warnings(toml);
+    assert!(
+        warnings.iter().any(|w| w.contains("bytes_per_minute")),
+        "expected a warning containing 'bytes_per_minute'; got {warnings:?}"
+    );
+    assert!(
+        !warnings.iter().any(|w| w.contains("tokens_per_minute")),
+        "manifest without tokens_per_minute must NOT trigger that warning; got {warnings:?}"
+    );
+}
+
+#[test]
+fn d5_warning_capture_both_fields_fire() {
+    use odyssey::host::manifest::load::removed_quota_field_warnings;
+
+    let toml = r#"
+[exposes.quota]
+calls_per_minute = 60
+tokens_per_minute = 100
+bytes_per_minute = 1000
+"#;
+    let warnings = removed_quota_field_warnings(toml);
+    assert_eq!(
+        warnings.len(),
+        2,
+        "expected two warnings (tokens + bytes); got {warnings:?}"
+    );
+    assert!(warnings.iter().any(|w| w.contains("tokens_per_minute")));
+    assert!(warnings.iter().any(|w| w.contains("bytes_per_minute")));
+}
+
+#[test]
+fn d5_warning_capture_no_dead_fields_no_warnings() {
+    use odyssey::host::manifest::load::removed_quota_field_warnings;
+
+    let toml = r#"
+[exposes.quota]
+calls_per_minute = 60
+"#;
+    let warnings = removed_quota_field_warnings(toml);
+    assert!(
+        warnings.is_empty(),
+        "manifest without removed fields must produce no warnings; got {warnings:?}"
+    );
+}
