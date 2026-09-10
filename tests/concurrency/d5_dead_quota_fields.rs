@@ -21,7 +21,7 @@ fn quota_spec_has_no_token_or_byte_fields() {
     // reflection-style check: a default QuotaSpec must serialize
     // without either key.
     let q = QuotaSpec::default();
-    let serialized = serde_json::to_value(&q).expect("QuotaSpec serializes");
+    let serialized = serde_json::to_value(q).expect("QuotaSpec serializes");
 
     let obj = serialized.as_object().expect("QuotaSpec is an object");
     assert!(

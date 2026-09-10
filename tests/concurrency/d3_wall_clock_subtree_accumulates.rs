@@ -98,7 +98,7 @@ fn child_wall_clock_inherits_parent_counter() {
     // of whatever the parent had. (The exact number depends on
     // whether they share the same atomic; on Phase-5 code they do.)
     assert!(
-        child_after >= child_before + 1,
+        child_after > child_before,
         "child counter did not advance after 10 calls: child_before={child_before}, child_after={child_after}"
     );
 }
