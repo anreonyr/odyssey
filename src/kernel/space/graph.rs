@@ -7,6 +7,15 @@
 //! is kept as a type alias so existing call sites compile.
 //! `CapabilityGraph::capabilities` is renamed to `nodes` to match
 //! the public contract (`graph.nodes.len()` etc.).
+//!
+//! `NamespaceNode` carries only the namespace tree
+//! (`namespace` + `children`). The flat `nodes` field on
+//! `CapabilityGraph` is the single source of truth for
+//! capability nodes — Phase 6 dropped the duplicated
+//! `Vec<GraphNode>` per-namespace field because it could not
+//! be populated with real `SlotId`s at the namespace level
+//! (the namespace builder only has `CapabilityMeta` in hand,
+//! not a `SlotId`).
 
 use std::collections::BTreeMap;
 
@@ -33,11 +42,21 @@ pub struct GraphNode {
 }
 
 /// One namespace node in the graph view.
+///
+/// Phase 6: `capabilities` field removed. The namespace tree
+/// only carries the structural shape (`namespace` + nested
+/// `children`); the flat `CapabilityGraph::nodes` array is the
+/// single source of truth for every capability. Consumers
+/// (HTTP bridge, observability tooling) walk `nodes` once and
+/// join by `namespace` string when they need a per-namespace
+/// grouping. Carrying the same `Vec<GraphNode>` per-namespace
+/// forced the builder to invent a `SlotId::new(1)` sentinel
+/// because the builder only sees `CapabilityMeta`, not the
+/// underlying slot id.
 #[derive(Debug, Clone, Serialize)]
 pub struct NamespaceNode {
     pub namespace: String,
     pub children: Vec<NamespaceNode>,
-    pub capabilities: Vec<GraphNode>,
 }
 
 /// Snapshot of the cspace — every capability, namespace tree,
@@ -84,7 +103,10 @@ impl From<&CapabilitySpace> for CapabilityGraph {
             })
             .collect();
 
-        // Build namespace tree from the same metas.
+        // Build the namespace tree from the metas' namespace
+        // strings. The tree carries no capability nodes —
+        // consumers walk `nodes` and join by `namespace` when
+        // they need a per-namespace grouping.
         let metas: Vec<crate::kernel::meta::CapabilityMeta> =
             index.into_iter().map(|(_, m)| m).collect();
         let namespaces = build_namespace_tree(&metas);
@@ -99,42 +121,28 @@ impl From<&CapabilitySpace> for CapabilityGraph {
 }
 
 fn build_namespace_tree(metas: &[crate::kernel::meta::CapabilityMeta]) -> Vec<NamespaceNode> {
-    let mut root: BTreeMap<String, (Vec<NamespaceNode>, Vec<GraphNode>)> = BTreeMap::new();
+    let mut root: BTreeMap<String, Vec<NamespaceNode>> = BTreeMap::new();
     for m in metas {
         let segments: Vec<&str> = if m.namespace.is_empty() {
             vec![""]
         } else {
             m.namespace.split('.').collect()
         };
-        // Flattened single-level representation: each capability is
+        // Flattened single-level representation: each namespace is
         // filed under its first segment. Recursion into deeper
         // segments is deferred to Phase 6 if needed.
         let head = segments.first().copied().unwrap_or("").to_string();
-        let node = GraphNode {
-            // Slot id is unknown at the namespace-tree level
-            // (we only have meta here, no slot→meta index).
-            // The graph's flat `nodes` field carries the real
-            // ids; the tree view uses a sentinel of slot 1,
-            // which the HTTP bridge substitutes with the real
-            // id when it joins the two views.
-            slot: SlotId::new(1),
-            capability_id: m.id.clone(),
-            name: m.name.clone(),
-            namespace: m.namespace.clone(),
-            contract_name: m.contract_name.clone(),
-            plugin: m.plugin.clone(),
-            operations: format!("{:?}", m.authority),
-            timeout_ms: m.timeout_ms,
-            parent: None,
-            quota_calls_per_minute: m.quota.calls_per_minute,
-        };
-        root.entry(head).or_default().1.push(node);
+        // Each namespace appears once in the tree; deeper
+        // segments live under `children` but the current
+        // builder does not synthesise them. Phase 6 callers
+        // that need deeper trees can call `enumerate_namespace`
+        // directly on the cspace.
+        root.entry(head).or_default();
     }
     root.into_iter()
-        .map(|(ns, (children, caps))| NamespaceNode {
+        .map(|(ns, children)| NamespaceNode {
             namespace: ns,
             children,
-            capabilities: caps,
         })
         .collect()
 }
