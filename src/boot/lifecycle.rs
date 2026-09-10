@@ -40,6 +40,7 @@ use crate::kernel::registry::Registry;
 use crate::kernel::resolver::{resolve, ResolvedPlan};
 use crate::plugins::{
     database::{database_plugin, handler as database_handler, DatabaseResource},
+    embedder::{embedder_plugin, handler as embedder_handler, EmbedderResource},
     echo::{
         basic::{echo_plugin, handler as echo_handler, EchoResource},
         chain::{echo_chain_plugin, EchoChainResource},
@@ -73,6 +74,7 @@ const RUNTIME_PLUGINS: &[&str] = &[
     "generator",
     "echo-chain",
     "database",
+    "embedder",
 ];
 
 /// Returns the cordis `Plugin` activator for a runtime plugin
@@ -91,6 +93,7 @@ fn activator_for(name: &str) -> Option<Arc<dyn cordis::Plugin>> {
         "generator" => Some(generator_plugin()),
         "echo-chain" => Some(echo_chain_plugin()),
         "database" => Some(database_plugin()),
+        "embedder" => Some(embedder_plugin()),
         _ => None,
     }
 }
@@ -264,6 +267,9 @@ async fn mint_one_plugin(
         "echo-chain" => mint_echo_chain(ctx, factory, cspace, plan, m).await,
         "database" => mint_simple::<DatabaseResource, _>(
             ctx, factory, m, CapKind::Sync, "slot:database", |_, _| database_handler(),
+        ).await,
+        "embedder" => mint_simple::<EmbedderResource, _>(
+            ctx, factory, m, CapKind::Sync, "slot:embed", |_, _| embedder_handler(),
         ).await,
         // B1: instead of silently returning an empty vec, fail
         // loudly. `mint_runtime_plugins` already checked that
@@ -721,6 +727,7 @@ fn load_manifests(_dir: &str) -> Result<Vec<PluginManifest>, Box<dyn std::error:
     use crate::plugins::{
         database::manifest as database_manifest,
         echo::{basic::manifest as echo_basic_manifest, chain::manifest as echo_chain_manifest, stream::manifest as echo_stream_manifest},
+        embedder::manifest as embedder_manifest,
         generator::manifest as generator_manifest,
         reverse::manifest as reverse_manifest,
         sandbox::manifest as sandbox_manifest,
@@ -729,6 +736,7 @@ fn load_manifests(_dir: &str) -> Result<Vec<PluginManifest>, Box<dyn std::error:
 
     let manifests = [
         database_manifest(),
+        embedder_manifest(),
         echo_basic_manifest(),
         echo_chain_manifest(),
         echo_stream_manifest(),
