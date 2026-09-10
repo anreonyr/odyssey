@@ -7,6 +7,7 @@
 //! is `pub(crate)`, so release builds can't amplify rights via the
 //! typed-cap path).
 
+mod m2_panic_default;
 mod revocable_marker;
 
 #[path = "../common/mod.rs"]
