@@ -14,13 +14,19 @@ use crate::kernel::chunk::CapabilityChunk;
 /// (for `invoke`) or `Err(\"resource does not support streaming\".to_string())`
 /// (for `open`) — these `String` errors are wrapped by the
 /// dispatching `Capability::invoke` / `open` as
-/// `CapabilityError::KindMismatch` at the typed boundary, so the
+/// `CapabilityError::Handler` at the typed boundary, so the
 /// wrong call shape fails closed instead of silently no-op'ing.
+/// (Note: `CapabilityError::KindMismatch` is produced earlier,
+/// at the sync/stream `CapKind` check in `Capability::invoke` /
+/// `open`; the handler's own `String` error is wrapped as
+/// `Handler` after the kind check passes.)
 pub trait Resource: Send + Sync + 'static {
     /// Default: sync invocation returns an `Err(String)`;
     /// `Capability::invoke` wraps this as
-    /// `CapabilityError::KindMismatch { expected: \"sync\", got: \"stream\" }`.
-    /// Sync resources override.
+    /// `CapabilityError::Handler { name, message }` (the
+    /// `KindMismatch` variant is produced at the CapKind
+    /// check, before the handler runs). Sync resources
+    /// override.
     fn invoke(&self, input: Value) -> Result<Value, String> {
         let _ = input;
         Err("resource does not support sync invocation".to_string())
@@ -28,8 +34,10 @@ pub trait Resource: Send + Sync + 'static {
 
     /// Default: stream open returns an `Err(String)`;
     /// `Capability::open` wraps this as
-    /// `CapabilityError::KindMismatch { expected: \"stream\", got: \"sync\" }`.
-    /// Stream resources override.
+    /// `CapabilityError::Handler { name, message }` (the
+    /// `KindMismatch` variant is produced at the CapKind
+    /// check, before the handler runs). Stream resources
+    /// override.
     fn open(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
         let _ = input;
         Err("resource does not support streaming".to_string())
