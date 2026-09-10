@@ -33,6 +33,18 @@ adheres to [Semantic Versioning](https://semver.org/).
   `[[requires]]` exclusively and uses
   `CapabilityRequirement`, not `DependencyRef`. The struct
   and both re-exports are gone.
+- **Removed `removed_quota_field_warnings` and D5
+  warning-capture tests** (no longer needed: quota fields
+  removed in Phase 5). The loader no longer scans the
+  source for `tokens_per_minute` / `bytes_per_minute` —
+  serde's default `deny_unknown_fields = false` already
+  ignores the dead keys silently, so the diagnostic was
+  redundant. The four `d5_warning_capture_*` tests that
+  exercised the warning builder directly are deleted;
+  the schema-level guards
+  (`quota_spec_has_no_token_or_byte_fields`,
+  `manifest_with_dead_quota_fields_still_loads`)
+  remain.
 
 ### Added — Phase 3: Capability-Native Runtime
 
