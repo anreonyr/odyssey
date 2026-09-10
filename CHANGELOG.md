@@ -756,10 +756,17 @@ src/
   this to flip a marker that the dispatch path checks — silent
   fall-through was the original soundness gap.
 - **M3** — `kernel/cap/typed.rs::invoke` + `invoke_op` reorder:
-  handler runs first, wall-clock recorded, then quota debited,
-  then timeout check. Successful handler results are not silently
-  discarded on a late timeout. `CapabilityError::Timeout` variant
-  added for the late-timeout case.
+  handler runs first; on success the elapsed wall-clock is recorded
+  (`self.clock.now()`); then the per-call timeout is checked (return
+  `CapabilityError::Timeout` if the budget was blown, dropping the
+  successful result — the budget is the contract); then the
+  per-minute quota is debited (`CapabilityError::QuotaExceeded` if
+  the bucket is full); then the handler result is returned. The
+  budget contract is the contract: a late answer is not a correct
+  answer. `CapabilityError::Timeout` variant added for the
+  late-timeout case. `Capability<R>` carries its own `Arc<dyn Clock>`
+  so the timeout recording does not call `Instant::now()` directly
+  (P1-C).
 - **M4** — typed `CapabilityError` variants replace substring
   matching on the rendered error message. `host/pipeline.rs`
   pattern-matches on `Revoked(SlotId)` / `SlotEmpty(SlotId)` via

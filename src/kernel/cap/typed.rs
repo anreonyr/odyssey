@@ -6,11 +6,14 @@
 //! - **D1** (`derive` doc-comment): the 20-line block arguing against a
 //!   hypothetical `pub derive` is compressed to a 5-line block noting
 //!   that `derive` is `pub(crate)` and the cspace is the only caller.
-//! - **M3** (`invoke_op` re-order): quota is debited BEFORE the handler
-//!   runs (the call has been authorised). Wall-clock is recorded
-//!   after the handler returns. The handler's success result is
-//!   never silently discarded on a late timeout — `M3`'s "don't lie
-//!   about success" invariant holds.
+//! - **M3** (`invoke_op` re-order): the handler runs first; on success
+//!   we record elapsed wall-clock (via `Clock::now()`); then we check
+//!   the per-call timeout (return `CapabilityError::Timeout` if the
+//!   budget was blown, dropping the successful handler result); then
+//!   we debit the per-minute quota (return `CapabilityError::QuotaExceeded`
+//!   if the bucket is full); then we surface the handler's result. The
+//!   budget contract is the contract — a late answer is not a correct
+//!   answer (M3's "don't lie about success" invariant).
 //! - **M4** (`invoke_op` / `open`): return typed `CapabilityError`
 //!   instead of `String`. Substring matching in pipeline is replaced
 //!   by pattern-matching on the variant.
@@ -194,9 +197,13 @@ impl<R: Resource> Capability<R> {
     }
 
     /// Sync invoke without an operation-rights check. Returns
-    /// typed `CapabilityError` (Phase 5 M4). Same M3 reorder as
-    /// `invoke_op`: handler first, then quota debit, then timeout
-    /// check. Successful results are dropped on timeout.
+    /// typed `CapabilityError` (Phase 5 M4). M3 reorder:
+    /// the handler runs first; on success the elapsed
+    /// wall-clock is recorded via `self.clock.now()`; the
+    /// per-call timeout is checked (the successful result
+    /// is dropped on a late timeout — the budget is the
+    /// contract); the per-minute quota is debited; the
+    /// handler result is surfaced.
     pub fn invoke(&self, input: Value) -> Result<Value, CapabilityError> {
         if self.kind != CapKind::Sync {
             return Err(CapabilityError::KindMismatch {
@@ -240,11 +247,13 @@ impl<R: Resource> Capability<R> {
     /// typed `CapabilityError`. The handler's `String` error is
     /// wrapped as `CapabilityError::Handler`.
     ///
-    /// Phase 5 M3 reorder: the handler runs first, then quota is
-    /// debited, then the timeout check fires. A late answer is not
-    /// a correct answer — if the wall-clock budget was blown we
-    /// drop the successful handler result and surface
-    /// `CapabilityError::Timeout`.
+    /// Phase 5 M3 reorder: the handler runs first; on success the
+    /// elapsed wall-clock is recorded via `self.clock.now()`; the
+    /// per-call timeout is checked (a late answer is not a correct
+    /// answer — we drop the successful handler result and surface
+    /// `CapabilityError::Timeout` if the budget was blown); the
+    /// per-minute quota is debited (`CapabilityError::QuotaExceeded`
+    /// if the bucket is full); the handler result is returned.
     pub fn invoke_op(
         &self,
         requested: OperationRights,
