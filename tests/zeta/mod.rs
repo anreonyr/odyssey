@@ -85,6 +85,7 @@ mod p3_7_events;
 mod p4_4_5_agent_env;
 mod p4_6_delegation;
 mod p4_7_composition;
+mod p4_8_revocation;
 
 #[path = "../common/mod.rs"]
 mod common;
