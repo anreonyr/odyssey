@@ -463,33 +463,86 @@ async fn shutdown_runtime_plugins(
 // Boot
 // ---------------------------------------------------------------------------
 
+/// Phase 1 of boot prints every loaded manifest so operators
+/// can confirm the resolver's input: which plugins loaded,
+/// what they expose, what they require. Aligned columns + a
+/// separator row make the dump scannable; `—` marks empty
+/// requires (the alternative, e.g. an empty cell, reads as
+/// a missing field).
+fn print_manifests(manifests: &[PluginManifest]) {
+    let mut rows: Vec<(String, String, String, String)> = Vec::with_capacity(manifests.len());
+    for m in manifests {
+        let name_ver = format!("{}@{}", m.plugin.name, m.plugin.version);
+        let exposes = m
+            .exposes
+            .iter()
+            .map(|c| c.name.clone())
+            .collect::<Vec<_>>()
+            .join(",");
+        let contracts = m
+            .exposes
+            .iter()
+            .map(|c| c.contract_name.clone())
+            .filter(|s| !s.is_empty())
+            .collect::<Vec<_>>()
+            .join(",");
+        let requires = if m.requires.is_empty() {
+            "—".to_string()
+        } else {
+            m.requires
+                .iter()
+                .map(|r| format!("{}→{}", r.name, r.contract))
+                .collect::<Vec<_>>()
+                .join(",")
+        };
+        rows.push((name_ver, exposes, contracts, requires));
+    }
+
+    // Column widths = max(header, longest cell), +1 for gutter.
+    let headers = (
+        "plugin".to_string(),
+        "exposes".to_string(),
+        "contract".to_string(),
+        "requires".to_string(),
+    );
+    let col_width = |label: &str, cells: &[String]| -> usize {
+        cells
+            .iter()
+            .map(|s| s.chars().count())
+            .max()
+            .unwrap_or(0)
+            .max(label.chars().count())
+            + 1
+    };
+    let wp = col_width(&headers.0, &rows.iter().map(|r| r.0.clone()).collect::<Vec<_>>());
+    let we = col_width(&headers.1, &rows.iter().map(|r| r.1.clone()).collect::<Vec<_>>());
+    let wc = col_width(&headers.2, &rows.iter().map(|r| r.2.clone()).collect::<Vec<_>>());
+    let wr = col_width(&headers.3, &rows.iter().map(|r| r.3.clone()).collect::<Vec<_>>());
+
+    println!("[manifest] loaded {} plugin(s):", manifests.len());
+    println!(
+        "  {:<wp$}{:<we$}{:<wc$}{:<wr$}",
+        headers.0, headers.1, headers.2, headers.3,
+    );
+    println!(
+        "  {}{}{}{}",
+        "-".repeat(wp - 1),
+        "-".repeat(we),
+        "-".repeat(wc),
+        "-".repeat(wr),
+    );
+    for (n, e, c, r) in &rows {
+        println!(
+            "  {:<wp$}{:<we$}{:<wc$}{:<wr$}",
+            n, e, c, r,
+        );
+    }
+}
+
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Phase 1: Parse manifests.
     let manifests = load_manifests(MANIFEST_DIR)?;
-    println!("[manifest] loaded {} plugin(s):", manifests.len());
-    for m in &manifests {
-        println!(
-            "  - {}@{}  exposes={}  contracts={}  requires={}",
-            m.plugin.name,
-            m.plugin.version,
-            m.exposes.iter().map(|c| c.name.as_str()).collect::<Vec<_>>().join(","),
-            m.exposes
-                .iter()
-                .map(|c| c.contract_name.as_str())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-                .join(","),
-            if m.requires.is_empty() {
-                "—".to_string()
-            } else {
-                m.requires
-                    .iter()
-                    .map(|r| format!("{}→{}", r.name, r.contract))
-                    .collect::<Vec<_>>()
-                    .join(",")
-            },
-        );
-    }
+    print_manifests(&manifests);
 
     // Phase 2: Provide core services.
     let ctx = cordis::Context::new();
