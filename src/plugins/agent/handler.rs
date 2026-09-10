@@ -155,6 +155,38 @@ impl AgentResource {
         }
     }
 
+    /// Phase 4 P4.6 — construct directly from a hand-rolled
+    /// reachable set. Used by tests that build agents whose
+    /// reachable references derived (restricted) capabilities
+    /// minted outside the resolver's view.
+    ///
+    /// Production code should use [`AgentResource::from_bindings`]
+    /// so the resolver drives the binding shape. This entry
+    /// point exists for delegation tests.
+    pub fn from_reachable(
+        name: impl Into<String>,
+        reachable: Vec<Reachable>,
+        cspace: CapabilitySpace,
+    ) -> Self {
+        let name_string = name.into();
+        let mut sorted = reachable;
+        sorted.sort_by(|a, b| a.handle.cmp(&b.handle));
+        eprintln!(
+            "[agent] {n}: reachable=[{list}]",
+            n = name_string,
+            list = sorted
+                .iter()
+                .map(|r| format!("{}→{}", r.handle, r.capability))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        Self {
+            name: name_string,
+            reachable: sorted,
+            cspace,
+        }
+    }
+
     /// Inspect the reachable set. Tests assert the binding table
     /// shape without going through dispatch.
     pub fn reachable(&self) -> &[Reachable] {
@@ -372,7 +404,15 @@ async fn run_program(
             }
         };
 
-        // 3) Authority check (only if step specifies an op)
+        // 3) Authority check (only if step specifies an op).
+        //    Translates the action verb to OperationRights bits
+        //    via the cap's published authority, then dispatches
+        //    through invoke_op_dyn so the kernel-level guard
+        //    checks `requested ⊆ held`. P4.6 relies on this:
+        //    a restricted slot holds fewer bits, so the
+        //    request fails with a clear deny — not a generic
+        //    fail.
+        let mut requested_op: Option<OperationRights> = None;
         if let Some(op_name) = &step.op {
             match cap.meta().authority.operation_for(op_name) {
                 None => {
@@ -387,19 +427,21 @@ async fn run_program(
                     stats.denied += 1;
                     continue;
                 }
-                Some(_op_str) => {
-                    // op_str is "READ"/"WRITE"/etc. Phase 4
-                    // does not enforce the held-bits check
-                    // here — that lives at the kernel level
-                    // (`invoke_op_dyn`). If the cap holds the
-                    // bit, the invoke will succeed; if not, the
-                    // invoke returns Err and we record fail.
+                Some(op_str) => {
+                    requested_op = parse_operation(op_str);
                 }
             }
         }
 
-        // 4) Dispatch via invoke_dyn.
-        match cap.invoke_dyn(step.input.clone()) {
+        // 4) Dispatch. If the step specified an op, use
+        //    invoke_op_dyn with the parsed bits so the
+        //    kernel-level guard can refuse bits not held.
+        //    Otherwise fall back to invoke_dyn (default EXECUTE).
+        let dispatch_result = match requested_op {
+            Some(op) => cap.invoke_op_dyn(op, step.input.clone()),
+            None => cap.invoke_dyn(step.input.clone()),
+        };
+        match dispatch_result {
             Ok(output) => {
                 emit_event(&tx, json!({
                     "event": "step_ok",
@@ -411,14 +453,30 @@ async fn run_program(
                 stats.ok += 1;
             }
             Err(e) => {
-                emit_event(&tx, json!({
-                    "event": "step_fail",
-                    "index": i,
-                    "handle": step.handle,
-                    "error": e,
-                }))
-                .await;
-                stats.failed += 1;
+                // If the kernel refused due to missing bits,
+                // surface as step_deny (P4.6 — capability
+                // attenuation). Otherwise it's a generic
+                // step_fail.
+                if e.contains("operation denied") {
+                    emit_event(&tx, json!({
+                        "event": "step_deny",
+                        "index": i,
+                        "handle": step.handle,
+                        "op": step.op,
+                        "reason": e,
+                    }))
+                    .await;
+                    stats.denied += 1;
+                } else {
+                    emit_event(&tx, json!({
+                        "event": "step_fail",
+                        "index": i,
+                        "handle": step.handle,
+                        "error": e,
+                    }))
+                    .await;
+                    stats.failed += 1;
+                }
             }
         }
     }
