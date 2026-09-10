@@ -26,9 +26,17 @@
 //!
 //! `tokio::sync::broadcast` guarantees that a single sender's
 //! events arrive at receivers in the same order they were
-//! sent. There is **no** cross-sender ordering — we have one
-//! sender per `CapabilitySpace`, so this isn't a concern in
-//! practice.
+//! sent. There is **no** cross-sender ordering.
+//!
+//! In practice the codebase calls `publish` from two
+//! sites — `CapabilitySpace` itself (for `Minted`, `Derived`,
+//! `Revoked`, `RevokeTree`) and `boot.rs` (for `PluginActivated`,
+//! `PluginDeactivated`, `ShutdownStarted`, `ShutdownCompleted`).
+//! Both go through the same `Arc<CapabilitySpace>` and therefore
+//! share the same `Sender`, so cross-sender ordering never
+//! arises. If we ever had multiple `CapabilitySpace` instances
+//! publishing into the same bus (we don't, today), the
+//! single-sender ordering guarantee would no longer hold.
 //!
 //! ## Backpressure
 //!

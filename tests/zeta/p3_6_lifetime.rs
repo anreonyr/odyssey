@@ -126,11 +126,9 @@ fn teardown_order_is_reverse_of_mint() {
         )
         .unwrap();
 
-    let mint_order = vec![
-        PluginId { name: "A".into(), version: "0.1.0".into() },
+    let mint_order = [PluginId { name: "A".into(), version: "0.1.0".into() },
         PluginId { name: "B".into(), version: "0.1.0".into() },
-        PluginId { name: "C".into(), version: "0.1.0".into() },
-    ];
+        PluginId { name: "C".into(), version: "0.1.0".into() }];
     let mut minted = std::collections::HashMap::new();
     minted.insert(mint_order[0].clone(), vec![slot_a]);
     minted.insert(mint_order[1].clone(), vec![slot_b]);

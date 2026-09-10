@@ -41,8 +41,10 @@
 //!
 //! # Example
 //!
-//! ```ignore
-//! use crate::kernel::manifest_builder::ManifestBuilder;
+//! ```no_run
+//! use std::sync::OnceLock;
+//! use odyssey::kernel::manifest::PluginManifest;
+//! use odyssey::kernel::manifest_builder::ManifestBuilder;
 //!
 //! pub fn manifest() -> &'static PluginManifest {
 //!     static M: OnceLock<PluginManifest> = OnceLock::new();
@@ -150,11 +152,12 @@ impl ManifestBuilder {
     }
 
     /// Append a legacy `[[consumes]]` entry. Plugin-version-keyed
-    /// dependency kept around for back-compat with the boot
-    /// validation log (which still prints the "plugin X consumes
-    /// Y from plugin Z@version" line for any non-empty `consumes`).
-    /// New plugins should prefer `.requires()` (capability-keyed);
-    /// the resolver walks `requires`, not `consumes`.
+    /// dependency kept around so existing manifests can still
+    /// describe their old-style dependencies for the audit
+    /// log printed by boot's Phase 5. The resolver does not
+    /// walk `consumes` — new plugins should prefer
+    /// `.requires()` (capability-keyed) so the dependency
+    /// graph picks them up.
     pub fn consumes(
         mut self,
         plugin: impl Into<String>,

@@ -19,7 +19,9 @@
 //!            (counter, broker, channel, agent) are resolved and
 //!            registered but not minted at boot — they're
 //!            exercised by the test crates.
-//!   Phase 5  Validate the legacy `consumes` graph (back-compat).
+//!   Phase 5  Log the legacy `consumes` entries (informational
+//!            only; the resolver uses `[[requires]]` for the
+//!            actual dependency graph).
 //!   Phase 6  Activate runtime plugins in resolved order.
 //!   Phase 7  Bring up the HTTP bridge and wait for Ctrl-C.
 //!
@@ -92,12 +94,26 @@ fn activator_for(name: &str) -> Option<Arc<dyn cordis::Plugin>> {
 
 /// Debug-only consistency check: every name in
 /// [`RUNTIME_PLUGINS`] must have an arm in [`activator_for`].
+/// The same is true for [`mint_one_plugin`], but we can't
+/// verify that statically — the closure types differ per
+/// plugin (each one binds a different `Resource` type).
+/// Instead, [`mint_one_plugin`] returns a loud `Err` for any
+/// name it doesn't recognise (the fallthrough arm), and
+/// [`mint_runtime_plugins`] checks that every
+/// `RUNTIME_PLUGINS` entry has a loaded manifest. The two
+/// mechanisms together cover all four
+/// "I added it here but forgot there" cases:
 ///
-/// We can't statically verify the typed-mint match in
-/// [`mint_one_plugin`] the same way (the closure types differ
-/// per plugin), but the `activator_for` arm-list mirrors it
-/// one-to-one. If you add a name to `RUNTIME_PLUGINS`, add
-/// arms in both `activator_for` and `mint_one_plugin`.
+/// |                                | activator_for | mint_one_plugin | manifest loaded |
+/// |--------------------------------|---------------|-----------------|-----------------|
+/// | `dispatch_consistency`         | debug_assert  | (runtime error) | (config check)  |
+/// | `mint_runtime_plugins` config  | n/a           | (runtime error) | error           |
+/// | `mint_one_plugin` fallthrough  | n/a           | error           | n/a             |
+///
+/// So the rule is simple: if you add a name to
+/// `RUNTIME_PLUGINS`, add arms in both `activator_for` and
+/// `mint_one_plugin`, and include the plugin's manifest in
+/// `load_manifests()`.
 #[allow(dead_code)]
 fn dispatch_consistency() {
     #[cfg(debug_assertions)]
@@ -128,6 +144,16 @@ fn dispatch_consistency() {
 /// the provider's slots are alive; revoking them in reverse
 /// mint order means consumers' reachable entries become
 /// invalid before their providers go away.
+///
+/// ## Configuration check (B1)
+///
+/// Before iterating, validate that every name in
+/// [`RUNTIME_PLUGINS`] is backed by a loaded manifest. This
+/// catches the misconfiguration where a name is added to
+/// `RUNTIME_PLUGINS` but the corresponding `manifest()` fn
+/// wasn't included in `load_manifests()`. Before this check
+/// existed, the loop would silently skip the missing name and
+/// the boot would succeed without the plugin.
 async fn mint_runtime_plugins(
     ctx: &cordis::Context,
     factory: &CapabilityFactory,
@@ -135,16 +161,45 @@ async fn mint_runtime_plugins(
     plan: &ResolvedPlan,
     manifests: &[PluginManifest],
 ) -> Result<std::collections::HashMap<PluginId, Vec<crate::capability::SlotId>>, Box<dyn std::error::Error>> {
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+    // A3: index manifests by PluginId for O(log n) per-plugin
+    // lookup. Linear `.find()` per plugin was O(n) per lookup,
+    // O(n²) over the full mint pass; with 50+ plugins that's
+    // noticeable.
+    let by_id: BTreeMap<PluginId, &PluginManifest> = manifests
+        .iter()
+        .map(|m| (m.plugin.clone(), m))
+        .collect();
+
+    // B1: every RUNTIME_PLUGINS entry must be backed by a
+    // loaded manifest. Without this, a typo or a forgotten
+    // `load_manifests()` entry would silently disappear.
+    let loaded_names: BTreeSet<&str> =
+        manifests.iter().map(|m| m.plugin.name.as_str()).collect();
+    let missing: Vec<&&str> = RUNTIME_PLUGINS
+        .iter()
+        .filter(|n| !loaded_names.contains(*n))
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "RUNTIME_PLUGINS lists {missing:?} but no loaded manifest publishes them; \
+             either add the plugin to `load_manifests()` or remove it from RUNTIME_PLUGINS"
+        )
+        .into());
+    }
+
     let mut minted: HashMap<PluginId, Vec<crate::capability::SlotId>> = HashMap::new();
     for plugin_id in &plan.mint_order {
         if !RUNTIME_PLUGINS.contains(&plugin_id.name.as_str()) {
             continue;
         }
-        let m = manifests
-            .iter()
-            .find(|m| &m.plugin == plugin_id)
-            .ok_or_else(|| format!("resolver returned unknown plugin {}", plugin_id.name))?;
+        let m = by_id.get(plugin_id).ok_or_else(|| {
+            format!(
+                "resolver returned unknown plugin {}@{} (not in manifest index)",
+                plugin_id.name, plugin_id.version
+            )
+        })?;
         let slots = mint_one_plugin(ctx, factory, cspace, plan, m).await?;
         if !slots.is_empty() {
             minted.insert(plugin_id.clone(), slots);
@@ -187,7 +242,19 @@ async fn mint_one_plugin(
             ctx, factory, m, CapKind::Stream, "slot:generate", |_, _| generator_handler(),
         ).await,
         "echo-chain" => mint_echo_chain(ctx, factory, cspace, plan, m).await,
-        _ => Ok(Vec::new()), // unknown runtime plugin name; skip
+        // B1: instead of silently returning an empty vec, fail
+        // loudly. `mint_runtime_plugins` already checked that
+        // every RUNTIME_PLUGINS name has a loaded manifest; if
+        // we still reach this arm, the manifest loaded something
+        // for which we forgot to write a mint match — surface
+        // it instead of pretending the plugin had nothing to
+        // mint.
+        name => Err(format!(
+            "mint_one_plugin: no mint arm for runtime plugin \"{name}\"; \
+             add one to mint_one_plugin and keep RUNTIME_PLUGINS / activator_for / \
+             mint_one_plugin in sync"
+        )
+        .into()),
     }
 }
 
@@ -207,6 +274,19 @@ where
     R: crate::capability::Resource + 'static,
     F: Fn(&CapabilityDecl, &PluginId) -> Arc<R>,
 {
+    // `mint_simple` does not honour inbound `[[requires]]` —
+    // its only contract is "mint one slot per `[[exposes]]`".
+    // Plugins that need to wire received caps at mint time use
+    // `mint_echo_chain` (or a future per-plugin variant).
+    // Refuse any simple plugin that has dependencies: the
+    // binding table would silently drop them and the consumer
+    // would boot without its expected caps.
+    debug_assert!(
+        m.requires.is_empty(),
+        "mint_simple: plugin {}@{v} declares [[requires]] but mint_simple ignores them — switch to a per-plugin mint fn",
+        m.plugin.name,
+        v = m.plugin.version,
+    );
     let mut slots = Vec::with_capacity(m.exposes.len());
     for cap in &m.exposes {
         let budget = CapabilityBudget::new(m.resources.timeout_ms.unwrap_or(5000));
@@ -333,7 +413,7 @@ async fn shutdown_runtime_plugins(
         //   RevokeTree { root, total }
         // — one PluginDeactivated per plugin, then N Revoked +
         // 1 RevokeTree per plugin.
-        let _ = cspace.events().publish(
+        cspace.publish_event(
             crate::capability::events::GraphEvent::PluginDeactivated {
                 plugin: plugin_id.clone(),
             },
@@ -413,17 +493,28 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("[mint] runtime plugins (in resolved order):");
     let minted = mint_runtime_plugins(&ctx, &factory, &cspace, &plan, &manifests).await?;
 
-    // Phase 5: Validate legacy `consumes` graph (back-compat).
-    println!("\n[graph] validating legacy `consumes` dependencies:");
+    // Phase 5: legacy `consumes` log (informational only).
+    //
+    //     The resolver walks `[[requires]]` (Phase 3 P3.1).
+    //     `[[consumes]]` is a back-compat field kept around so
+    //     existing manifests can still describe their
+    //     plugin-version-keyed dependencies for the audit log.
+    //     We no longer treat a missing `consumes` provider as a
+    //     boot error — doing so would create a confusing dual
+    //     graph where `requires` succeeds but `consumes` fails
+    //     and boot aborts anyway. Instead we print every entry
+    //     and flag unprovided ones as a hint to migrate to
+    //     `[[requires]]`.
+    println!("\n[legacy] `consumes` entries (informational; resolver uses `requires`):");
     let provided_caps: std::collections::HashSet<String> = manifests
         .iter()
         .flat_map(|m| m.exposes.iter().map(|c| c.name.clone()))
         .collect();
-    let mut missing: Vec<(String, String, String)> = Vec::new();
+    let mut legacy_unprovided: Vec<String> = Vec::new();
     for m in &manifests {
         for dep in &m.consumes {
             let ok = provided_caps.contains(&dep.capability);
-            let mark = if ok { "✓" } else { "✗" };
+            let mark = if ok { "✓" } else { "⚠" };
             println!(
                 "  {} {}@{} consumes {} from {}@{} ({})",
                 mark,
@@ -432,27 +523,23 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 dep.capability,
                 dep.plugin,
                 dep.version,
-                if ok { "provided" } else { "MISSING" }
+                if ok { "provided" } else { "unprovided — migrate to [[requires]]" }
             );
             if !ok {
-                missing.push((
-                    m.plugin.name.clone(),
-                    dep.plugin.clone(),
-                    dep.capability.clone(),
+                legacy_unprovided.push(format!(
+                    "{} → {} (from {}@{})",
+                    m.plugin.name, dep.capability, dep.plugin, dep.version
                 ));
             }
         }
     }
-    if !missing.is_empty() {
-        return Err(format!(
-            "missing capability providers: {}",
-            missing
-                .iter()
-                .map(|(consumer, provider, cap)| format!("{consumer} needs {cap} from {provider}"))
-                .collect::<Vec<_>>()
-                .join("; ")
-        )
-        .into());
+    if !legacy_unprovided.is_empty() {
+        println!(
+            "[legacy] {} `consumes` entry/entries have no provider; boot continues \
+             because the resolver uses `requires`. Consider migrating:\n  - {}",
+            legacy_unprovided.len(),
+            legacy_unprovided.join("\n  - ")
+        );
     }
 
     // Register manifests.
@@ -475,7 +562,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                 // itself already published `Minted` at factory
                 // time; this marks the plugin's lifecycle event
                 // (the cordis handler returned Ok).
-                let _ = cspace.events().publish(
+                cspace.publish_event(
                     crate::capability::events::GraphEvent::PluginActivated {
                         plugin: plugin_id.clone(),
                     },
@@ -513,11 +600,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // emit `ShutdownCompleted { remaining_slots }`. Plugin
     // lifecycle events (`PluginDeactivated`) accompany each
     // per-plugin revoke.
-    let _ = cspace.events().publish(
-        crate::capability::events::GraphEvent::ShutdownStarted,
-    );
+    cspace.publish_event(crate::capability::events::GraphEvent::ShutdownStarted);
     shutdown_runtime_plugins(&cspace, &plan, &minted).await;
-    let _ = cspace.events().publish(
+    cspace.publish_event(
         crate::capability::events::GraphEvent::ShutdownCompleted {
             remaining_slots: cspace.len(),
         },

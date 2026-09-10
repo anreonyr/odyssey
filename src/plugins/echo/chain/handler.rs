@@ -46,8 +46,7 @@ pub fn echo_chain_plugin() -> Arc<dyn Plugin> {
                         .capability()
                         .map(|c| c.id().to_string())
                         .unwrap_or_else(|| "(empty)".to_string()),
-                )
-                .into(),
+                ),
             );
             Ok(())
         },

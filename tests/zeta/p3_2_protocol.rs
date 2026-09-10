@@ -16,7 +16,7 @@
 
 use std::sync::Arc;
 
-use odyssey::capability::{Capability, CapabilityBudget, CapabilitySpace, CapKind, Resource};
+use odyssey::capability::{Capability, CapabilityBudget, CapKind, Resource};
 use odyssey::kernel::factory::CapabilityFactory;
 use odyssey::kernel::manifest_builder::ManifestBuilder as MB;
 use odyssey::plugins::test_only::counter::{handler as counter_handler, CounterResource};
@@ -153,7 +153,7 @@ fn authority_vocabulary_drives_dispatch_authority() {
         .action("increment", "WRITE")
         .action("reset", "ADMIN")
         .build();
-    let slot = factory.mint::<CounterResource>(
+    let _slot = factory.mint::<CounterResource>(
         CapKind::Sync,
         &m.exposes[0],
         &m.plugin,

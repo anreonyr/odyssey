@@ -119,7 +119,7 @@ fn manifest(
     }
 }
 
-fn position_of<'a>(plan: &'a ResolvedPlan, name: &str) -> usize {
+fn position_of(plan: &ResolvedPlan, name: &str) -> usize {
     plan.mint_order
         .iter()
         .position(|p| p.name == name)

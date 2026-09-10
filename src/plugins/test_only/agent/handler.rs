@@ -131,13 +131,36 @@ impl AgentResource {
             .map(|bs| bs.iter().map(Reachable::from_binding).collect())
             .unwrap_or_default();
         reachable.sort_by(|a, b| a.handle.cmp(&b.handle));
-        // Duplicate handles would mean the resolver produced
-        // two bindings with the same name for the same consumer.
-        // That's a resolver bug; surface it loudly here rather
+        // C2: log the reachable set at construction so a
+        // missing-binding situation (empty `[[requires]]` ⇒
+        // empty reachable) is visible immediately. Empty
+        // reachable means "every dispatch will fail" — should
+        // be loud, not silent until first invoke.
+        let name_string = name.into();
+        eprintln!(
+            "[agent] {n}: reachable=[{list}]",
+            n = name_string,
+            list = reachable
+                .iter()
+                .map(|r| format!("{}→{}", r.handle, r.capability))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        // Duplicate handles mean the resolver produced two
+        // bindings with the same `name` for the same consumer.
+        // That's a resolver bug — surface it loudly here rather
         // than silently picking one.
+        debug_assert!(
+            reachable.windows(2).all(|w| w[0].handle != w[1].handle),
+            "duplicate handles in binding table for consumer {:?}: {:?}",
+            consumer,
+            reachable.iter().map(|r| &r.handle).collect::<Vec<_>>()
+        );
+        // Strip duplicates only in release builds so tests can
+        // still construct the resource after the assert fires.
         reachable.dedup_by(|a, b| a.handle == b.handle);
         Self {
-            name: name.into(),
+            name: name_string,
             reachable,
             cspace,
         }
@@ -339,8 +362,7 @@ pub fn agent_plugin() -> Arc<dyn Plugin> {
                     slot.capability()
                         .map(|c| c.id().to_string())
                         .unwrap_or_else(|| "(empty)".to_string()),
-                )
-                .into(),
+                ),
             );
             Ok(())
         },

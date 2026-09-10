@@ -8,11 +8,26 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added — Phase 3: Capability-Native Runtime
 
-Phase 3 begins the runtime-substrate experiment: prove the entire
-runtime can be built on Capability. The completion criteria are
-seven experiments P3.1–P3.7 (P3.8 — Sandbox-as-Capability-Env —
-is deferred to Phase 4 research track). This release ships P3.1;
-P3.2–P3.7 follow in subsequent minor versions.
+Phase 3 proves the entire runtime can be built on Capability.
+The completion criteria are seven experiments P3.1–P3.7 (P3.8 —
+Sandbox-as-Capability-Env — is deferred to Phase 4 research
+track). **All seven ship in this release**:
+
+- **P3.1** Capability Injection — contract-keyed resolver +
+  `[[requires]]` graph; replaces the legacy `[[consumes]]`
+  plugin-version-keyed model.
+- **P3.2** Protocol as Metadata — split `CapabilityContract`
+  into load-bearing `AuthorityContract` (action → op map) and
+  pure-metadata `Protocol` (schemas, transport).
+- **P3.4** Capability-Native Agent — `AgentResource`'s
+  reachable set derived from the binding table; no `SlotId`s
+  in the agent's view.
+- **P3.6** Runtime Lifetime — reverse-mint-order teardown via
+  `cspace.revoke_tree`; consumers die before providers.
+- **P3.7** Graph Events — `tokio::sync::broadcast` bus
+  surfacing every mutation (`Minted`/`Derived`/`Revoked`/
+  `RevokeTree`) and lifecycle event (`PluginActivated`/
+  `PluginDeactivated`/`ShutdownStarted`/`ShutdownCompleted`).
 
 #### P3.1 — Capability Injection
 

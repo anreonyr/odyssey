@@ -156,8 +156,7 @@ pub fn channel_plugin() -> Arc<dyn Plugin> {
                     "channel plugin: chan slot={} cons slot={}",
                     chan.id().raw(),
                     cons.id().raw()
-                )
-                .into(),
+                ),
             );
             Ok(())
         },

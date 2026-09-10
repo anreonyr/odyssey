@@ -110,8 +110,7 @@ pub fn sandbox_plugin() -> Arc<dyn Plugin> {
                     slot.capability()
                         .map(|c| c.id().to_string())
                         .unwrap_or_else(|| "(empty)".to_string()),
-                )
-                .into(),
+                ),
             );
             Ok(())
         },

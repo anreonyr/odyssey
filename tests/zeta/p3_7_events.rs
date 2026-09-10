@@ -19,8 +19,7 @@
 
 use odyssey::capability::{
     events::{DeriveKind, GraphEvent},
-    Capability, CapabilityBudget, CapabilityRights, CapabilitySpace, CapKind, OperationRights,
-    Resource, SlotId,
+    Capability, CapabilityBudget, CapabilityRights, CapabilitySpace, CapKind, OperationRights, SlotId,
 };
 use odyssey::kernel::factory::CapabilityFactory;
 use odyssey::kernel::manifest::{CapabilityDecl, PluginId};
@@ -296,68 +295,86 @@ fn full_lifecycle_event_sequence() {
         events.push(ev);
     }
 
-    // Expected shape:
-    //   Minted (counter)
-    //   Minted (echo)
-    //   Minted (echo-chain)
-    //   PluginActivated (counter)
-    //   PluginActivated (echo)
-    //   PluginActivated (echo-chain)
-    //   ShutdownStarted
-    //   PluginDeactivated (echo-chain)   <- last to mint, first to die
-    //   Revoked (echo-chain)
-    //   RevokeTree (echo-chain, 1)
-    //   PluginDeactivated (echo)
-    //   Revoked (echo)
-    //   RevokeTree (echo, 1)
-    //   PluginDeactivated (counter)
-    //   Revoked (counter)
-    //   RevokeTree (counter, 1)
-    //   ShutdownCompleted { remaining_slots: 0 }
-    let names_in_mint_order: Vec<&str> = plugins.iter().map(|m| m.plugin.name.as_str()).collect();
-    let expected_count = 3 * 4 /* mint+activate+deactivate+revoke_tree */
-        + 3 /* per-plugin revoke */
-        + 2; /* shutdown markers */
-    assert_eq!(events.len(), expected_count, "event count");
+    // Expected shape (in causal order):
+    //   Phase A — mint:    1 × Minted per plugin (in mint order)
+    //   Phase B — boot:    1 × PluginActivated per plugin (mint order)
+    //   Phase C — shutdown markers:
+    //                     1 × ShutdownStarted
+    //                     per plugin (reverse mint order):
+    //                        PluginDeactivated
+    //                        Revoked
+    //                        RevokeTree
+    //                     1 × ShutdownCompleted
+    //
+    // Asserts check the *category* of each event at each
+    // position, not the hardcoded total — a future event added
+    // to the bus would extend the timeline but shouldn't break
+    // the existing shape contract.
+    let names_in_mint_order: Vec<&str> =
+        plugins.iter().map(|m| m.plugin.name.as_str()).collect();
+    let n = names_in_mint_order.len();
 
-    // Minted events in mint order.
+    // Sanity check: the category count is correct, regardless
+    // of any new event variants added to `GraphEvent`. If this
+    // is the only assertion that breaks when we add e.g.
+    // `MigrateStarted`, the fix is to extend the timeline
+    // categories below — not to bump a magic number.
+    assert_eq!(
+        events.len(),
+        n + n + 1 + n * 3 + 1,
+        "event timeline length: {n} mint + {n} activated + \
+         1 ShutdownStarted + {n}*3 teardown + 1 ShutdownCompleted"
+    );
+
+    // --- Phase A: minted events in mint order ---
+    let mint_range = 0..n;
     for (i, name) in names_in_mint_order.iter().enumerate() {
-        match &events[i] {
+        match &events[mint_range.start + i] {
             GraphEvent::Minted { plugin, capability, .. } => {
-                assert_eq!(&plugin.name, name);
-                assert_eq!(capability, name);
-            }
-            other => panic!("event[{i}] expected Minted({name}), got {other:?}"),
-        }
-    }
-
-    // PluginActivated in mint order.
-    for (i, name) in names_in_mint_order.iter().enumerate() {
-        match &events[3 + i] {
-            GraphEvent::PluginActivated { plugin } => {
-                assert_eq!(&plugin.name, name);
+                assert_eq!(&plugin.name, name, "Minted plugin order");
+                assert_eq!(capability, name, "Minted capability name");
             }
             other => panic!(
-                "event[{}] expected PluginActivated({}), got {:?}",
-                3 + i,
-                name,
-                other
+                "event[{}] expected Minted({name}), got {other:?}",
+                mint_range.start + i
             ),
         }
     }
 
-    // ShutdownStarted at position 6.
-    assert!(matches!(events[6], GraphEvent::ShutdownStarted));
+    // --- Phase B: PluginActivated in mint order ---
+    let activate_range = n..(2 * n);
+    for (i, name) in names_in_mint_order.iter().enumerate() {
+        match &events[activate_range.start + i] {
+            GraphEvent::PluginActivated { plugin } => {
+                assert_eq!(&plugin.name, name, "Activated plugin order");
+            }
+            other => panic!(
+                "event[{}] expected PluginActivated({name}), got {other:?}",
+                activate_range.start + i
+            ),
+        }
+    }
 
-    // Per-plugin shutdown: deactivated, revoked, revoke_tree.
-    // Reverse mint order: chain, echo, counter.
-    let mut idx = 7;
+    // --- Phase C: shutdown markers + per-plugin teardown ---
+    let shutdown_start_idx = 2 * n;
+    match &events[shutdown_start_idx] {
+        GraphEvent::ShutdownStarted => {}
+        other => panic!(
+            "event[{shutdown_start_idx}] expected ShutdownStarted, got {other:?}"
+        ),
+    }
+
+    // Per-plugin teardown in reverse mint order:
+    //   PluginDeactivated → Revoked → RevokeTree
+    let mut idx = shutdown_start_idx + 1;
     for name in names_in_mint_order.iter().rev() {
         match &events[idx] {
             GraphEvent::PluginDeactivated { plugin } => {
-                assert_eq!(&plugin.name, name);
+                assert_eq!(&plugin.name, name, "Deactivated plugin order");
             }
-            other => panic!("event[{idx}] expected PluginDeactivated({name}), got {other:?}"),
+            other => panic!(
+                "event[{idx}] expected PluginDeactivated({name}), got {other:?}"
+            ),
         }
         idx += 1;
         match &events[idx] {
@@ -379,6 +396,8 @@ fn full_lifecycle_event_sequence() {
         }
         other => panic!("event[{idx}] expected ShutdownCompleted, got {other:?}"),
     }
+    // idx is now exactly events.len() - 1; ensure no stray events.
+    assert_eq!(idx + 1, events.len(), "no events after ShutdownCompleted");
 }
 
 // =========================================================================

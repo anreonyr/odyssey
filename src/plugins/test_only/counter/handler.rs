@@ -75,8 +75,7 @@ pub fn counter_plugin() -> Arc<dyn Plugin> {
                         .map(|c| c.id().to_string())
                         .unwrap_or_else(|| "(empty)".to_string()),
                     slot.capability().map(|c| c.operations()).unwrap_or_default(),
-                )
-                .into(),
+                ),
             );
             Ok(())
         },

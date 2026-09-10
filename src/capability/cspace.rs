@@ -273,14 +273,12 @@ impl CapabilitySpace {
         // Publish outside the locks — broadcast::send is
         // non-blocking but holding the cspace locks across
         // user code is a footgun.
-        let _ = self.inner.events.publish(
-            crate::capability::events::GraphEvent::Minted {
-                plugin,
-                slot,
-                capability: name,
-                contract,
-            },
-        );
+        self.publish_event(crate::capability::events::GraphEvent::Minted {
+            plugin,
+            slot,
+            capability: name,
+            contract,
+        });
     }
 
     /// Typed lookup. The caller must know `R`; otherwise returns `None`.
@@ -454,13 +452,11 @@ impl CapabilitySpace {
         child: SlotId,
         kind: crate::capability::events::DeriveKind,
     ) {
-        let _ = self.inner.events.publish(
-            crate::capability::events::GraphEvent::Derived {
-                parent,
-                child,
-                kind,
-            },
-        );
+        self.publish_event(crate::capability::events::GraphEvent::Derived {
+            parent,
+            child,
+            kind,
+        });
     }
 
     /// **Grant**: derive a new slot with the given rights; source slot
@@ -604,12 +600,10 @@ impl CapabilitySpace {
             drop(slots);
             drop(names);
             drop(parents);
-            let _ = self.inner.events.publish(
-                crate::capability::events::GraphEvent::Revoked {
-                    slot,
-                    capability: cap_name,
-                },
-            );
+            self.publish_event(crate::capability::events::GraphEvent::Revoked {
+                slot,
+                capability: cap_name,
+            });
             true
         } else {
             false
@@ -651,15 +645,39 @@ impl CapabilitySpace {
                 removed += 1;
             }
         }
-        let _ = self.inner.events.publish(
-            crate::capability::events::GraphEvent::RevokeTree { root, total: removed },
-        );
+        self.publish_event(crate::capability::events::GraphEvent::RevokeTree { root, total: removed });
         removed
     }
 
     /// Total number of populated slots — useful for graph assertions.
     pub fn len(&self) -> usize {
         self.inner.slots.read().expect("cspace poisoned").len()
+    }
+
+    /// Publish a graph event with diagnostics.
+    ///
+    /// Fast path: when no subscribers are connected (the common
+    /// case in unit tests that don't exercise the event bus),
+    /// the event is silently dropped. No log spam, no allocation.
+    ///
+    /// Subscribers present but buffer overflowed: print a one-line
+    /// warning to stderr. Subscribers can't keep up means the
+    /// audit trail is being lost — better to surface that than
+    /// silently swallow it.
+    ///
+    /// This helper exists so callers don't need to repeat the
+    /// `let _ = self.inner.events.publish(...)` pattern; it's
+    /// also the single place to add fancier behaviour later
+    /// (e.g. structured logging, metrics).
+    pub fn publish_event(&self, ev: crate::capability::events::GraphEvent) {
+        if self.inner.events.receiver_count() == 0 {
+            return;
+        }
+        if let Err(_dropped) = self.inner.events.publish(ev) {
+            eprintln!(
+                "[cspace] graph event dropped: subscribers lagging (broadcast buffer overflow)"
+            );
+        }
     }
 
     /// Phase 2 P6: every slot whose recorded parent is `parent`.
@@ -671,6 +689,12 @@ impl CapabilitySpace {
             .iter()
             .filter_map(|(child, p)| if *p == parent { Some(*child) } else { None })
             .collect()
+    }
+}
+
+impl Default for CapabilitySpace {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
