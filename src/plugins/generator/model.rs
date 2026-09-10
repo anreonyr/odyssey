@@ -591,4 +591,61 @@ mod http_model_tests {
             "expected parse error, got: {err}"
         );
     }
+
+    // -----------------------------------------------------------------
+    // ModelKind::with_http tests (P1-K)
+    //
+    // Phase 7 naming audit renamed `build_http(cspace, reachable)` to
+    // `with_http(cspace, reachable)` — builder pattern is `build` for
+    // the no-cap variant, `with_*` for variants that need a cap.
+    // These tests pin the new entry point.
+    // -----------------------------------------------------------------
+
+    /// Positive case: ModelKind::with_http builds an HTTP-backed
+    /// `Arc<dyn Model>` that successfully dispatches via the
+    /// reachable binding table.
+    #[test]
+    fn model_kind_with_http_returns_dispatchable_model() {
+        let (cspace, _slot) = cspace_with_http(json!({
+            "completion": "ok from with_http"
+        }));
+        let model = ModelKind::with_http(cspace, reachable("http_request"));
+        let toks = model
+            .generate("hello", None)
+            .expect("with_http-built model should dispatch");
+        assert_eq!(toks.join(" "), "ok from with_http");
+    }
+
+    /// Failure path: ModelKind::with_http with an unreachable
+    /// binding returns an error from generate. The model still
+    /// builds (HttpModel is constructable with any reachable
+    /// set), but the dispatch fails when the binding doesn't
+    /// resolve.
+    #[test]
+    fn model_kind_with_http_bad_reachable_returns_err() {
+        let (cspace, _slot) = cspace_with_http(json!({"completion": "x"}));
+        // Empty reachable set — no 'http' binding.
+        let model = ModelKind::with_http(cspace, vec![]);
+        let err = model.generate("anything", None).unwrap_err();
+        assert!(
+            err.contains("'http' is not in the binding table"),
+            "expected missing-binding error; got {err}"
+        );
+    }
+
+    /// Failure path: ModelKind::with_http with a reachable set
+    /// that points at a capability name not in the cspace.
+    /// Dispatch finds the binding but lookup_by_name returns
+    /// None; the model surfaces a clear error.
+    #[test]
+    fn model_kind_with_http_binding_pointing_at_missing_cap_returns_err() {
+        let (cspace, _slot) = cspace_with_http(json!({"completion": "x"}));
+        // Reachable points at a name that's not in cspace.
+        let model = ModelKind::with_http(cspace, reachable("nonexistent_cap"));
+        let err = model.generate("anything", None).unwrap_err();
+        assert!(
+            err.contains("reachable says capability=") && err.contains("but no slot found"),
+            "expected cap-missing error; got {err}"
+        );
+    }
 }
