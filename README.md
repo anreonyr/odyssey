@@ -62,9 +62,9 @@ slot.invoke(json!({"hello": "world"}))?;     // sync — wall-clock budget enfor
 2. Provide core services (`capability_space`, `capability_factory`)
 3. Resolve capability dependency graph (`host::resolver`)
 4. Mint runtime plugins in resolved order (`runtime::mint`)
-5. Log legacy `consumes` entries (informational; resolver uses `requires`)
+5. _reserved_ (was the legacy `consumes` audit log; Phase 6 retired it)
 6. Activate runtime plugins in resolved order (`runtime::activate`)
-7. HTTP bridge on `127.0.0.1:3030` (`runtime::http_bridge`) + wait for Ctrl-C
+7. HTTP bridge on `127.0.0.1:3030` (`runtime::lifecycle::shutdown`) + wait for Ctrl-C
 8. Teardown in reverse mint order (`runtime::teardown`)
 
 ## HTTP bridge
@@ -106,7 +106,12 @@ src/
 │   ├── resolver/        — index + topo + plan (capability-keyed resolve)
 │   └── pipeline.rs      — linear composition of typed sync stages
 ├── runtime/             — adapter: lifecycle, HTTP bridge, plugin mint
-│   ├── lifecycle.rs     — 8-phase orchestrator (boot sequence)
+│   ├── lifecycle/       — 8-phase orchestrator (boot sequence)
+│   │   ├── mod.rs       — run() + phase glue
+│   │   ├── phases.rs    — phase constants
+│   │   ├── manifests.rs — load_manifests (explicit enumeration)
+│   │   ├── print.rs     — manifest table formatter
+│   │   └── shutdown.rs  — HTTP bridge spawn + wait
 │   ├── activate.rs      — activator_for + per-arm const asserts
 │   ├── teardown.rs      — ruin_runtime_plugins (reverse-order shutdown)
 │   ├── http_bridge.rs   — axum router + SSE serve loop
