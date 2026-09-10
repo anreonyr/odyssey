@@ -402,7 +402,7 @@ mod tests {
 // Phase 4 P4.1 — HttpModel
 // ---------------------------------------------------------------------------
 
-use crate::host::Reachable;
+use crate::host::resolver::Reachable;
 use crate::kernel::{Capability, CapabilitySpace};
 use crate::plugins::http::HttpResource;
 

@@ -102,7 +102,7 @@ fn parse_operation(s: &str) -> Option<OperationRights> {
 // because Generator's HttpModel and any future consumer
 // need it. The agent test surface still uses it; it just
 // imports from `crate::capability` now.
-pub use crate::host::Reachable;
+pub use crate::host::resolver::Reachable;
 
 /// Holds the agent's identity, the reachable set derived from
 /// its binding table, and a reference to the cspace so it can
