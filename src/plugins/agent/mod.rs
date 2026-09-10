@@ -19,11 +19,36 @@
 //! from the binding table; the boot pipeline mints it
 //! normally. The test surface still uses it through the same
 //! module path.
+//!
+//! ## Phase 6 file split
+//!
+//! The agent's `handler.rs` was 712 LOC and bundled four
+//! concerns: the `AgentResource` struct + constructors, the
+//! sync dispatch path, the streaming interpreter, and the
+//! cordis plugin glue. Phase 6 split it into five focused
+//! files in this module:
+//!
+//! - `handler.rs`  — struct, constructors, accessors, the
+//!   shared `parse_operation` helper.
+//! - `dispatch.rs` — `impl Resource for AgentResource { fn
+//!   invoke }`. Sync dispatch.
+//! - `stream.rs`   — `impl Resource for AgentResource { fn open
+//!   }`, the `run_program` interpreter, `RunStats`, and
+//!   event-emission helpers.
+//! - `plugin.rs`   — cordis glue: `handler`, `handler_from_plan`,
+//!   `agent_plugin`.
+//! - `panic.rs`    — `panic_payload_to_str` formatter used by
+//!   the streaming path's panic-catch.
 
-pub mod handler;
-pub use handler::{agent_plugin, handler as agent_handler, handler_from_plan, AgentResource};
+mod dispatch;
+mod handler;
+mod panic;
+mod plugin;
+mod stream;
 
 pub mod program;
+pub use handler::AgentResource;
+pub use plugin::{agent_plugin, handler as agent_handler, handler_from_plan};
 pub use program::ProgramStep;
 
 mod manifest;
