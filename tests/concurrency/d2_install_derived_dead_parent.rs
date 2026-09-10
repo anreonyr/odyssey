@@ -329,5 +329,6 @@ fn build_counter_cap(name: &str) -> Capability<CounterResource> {
         budget,
         rights,
         CapKind::Sync,
+        Arc::new(odyssey::kernel::SystemClock),
     )
 }

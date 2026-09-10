@@ -17,12 +17,12 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
 
 use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::kernel::chunk::CapabilityChunk;
+use crate::kernel::clock::Clock;
 use crate::kernel::error::CapabilityError;
 use crate::kernel::ids::{CapabilityId, SlotId};
 use crate::kernel::kind::CapKind;
@@ -47,6 +47,13 @@ pub struct Capability<R: Resource> {
     slot: Option<SlotId>,
     handler: Arc<R>,
     budget: Arc<CapabilityBudget>,
+    /// Wall-clock source. Phase 5 P1-C fix: every capability
+    /// carries its own `Arc<dyn Clock>` so the `invoke` /
+    /// `invoke_op` paths can record elapsed wall-clock without
+    /// calling `Instant::now()` directly. Production uses
+    /// `SystemClock`; tests inject `MockClock` to make
+    /// timeout / quota eviction deterministic.
+    clock: Arc<dyn Clock>,
     operations: OperationRights,
     kind: CapKind,
     revoked: Arc<AtomicBool>,
@@ -55,18 +62,27 @@ pub struct Capability<R: Resource> {
 impl<R: Resource> Capability<R> {
     /// Construct a typed capability. Called by the factory at mint time
     /// and by `derive` for derived caps.
+    ///
+    /// `clock` is the wall-clock source the capability will use
+    /// for elapsed-time recording. The factory passes an
+    /// `Arc<SystemClock>` by default; tests pass an `Arc<MockClock>`
+    /// to drive deterministic time. Derived caps inherit their
+    /// parent's clock via `derive` so a subtree shares the same
+    /// notion of wall-clock time.
     pub fn new(
         meta: CapabilityMeta,
         handler: Arc<R>,
         budget: CapabilityBudget,
         rights: CapabilityRights,
         kind: CapKind,
+        clock: Arc<dyn Clock>,
     ) -> Self {
         Self {
             meta,
             slot: None,
             handler,
             budget: Arc::new(budget),
+            clock,
             operations: rights.operations,
             kind,
             revoked: Arc::new(AtomicBool::new(false)),
@@ -142,6 +158,12 @@ impl<R: Resource> Capability<R> {
     /// cspace calls this, after verifying attenuation. The kernel
     /// is the only path that may mint derived caps; release-build
     /// checks ensure no plugin can amplify authority.
+    ///
+    /// The derived cap inherits the parent's `clock` (via
+    /// `Arc::clone`) so the entire subtree agrees on what
+    /// "wall-clock" means. The same `Arc<dyn Clock>` is shared
+    /// between parent and child — a `MockClock::advance` call
+    /// from a test is visible to both parent and child.
     pub(crate) fn derive(&self, rights: CapabilityRights, new_id: CapabilityId) -> Self {
         // Phase 5 D1: kernel is the only caller; cspace has already
         // verified `held.contains(&rights)`. Tripwire remains so a
@@ -162,6 +184,7 @@ impl<R: Resource> Capability<R> {
             slot: None, // bound by install_derived on insertion
             handler: self.handler.clone(),
             budget: Arc::new(new_budget),
+            clock: Arc::clone(&self.clock),
             operations: rights.operations,
             kind: self.kind,
             // Fresh marker — a derived slot has its own lifecycle,
@@ -185,7 +208,7 @@ impl<R: Resource> Capability<R> {
         if self.is_revoked() {
             return Err(CapabilityError::Revoked(self.slot.unwrap_or(SlotId::new(1))));
         }
-        let start = Instant::now();
+        let start = self.clock.now();
         let result = self.handler.invoke(input);
         let elapsed = start.elapsed();
         self.budget.record_elapsed(elapsed);
@@ -247,7 +270,7 @@ impl<R: Resource> Capability<R> {
         // Phase 5 M3: run the handler first. The call is authorised;
         // we debit the quota only after a successful run. Wall-clock
         // recorded the same way.
-        let start = Instant::now();
+        let start = self.clock.now();
         let result = self.handler.invoke(input);
         let elapsed = start.elapsed();
         self.budget.record_elapsed(elapsed);
@@ -318,6 +341,7 @@ impl<R: Resource> Clone for Capability<R> {
             slot: self.slot,
             handler: self.handler.clone(),
             budget: self.budget.clone(),
+            clock: Arc::clone(&self.clock),
             operations: self.operations,
             kind: self.kind,
             // Revocable marker (Phase 4 review loop): share
