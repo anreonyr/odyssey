@@ -416,10 +416,7 @@ impl CapabilitySpace {
         parent: SlotId,
         new_cap: Capability<R>,
         new_name: String,
-    ) -> SlotId
-    where
-        R: Resource,
-    {
+    ) -> SlotId {
         let new_slot = self.allocate();
         let cap: Arc<dyn AnyCapability> = Arc::new(new_cap);
         let mut slots = self.inner.slots.write().expect("cspace poisoned");
@@ -652,6 +649,13 @@ impl CapabilitySpace {
     /// Total number of populated slots — useful for graph assertions.
     pub fn len(&self) -> usize {
         self.inner.slots.read().expect("cspace poisoned").len()
+    }
+
+    /// True when no slots are populated. Complements [`len`]
+    /// so callers can use the idiomatic `is_empty()` check
+    /// instead of `len() == 0`.
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 
     /// Publish a graph event with diagnostics.

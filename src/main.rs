@@ -7,9 +7,9 @@
 //! The capability experiments are run via `cargo test
 //! tests/{alpha,beta,gamma,delta}/` — this binary is the runtime.
 
-use odyssey::boot::boot;
+use odyssey::boot::lifecycle;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    boot::run().await
+    lifecycle::run().await
 }

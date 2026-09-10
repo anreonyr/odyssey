@@ -5,5 +5,5 @@
 //! minting and composition layer) and [`crate::capability`] (the
 //! kernel model).
 
-pub mod boot;
 pub mod http_bridge;
+pub mod lifecycle;
