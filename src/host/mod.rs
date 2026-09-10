@@ -21,7 +21,7 @@ pub mod resolver;
 // Curated re-exports.
 pub use factory::CapabilityFactory;
 pub use manifest::{
-    CapabilityDecl, CapabilityRequirement, DependencyRef, HostServiceRef, IsolationMode,
+    CapabilityDecl, CapabilityRequirement, HostServiceRef, IsolationMode,
     ManifestBuilder, ManifestError, PluginManifest, ResourceHints,
 };
 pub use crate::kernel::ids::PluginId;

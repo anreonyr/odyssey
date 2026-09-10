@@ -12,6 +12,6 @@ pub mod types;
 pub use builder::ManifestBuilder;
 pub use load::{from_path as load_from_path, from_toml_str as load_from_toml_str};
 pub use types::{
-    CapabilityDecl, CapabilityRequirement, DependencyRef, HostServiceRef, IsolationMode,
+    CapabilityDecl, CapabilityRequirement, HostServiceRef, IsolationMode,
     ManifestError, PluginManifest, ResourceHints,
 };

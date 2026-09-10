@@ -23,6 +23,17 @@ adheres to [Semantic Versioning](https://semver.org/).
   Phase 5 of the boot orchestrator is now a no-op marker;
   the 8-phase numbering is preserved for diff stability.
 
+### Phase 7: Tech-debt follow-up
+
+- **Removed orphan `DependencyRef` public type.** The
+  `pub struct DependencyRef { plugin, version, capability }`
+  defined in `src/host/manifest/types.rs` and re-exported
+  via `host::manifest` and `host` was zero-referenced after
+  the Phase 6 `consumes` removal; the resolver walks
+  `[[requires]]` exclusively and uses
+  `CapabilityRequirement`, not `DependencyRef`. The struct
+  and both re-exports are gone.
+
 ### Added — Phase 3: Capability-Native Runtime
 
 Phase 3 proves the entire runtime can be built on Capability.

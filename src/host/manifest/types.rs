@@ -124,13 +124,6 @@ pub struct CapabilityDecl {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct DependencyRef {
-    pub plugin: String,
-    pub version: String,
-    pub capability: String,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct HostServiceRef {
     pub service: String,
     #[serde(default)]
