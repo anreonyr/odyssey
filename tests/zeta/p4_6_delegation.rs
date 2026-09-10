@@ -29,7 +29,8 @@
 //!   remains a DAG (Supervisor → {Researcher, Writer} all
 //!   receive slices of the same parent).
 
-use odyssey::capability::{CapabilityChunk, CapabilityRights, OperationRights, Reachable, Resource};
+use odyssey::host::resolver::Reachable;
+use odyssey::kernel::{CapabilityChunk, CapabilityRights, OperationRights, Resource};
 use odyssey::plugins::agent::{AgentResource, ProgramStep};
 use odyssey::plugins::database::{handler as database_handler, DatabaseResource};
 use odyssey::plugins::echo::basic::{handler as echo_handler, EchoResource};
@@ -40,21 +41,19 @@ use serde_json::{json, Value};
 // =========================================================================
 
 struct World {
-    space: odyssey::capability::CapabilitySpace,
+    space: odyssey::kernel::CapabilitySpace,
     #[allow(dead_code)]
-    echo_slot: odyssey::capability::SlotId,
+    echo_slot: odyssey::kernel::SlotId,
     #[allow(dead_code)]
-    database_slot: odyssey::capability::SlotId,
+    database_slot: odyssey::kernel::SlotId,
 }
 
 fn build_world() -> World {
-    use odyssey::capability::cspace::CapabilitySpace;
-    use odyssey::capability::events::GraphEventBus;
-    use odyssey::kernel::factory::CapabilityFactory;
-    use odyssey::kernel::manifest::{
-        CapabilityDecl, IsolationMode, PluginId, PluginManifest,
-    };
-
+    use odyssey::kernel::space::CapabilitySpace;
+    use odyssey::kernel::space::events::GraphEventBus;
+    use odyssey::host::factory::CapabilityFactory;
+    use odyssey::host::manifest::{CapabilityDecl, IsolationMode, PluginManifest};
+    use odyssey::kernel::PluginId;
     let bus = GraphEventBus::default();
     let space = CapabilitySpace::with_bus(bus);
     let factory = CapabilityFactory::new(space.clone());
@@ -69,8 +68,8 @@ fn build_world() -> World {
             out_type: "any".into(),
             streaming: false,
             contract_name: "echo".into(),
-            authority: odyssey::capability::AuthorityContract::empty(),
-            protocol: odyssey::capability::Protocol::empty(),
+            authority: odyssey::kernel::AuthorityContract::empty(),
+            protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
         consumes: vec![],
@@ -78,10 +77,10 @@ fn build_world() -> World {
         resources: Default::default(),
     };
     let echo_slot = factory.mint::<EchoResource>(
-        odyssey::capability::CapKind::Sync,
+        odyssey::kernel::CapKind::Sync,
         &echo_decl.exposes[0],
         &echo_decl.plugin,
-        odyssey::capability::CapabilityBudget::new(5000),
+        odyssey::kernel::CapabilityBudget::new(5000),
         echo_handler(),
     );
 
@@ -95,11 +94,11 @@ fn build_world() -> World {
             out_type: "any".into(),
             streaming: false,
             contract_name: "database".into(),
-            authority: odyssey::capability::AuthorityContract::empty()
+            authority: odyssey::kernel::AuthorityContract::empty()
                 .with_action("read", "DB_READ")
                 .with_action("write", "DB_WRITE")
                 .with_action("admin", "DB_ADMIN"),
-            protocol: odyssey::capability::Protocol::empty(),
+            protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
         consumes: vec![],
@@ -107,10 +106,10 @@ fn build_world() -> World {
         resources: Default::default(),
     };
     let db_slot = factory.mint::<DatabaseResource>(
-        odyssey::capability::CapKind::Sync,
+        odyssey::kernel::CapKind::Sync,
         &db_decl.exposes[0],
         &db_decl.plugin,
-        odyssey::capability::CapabilityBudget::new(5000),
+        odyssey::kernel::CapabilityBudget::new(5000),
         database_handler(),
     );
 
@@ -136,7 +135,7 @@ async fn drain_events(mut rx: tokio::sync::mpsc::Receiver<CapabilityChunk>) -> V
 fn agent_with_reachable(
     name: &str,
     reachable: Vec<Reachable>,
-    cspace: odyssey::capability::CapabilitySpace,
+    cspace: odyssey::kernel::CapabilitySpace,
 ) -> std::sync::Arc<AgentResource> {
     std::sync::Arc::new(AgentResource::from_reachable(name, reachable, cspace))
 }
@@ -310,7 +309,7 @@ async fn supervisor_can_delegate_multiple_slices_to_separate_consumers() {
 
 #[tokio::test]
 async fn restrict_on_already_revoked_cap_returns_error() {
-    use odyssey::capability::{CapabilityRights, OperationRights};
+    use odyssey::kernel::{CapabilityRights, OperationRights};
 
     let world = build_world();
 

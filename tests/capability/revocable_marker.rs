@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use odyssey::capability::{Capability, OperationRights, Slot};
+use odyssey::kernel::{Capability, OperationRights, Slot};
 use odyssey::plugins::test_only::counter::CounterResource;
 
 #[test]

@@ -3,7 +3,7 @@
 //! Two `RuleAgent` instances built from identical code but different
 //! capability environments produce different observable behaviour.
 
-use odyssey::capability::{CapabilityRights, OperationRights, Slot};
+use odyssey::kernel::{CapabilityRights, OperationRights, Slot};
 use odyssey::plugins::agent::{agent_handler, AgentResource};
 use odyssey::plugins::test_only::counter::CounterResource;
 use serde_json::json;
@@ -36,11 +36,11 @@ fn agent_gated_by_cap_authority() {
         )
         .unwrap();
 
-    let pid = odyssey::kernel::manifest::PluginId {
+    let pid = odyssey::kernel::PluginId {
         name: "agent".into(),
         version: "0.1.0".into(),
     };
-    let decl_a = odyssey::kernel::manifest::CapabilityDecl {
+    let decl_a = odyssey::host::manifest::CapabilityDecl {
         name: "agent_a".into(),
         in_type: "object".into(),
         out_type: "object".into(),
@@ -48,13 +48,13 @@ fn agent_gated_by_cap_authority() {
         ..Default::default()
     };
     let agent_a = factory.mint::<AgentResource>(
-        odyssey::capability::CapKind::Sync,
+        odyssey::kernel::CapKind::Sync,
         &decl_a,
         &pid,
-        odyssey::capability::CapabilityBudget::new(crate::common::DEFAULT_TIMEOUT_MS),
+        odyssey::kernel::CapabilityBudget::new(crate::common::DEFAULT_TIMEOUT_MS),
         agent_handler("agent_a".to_string(), vec![("counter".to_string(), cap_a)], space.clone()),
     );
-    let decl_b = odyssey::kernel::manifest::CapabilityDecl {
+    let decl_b = odyssey::host::manifest::CapabilityDecl {
         name: "agent_b".into(),
         in_type: "object".into(),
         out_type: "object".into(),
@@ -62,10 +62,10 @@ fn agent_gated_by_cap_authority() {
         ..Default::default()
     };
     let agent_b = factory.mint::<AgentResource>(
-        odyssey::capability::CapKind::Sync,
+        odyssey::kernel::CapKind::Sync,
         &decl_b,
         &pid,
-        odyssey::capability::CapabilityBudget::new(crate::common::DEFAULT_TIMEOUT_MS),
+        odyssey::kernel::CapabilityBudget::new(crate::common::DEFAULT_TIMEOUT_MS),
         agent_handler("agent_b".to_string(), vec![("counter".to_string(), cap_b)], space.clone()),
     );
 

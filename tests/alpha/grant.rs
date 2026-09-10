@@ -4,7 +4,7 @@
 //! source. The source cap must still work after the grant; the child
 //! cap holds the (subset) rights the parent granted.
 
-use odyssey::capability::{CapabilityRights, OperationRights, Slot};
+use odyssey::kernel::{CapabilityRights, OperationRights, Slot};
 use odyssey::plugins::test_only::counter::CounterResource;
 use serde_json::json;
 

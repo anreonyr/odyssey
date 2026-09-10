@@ -4,7 +4,7 @@
 //! slot receives the capability; the source slot becomes empty (the
 //! `Slot<R>` reference itself stays valid — no panic).
 
-use odyssey::capability::{CapabilityRights, OperationRights, Slot};
+use odyssey::kernel::{CapabilityRights, OperationRights, Slot};
 use odyssey::plugins::test_only::counter::CounterResource;
 use serde_json::json;
 

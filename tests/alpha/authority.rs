@@ -3,7 +3,7 @@
 //! A `Capability<R>` consulted with the right bit runs the handler;
 //! consulted without it is denied.
 
-use odyssey::capability::{CapabilityRights, OperationRights, Slot};
+use odyssey::kernel::{CapabilityRights, OperationRights, Slot};
 use odyssey::plugins::test_only::counter::CounterResource;
 use serde_json::json;
 

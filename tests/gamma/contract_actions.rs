@@ -5,8 +5,8 @@
 //! survive the factory's mint, and are observable via the same
 //! `slot_meta` path as `protocol` (schemas, description).
 
-use odyssey::capability::AuthorityContract;
-use odyssey::kernel::manifest::PluginManifest;
+use odyssey::kernel::AuthorityContract;
+use odyssey::host::manifest::PluginManifest;
 
 #[test]
 fn counter_publishes_three_actions() {
@@ -34,13 +34,13 @@ fn factory_preserves_authority_action_table() {
     )
     .unwrap();
 
-    let space = odyssey::capability::CapabilitySpace::new();
-    let factory = odyssey::kernel::factory::CapabilityFactory::new(space.clone());
+    let space = odyssey::kernel::CapabilitySpace::new();
+    let factory = odyssey::host::factory::CapabilityFactory::new(space.clone());
     let slot = factory.mint::<odyssey::plugins::test_only::counter::CounterResource>(
-        odyssey::capability::CapKind::Sync,
+        odyssey::kernel::CapKind::Sync,
         &m.exposes[0],
         &m.plugin,
-        odyssey::capability::CapabilityBudget::new(crate::common::DEFAULT_TIMEOUT_MS),
+        odyssey::kernel::CapabilityBudget::new(crate::common::DEFAULT_TIMEOUT_MS),
         odyssey::plugins::test_only::counter::handler(),
     );
     // Phase 3 P3.2 — `slot.meta()` now exposes two fields:

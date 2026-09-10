@@ -22,14 +22,15 @@
 
 use std::sync::Arc;
 
-use odyssey::capability::{
+use odyssey::kernel::{
     Capability, CapabilityBudget, CapabilityRights, CapabilitySpace, CapKind, OperationRights,
     Resource, SlotId,
 };
-use odyssey::kernel::factory::CapabilityFactory;
-use odyssey::kernel::manifest::{CapabilityDecl, PluginId};
-use odyssey::kernel::manifest_builder::ManifestBuilder;
-use odyssey::kernel::resolver::{ResolvedBinding, ResolvedPlan};
+use odyssey::host::factory::CapabilityFactory;
+use odyssey::host::manifest::{CapabilityDecl};
+use odyssey::kernel::PluginId;
+use odyssey::host::manifest::ManifestBuilder;
+use odyssey::host::resolver::{ResolvedBinding, ResolvedPlan};
 use odyssey::plugins::echo::basic::{handler as echo_handler, EchoResource};
 use odyssey::plugins::agent::handler_from_plan;
 use odyssey::plugins::test_only::counter::{handler as counter_handler, CounterResource};
@@ -41,7 +42,7 @@ const TIMEOUT_MS: u32 = 5000;
 // Helpers
 // =========================================================================
 
-fn counter_manifest() -> odyssey::kernel::manifest::PluginManifest {
+fn counter_manifest() -> odyssey::host::manifest::PluginManifest {
     ManifestBuilder::new("counter", "counter", "counter")
         .in_type("object")
         .out_type("object")
@@ -51,7 +52,7 @@ fn counter_manifest() -> odyssey::kernel::manifest::PluginManifest {
         .build()
 }
 
-fn echo_manifest() -> odyssey::kernel::manifest::PluginManifest {
+fn echo_manifest() -> odyssey::host::manifest::PluginManifest {
     ManifestBuilder::new("echo", "echo", "echo")
         .in_type("any")
         .out_type("any")
@@ -59,7 +60,7 @@ fn echo_manifest() -> odyssey::kernel::manifest::PluginManifest {
         .build()
 }
 
-fn _echo_chain_manifest() -> odyssey::kernel::manifest::PluginManifest {
+fn _echo_chain_manifest() -> odyssey::host::manifest::PluginManifest {
     ManifestBuilder::new("echo-chain", "echo_chain", "echo_chain")
         .in_type("any")
         .out_type("any")

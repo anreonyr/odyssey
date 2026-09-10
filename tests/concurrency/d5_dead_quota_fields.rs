@@ -13,7 +13,7 @@
 
 #[test]
 fn quota_spec_has_no_token_or_byte_fields() {
-    use odyssey::capability::QuotaSpec;
+    use odyssey::kernel::QuotaSpec;
 
     // Compile-time check: after Phase 5, QuotaSpec exposes neither
     // `tokens_per_minute` nor `bytes_per_minute` nor their
@@ -36,7 +36,7 @@ fn quota_spec_has_no_token_or_byte_fields() {
 
 #[test]
 fn manifest_with_dead_quota_fields_still_loads() {
-    use odyssey::kernel::manifest::PluginManifest;
+    use odyssey::host::manifest::PluginManifest;
 
     let toml_src = r#"
 [plugin]

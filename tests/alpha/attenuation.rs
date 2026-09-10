@@ -3,7 +3,7 @@
 //! `cspace.restrict(child ⊇ parent)` returns `AttenuationViolation`.
 //! Same invariant applies to `grant` and `transfer`.
 
-use odyssey::capability::{CapabilityError, CapabilityRights, OperationRights};
+use odyssey::kernel::{CapabilityError, CapabilityRights, OperationRights};
 use odyssey::plugins::test_only::counter::CounterResource;
 
 #[test]

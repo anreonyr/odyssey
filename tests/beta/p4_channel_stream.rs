@@ -6,7 +6,7 @@
 //! incoming message and a terminal `Done` when the producer drops
 //! (or is revoked).
 
-use odyssey::capability::{CapabilityChunk, Slot};
+use odyssey::kernel::{CapabilityChunk, Slot};
 use serde_json::json;
 
 #[tokio::test]
@@ -14,13 +14,13 @@ async fn consumer_stream_yields_messages_then_done() {
     let (space, factory) = crate::common::boot();
     let (chan_handler, cons_handler) =
         odyssey::plugins::test_only::channel::channel_pair("p4_stream", 16);
-    let pid = odyssey::kernel::manifest::PluginId {
+    let pid = odyssey::kernel::PluginId {
         name: "channel".into(),
         version: "0.1.0".into(),
     };
 
     // Producer (sync).
-    let chan_decl = odyssey::kernel::manifest::CapabilityDecl {
+    let chan_decl = odyssey::host::manifest::CapabilityDecl {
         name: "channel_a".into(),
         in_type: "object".into(),
         out_type: "object".into(),
@@ -28,16 +28,16 @@ async fn consumer_stream_yields_messages_then_done() {
         ..Default::default()
     };
     let chan_slot = factory.mint::<odyssey::plugins::test_only::channel::ChannelResource>(
-        odyssey::capability::CapKind::Sync,
+        odyssey::kernel::CapKind::Sync,
         &chan_decl,
         &pid,
-        odyssey::capability::CapabilityBudget::new(crate::common::DEFAULT_TIMEOUT_MS),
+        odyssey::kernel::CapabilityBudget::new(crate::common::DEFAULT_TIMEOUT_MS),
         chan_handler,
     );
 
     // Consumer (stream). Minted as CapKind::Stream to match the
     // manifest's `streaming = true`.
-    let cons_decl = odyssey::kernel::manifest::CapabilityDecl {
+    let cons_decl = odyssey::host::manifest::CapabilityDecl {
         name: "consumer_a".into(),
         in_type: "null".into(),
         out_type: "object".into(),
@@ -45,10 +45,10 @@ async fn consumer_stream_yields_messages_then_done() {
         ..Default::default()
     };
     let cons_slot = factory.mint::<odyssey::plugins::test_only::channel::ConsumerResource>(
-        odyssey::capability::CapKind::Stream,
+        odyssey::kernel::CapKind::Stream,
         &cons_decl,
         &pid,
-        odyssey::capability::CapabilityBudget::new(crate::common::DEFAULT_TIMEOUT_MS),
+        odyssey::kernel::CapabilityBudget::new(crate::common::DEFAULT_TIMEOUT_MS),
         cons_handler,
     );
 

@@ -25,8 +25,9 @@
 //!   (echo, post-revoke) records `step_skip`. Final `done` has
 //!   ok=2, skip=1.
 
-use odyssey::capability::{
-    CapabilityChunk, Reachable, Resource,
+use odyssey::host::resolver::Reachable;
+use odyssey::kernel::{
+    CapabilityChunk, Resource,
 };
 use odyssey::plugins::agent::{AgentResource, ProgramStep};
 use odyssey::plugins::database::{handler as database_handler, DatabaseResource};
@@ -76,21 +77,19 @@ async fn drain_until_step_starts(
 }
 
 struct World {
-    space: odyssey::capability::CapabilitySpace,
+    space: odyssey::kernel::CapabilitySpace,
     #[allow(dead_code)]
-    echo_slot: odyssey::capability::SlotId,
+    echo_slot: odyssey::kernel::SlotId,
     #[allow(dead_code)]
-    database_slot: odyssey::capability::SlotId,
+    database_slot: odyssey::kernel::SlotId,
 }
 
 fn build_world() -> World {
-    use odyssey::capability::cspace::CapabilitySpace;
-    use odyssey::capability::events::GraphEventBus;
-    use odyssey::kernel::factory::CapabilityFactory;
-    use odyssey::kernel::manifest::{
-        CapabilityDecl, IsolationMode, PluginId, PluginManifest,
-    };
-
+    use odyssey::kernel::space::CapabilitySpace;
+    use odyssey::kernel::space::events::GraphEventBus;
+    use odyssey::host::factory::CapabilityFactory;
+    use odyssey::host::manifest::{CapabilityDecl, IsolationMode, PluginManifest};
+    use odyssey::kernel::PluginId;
     let bus = GraphEventBus::default();
     let space = CapabilitySpace::with_bus(bus);
     let factory = CapabilityFactory::new(space.clone());
@@ -104,8 +103,8 @@ fn build_world() -> World {
             out_type: "any".into(),
             streaming: false,
             contract_name: "echo".into(),
-            authority: odyssey::capability::AuthorityContract::empty(),
-            protocol: odyssey::capability::Protocol::empty(),
+            authority: odyssey::kernel::AuthorityContract::empty(),
+            protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
         consumes: vec![],
@@ -113,10 +112,10 @@ fn build_world() -> World {
         resources: Default::default(),
     };
     let echo_slot = factory.mint::<EchoResource>(
-        odyssey::capability::CapKind::Sync,
+        odyssey::kernel::CapKind::Sync,
         &echo_decl.exposes[0],
         &echo_decl.plugin,
-        odyssey::capability::CapabilityBudget::new(5000),
+        odyssey::kernel::CapabilityBudget::new(5000),
         echo_handler(),
     );
 
@@ -129,9 +128,9 @@ fn build_world() -> World {
             out_type: "any".into(),
             streaming: false,
             contract_name: "database".into(),
-            authority: odyssey::capability::AuthorityContract::empty()
+            authority: odyssey::kernel::AuthorityContract::empty()
                 .with_action("read", "DB_READ"),
-            protocol: odyssey::capability::Protocol::empty(),
+            protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
         consumes: vec![],
@@ -139,10 +138,10 @@ fn build_world() -> World {
         resources: Default::default(),
     };
     let db_slot = factory.mint::<DatabaseResource>(
-        odyssey::capability::CapKind::Sync,
+        odyssey::kernel::CapKind::Sync,
         &db_decl.exposes[0],
         &db_decl.plugin,
-        odyssey::capability::CapabilityBudget::new(5000),
+        odyssey::kernel::CapabilityBudget::new(5000),
         database_handler(),
     );
 
@@ -152,7 +151,7 @@ fn build_world() -> World {
 fn build_agent(
     name: &str,
     reachable: Vec<Reachable>,
-    space: odyssey::capability::CapabilitySpace,
+    space: odyssey::kernel::CapabilitySpace,
 ) -> std::sync::Arc<AgentResource> {
     std::sync::Arc::new(AgentResource::from_reachable(name, reachable, space))
 }
@@ -246,13 +245,11 @@ async fn mid_flight_revoke_skips_subsequent_steps_targeting_revoked_cap() {
 async fn revoking_streaming_cap_does_not_crash_inflight_receiver() {
     use odyssey::plugins::generator::handler as generator_handler;
     use odyssey::plugins::generator::GeneratorResource;
-    use odyssey::kernel::factory::CapabilityFactory;
-    use odyssey::kernel::manifest::{
-        CapabilityDecl, IsolationMode, PluginId, PluginManifest,
-    };
-
-    let bus = odyssey::capability::events::GraphEventBus::default();
-    let space = odyssey::capability::CapabilitySpace::with_bus(bus);
+    use odyssey::host::factory::CapabilityFactory;
+    use odyssey::host::manifest::{CapabilityDecl, IsolationMode, PluginManifest};
+    use odyssey::kernel::PluginId;
+    let bus = odyssey::kernel::space::events::GraphEventBus::default();
+    let space = odyssey::kernel::CapabilitySpace::with_bus(bus);
     let factory = CapabilityFactory::new(space.clone());
 
     let g_decl = PluginManifest {
@@ -264,8 +261,8 @@ async fn revoking_streaming_cap_does_not_crash_inflight_receiver() {
             out_type: "tokens".into(),
             streaming: true,
             contract_name: "generate".into(),
-            authority: odyssey::capability::AuthorityContract::empty(),
-            protocol: odyssey::capability::Protocol::empty(),
+            authority: odyssey::kernel::AuthorityContract::empty(),
+            protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
         consumes: vec![],
@@ -273,10 +270,10 @@ async fn revoking_streaming_cap_does_not_crash_inflight_receiver() {
         resources: Default::default(),
     };
     let g_slot = factory.mint::<GeneratorResource>(
-        odyssey::capability::CapKind::Stream,
+        odyssey::kernel::CapKind::Stream,
         &g_decl.exposes[0],
         &g_decl.plugin,
-        odyssey::capability::CapabilityBudget::new(5000),
+        odyssey::kernel::CapabilityBudget::new(5000),
         generator_handler(std::sync::Arc::new(odyssey::plugins::generator::MarkovModel::default())),
     );
 
@@ -399,13 +396,11 @@ async fn mid_flight_revoke_of_one_cap_leaves_other_steps_untouched() {
 
 #[tokio::test]
 async fn cspace_double_revoke_returns_false() {
-    use odyssey::capability::cspace::CapabilitySpace;
-    use odyssey::capability::events::GraphEventBus;
-    use odyssey::kernel::factory::CapabilityFactory;
-    use odyssey::kernel::manifest::{
-        CapabilityDecl, IsolationMode, PluginId, PluginManifest,
-    };
-
+    use odyssey::kernel::space::CapabilitySpace;
+    use odyssey::kernel::space::events::GraphEventBus;
+    use odyssey::host::factory::CapabilityFactory;
+    use odyssey::host::manifest::{CapabilityDecl, IsolationMode, PluginManifest};
+    use odyssey::kernel::PluginId;
     let bus = GraphEventBus::default();
     let space = CapabilitySpace::with_bus(bus);
     let factory = CapabilityFactory::new(space.clone());
@@ -419,8 +414,8 @@ async fn cspace_double_revoke_returns_false() {
             out_type: "any".into(),
             streaming: false,
             contract_name: "echo".into(),
-            authority: odyssey::capability::AuthorityContract::empty(),
-            protocol: odyssey::capability::Protocol::empty(),
+            authority: odyssey::kernel::AuthorityContract::empty(),
+            protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
         consumes: vec![],
@@ -428,10 +423,10 @@ async fn cspace_double_revoke_returns_false() {
         resources: Default::default(),
     };
     let slot_id = factory.mint::<EchoResource>(
-        odyssey::capability::CapKind::Sync,
+        odyssey::kernel::CapKind::Sync,
         &decl.exposes[0],
         &decl.plugin,
-        odyssey::capability::CapabilityBudget::new(5000),
+        odyssey::kernel::CapabilityBudget::new(5000),
         echo_handler(),
     );
 
@@ -451,7 +446,7 @@ async fn cspace_double_revoke_returns_false() {
         rx.recv(),
     ).await {
         match res {
-            Ok(odyssey::capability::events::GraphEvent::Revoked { slot: s, .. }) => {
+            Ok(odyssey::kernel::space::events::GraphEvent::Revoked { slot: s, .. }) => {
                 if s == slot_id {
                     revoked_count += 1;
                 }
@@ -475,13 +470,11 @@ async fn cspace_double_revoke_returns_false() {
 
 #[tokio::test]
 async fn agent_program_completes_then_revocation_is_noop() {
-    use odyssey::capability::cspace::CapabilitySpace;
-    use odyssey::capability::events::GraphEventBus;
-    use odyssey::kernel::factory::CapabilityFactory;
-    use odyssey::kernel::manifest::{
-        CapabilityDecl, IsolationMode, PluginId, PluginManifest,
-    };
-
+    use odyssey::kernel::space::CapabilitySpace;
+    use odyssey::kernel::space::events::GraphEventBus;
+    use odyssey::host::factory::CapabilityFactory;
+    use odyssey::host::manifest::{CapabilityDecl, IsolationMode, PluginManifest};
+    use odyssey::kernel::PluginId;
     let bus = GraphEventBus::default();
     let space = CapabilitySpace::with_bus(bus);
     let factory = CapabilityFactory::new(space.clone());
@@ -495,8 +488,8 @@ async fn agent_program_completes_then_revocation_is_noop() {
             out_type: "any".into(),
             streaming: false,
             contract_name: "echo".into(),
-            authority: odyssey::capability::AuthorityContract::empty(),
-            protocol: odyssey::capability::Protocol::empty(),
+            authority: odyssey::kernel::AuthorityContract::empty(),
+            protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
         consumes: vec![],
@@ -504,10 +497,10 @@ async fn agent_program_completes_then_revocation_is_noop() {
         resources: Default::default(),
     };
     let echo_slot = factory.mint::<EchoResource>(
-        odyssey::capability::CapKind::Sync,
+        odyssey::kernel::CapKind::Sync,
         &echo_decl.exposes[0],
         &echo_decl.plugin,
-        odyssey::capability::CapabilityBudget::new(5000),
+        odyssey::kernel::CapabilityBudget::new(5000),
         echo_handler(),
     );
 

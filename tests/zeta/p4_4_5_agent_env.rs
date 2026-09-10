@@ -28,11 +28,12 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use odyssey::capability::{CapabilityChunk, Resource};
+use odyssey::kernel::{CapabilityChunk, Resource};
 use odyssey::plugins::agent::handler_from_plan;
 use odyssey::plugins::database::{handler as database_handler, DatabaseResource};
 use odyssey::plugins::echo::basic::{handler as echo_handler, EchoResource};
-use odyssey::{kernel::resolver::resolve, kernel::manifest::PluginManifest};
+use odyssey::host::resolver::resolve;
+use odyssey::host::manifest::PluginManifest;
 use serde_json::{json, Value};
 
 /// Drain a streaming capability to a vector of events
@@ -56,13 +57,13 @@ async fn drain_events(mut rx: tokio::sync::mpsc::Receiver<CapabilityChunk>) -> V
 
 /// Build a cspace + plan with `echo` and `database` minted.
 fn fixture_two_caps() -> (
-    odyssey::capability::CapabilitySpace,
+    odyssey::kernel::CapabilitySpace,
     HashMap<String, Arc<dyn Resource>>,
     Vec<PluginManifest>,
 ) {
-    use odyssey::capability::cspace::CapabilitySpace;
-    use odyssey::capability::events::GraphEventBus;
-    use odyssey::kernel::factory::CapabilityFactory;
+    use odyssey::kernel::space::CapabilitySpace;
+    use odyssey::kernel::space::events::GraphEventBus;
+    use odyssey::host::factory::CapabilityFactory;
 
     let bus = GraphEventBus::default();
     let space = CapabilitySpace::with_bus(bus);
@@ -73,19 +74,19 @@ fn fixture_two_caps() -> (
 
     // Mint echo as `echo`
     let echo_decl = PluginManifest {
-        plugin: odyssey::kernel::manifest::PluginId {
+        plugin: odyssey::kernel::PluginId {
             name: "echo".into(),
             version: "0.1.0".into(),
         },
-        isolate: odyssey::kernel::manifest::IsolationMode::InProc,
-        exposes: vec![odyssey::kernel::manifest::CapabilityDecl {
+        isolate: odyssey::host::manifest::IsolationMode::InProc,
+        exposes: vec![odyssey::host::manifest::CapabilityDecl {
             name: "echo".into(),
             in_type: "any".into(),
             out_type: "any".into(),
             streaming: false,
             contract_name: "echo".into(),
-            authority: odyssey::capability::AuthorityContract::empty(),
-            protocol: odyssey::capability::Protocol::empty(),
+            authority: odyssey::kernel::AuthorityContract::empty(),
+            protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
         consumes: vec![],
@@ -93,30 +94,30 @@ fn fixture_two_caps() -> (
         resources: Default::default(),
     };
     factory.mint::<EchoResource>(
-        odyssey::capability::CapKind::Sync,
+        odyssey::kernel::CapKind::Sync,
         &echo_decl.exposes[0],
         &echo_decl.plugin,
-        odyssey::capability::CapabilityBudget::new(5000),
+        odyssey::kernel::CapabilityBudget::new(5000),
         echo_cap.clone(),
     );
 
     // Mint database as `database`
     let db_decl = PluginManifest {
-        plugin: odyssey::kernel::manifest::PluginId {
+        plugin: odyssey::kernel::PluginId {
             name: "database".into(),
             version: "0.1.0".into(),
         },
-        isolate: odyssey::kernel::manifest::IsolationMode::InProc,
-        exposes: vec![odyssey::kernel::manifest::CapabilityDecl {
+        isolate: odyssey::host::manifest::IsolationMode::InProc,
+        exposes: vec![odyssey::host::manifest::CapabilityDecl {
             name: "database".into(),
             in_type: "any".into(),
             out_type: "any".into(),
             streaming: false,
             contract_name: "database".into(),
-            authority: odyssey::capability::AuthorityContract::empty()
+            authority: odyssey::kernel::AuthorityContract::empty()
                 .with_action("read", "DB_READ")
                 .with_action("write", "DB_WRITE"),
-            protocol: odyssey::capability::Protocol::empty(),
+            protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
         consumes: vec![],
@@ -124,10 +125,10 @@ fn fixture_two_caps() -> (
         resources: Default::default(),
     };
     factory.mint::<DatabaseResource>(
-        odyssey::capability::CapKind::Sync,
+        odyssey::kernel::CapKind::Sync,
         &db_decl.exposes[0],
         &db_decl.plugin,
-        odyssey::capability::CapabilityBudget::new(5000),
+        odyssey::kernel::CapabilityBudget::new(5000),
         db_cap.clone(),
     );
 
@@ -144,9 +145,8 @@ fn fixture_two_caps() -> (
 /// tests below (we use from_bindings directly), but it's here
 /// for completeness and for ζ.26's plan computation.
 fn agent_consumer_manifest() -> PluginManifest {
-    use odyssey::kernel::manifest::{
-        CapabilityDecl, CapabilityRequirement, IsolationMode, PluginId, PluginManifest,
-    };
+    use odyssey::host::manifest::{CapabilityDecl, CapabilityRequirement, IsolationMode, PluginManifest};
+    use odyssey::kernel::PluginId;
     PluginManifest {
         plugin: PluginId { name: "agent".into(), version: "0.1.0".into() },
         isolate: IsolationMode::InProc,
@@ -156,8 +156,8 @@ fn agent_consumer_manifest() -> PluginManifest {
             out_type: "events".into(),
             streaming: true,
             contract_name: "agent".into(),
-            authority: odyssey::capability::AuthorityContract::empty(),
-            protocol: odyssey::capability::Protocol::empty(),
+            authority: odyssey::kernel::AuthorityContract::empty(),
+            protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![
             CapabilityRequirement { name: "echo".into(), contract: "echo".into() },
@@ -183,7 +183,7 @@ async fn agent_with_empty_reachable_skips_all_steps() {
     // Use a consumer PluginId that is NOT in the plan, so
     // its reachable set is empty. This proves graceful
     // failure when the env grants nothing.
-    let phantom = odyssey::kernel::manifest::PluginId {
+    let phantom = odyssey::kernel::PluginId {
         name: "phantom".into(),
         version: "0.1.0".into(),
     };
@@ -222,7 +222,7 @@ async fn agent_dispatches_to_reachable_cap_and_emits_step_ok() {
     manifests.push(agent_consumer_manifest());
     let plan = resolve(&manifests).expect("resolve");
 
-    let consumer = odyssey::kernel::manifest::PluginId {
+    let consumer = odyssey::kernel::PluginId {
         name: "agent".into(),
         version: "0.1.0".into(),
     };
@@ -257,7 +257,7 @@ async fn agent_emits_step_deny_when_op_not_in_authority() {
     manifests.push(agent_consumer_manifest());
     let plan = resolve(&manifests).expect("resolve");
 
-    let consumer = odyssey::kernel::manifest::PluginId {
+    let consumer = odyssey::kernel::PluginId {
         name: "agent".into(),
         version: "0.1.0".into(),
     };
@@ -292,7 +292,7 @@ async fn agent_emits_step_fail_and_continues_on_invoke_error() {
     manifests.push(agent_consumer_manifest());
     let plan = resolve(&manifests).expect("resolve");
 
-    let consumer = odyssey::kernel::manifest::PluginId {
+    let consumer = odyssey::kernel::PluginId {
         name: "agent".into(),
         version: "0.1.0".into(),
     };
@@ -340,7 +340,7 @@ async fn agent_done_event_summarises_counts() {
     manifests.push(agent_consumer_manifest());
     let plan = resolve(&manifests).expect("resolve");
 
-    let consumer = odyssey::kernel::manifest::PluginId {
+    let consumer = odyssey::kernel::PluginId {
         name: "agent".into(),
         version: "0.1.0".into(),
     };
@@ -395,7 +395,7 @@ async fn same_program_different_env_produces_different_outcomes() {
     manifests_a.push(agent_consumer_manifest());
     let plan_a = resolve(&manifests_a).expect("resolve A");
 
-    let consumer = odyssey::kernel::manifest::PluginId {
+    let consumer = odyssey::kernel::PluginId {
         name: "agent".into(),
         version: "0.1.0".into(),
     };
@@ -404,7 +404,7 @@ async fn same_program_different_env_produces_different_outcomes() {
     // Build agent B with a stripped plan (only echo binding).
     let (_, _, _manifests_b) = fixture_two_caps();
     let plan_b = {
-        use odyssey::kernel::resolver::{ResolvedPlan, ResolvedBinding};
+        use odyssey::host::resolver::{ResolvedPlan, ResolvedBinding};
         let mut plan = ResolvedPlan {
             mint_order: vec![],
             bindings: BTreeMap::new(),
@@ -414,7 +414,7 @@ async fn same_program_different_env_produces_different_outcomes() {
             consumer.clone(),
             vec![ResolvedBinding {
                 handle: "echo".into(),
-                provider: odyssey::kernel::manifest::PluginId {
+                provider: odyssey::kernel::PluginId {
                     name: "echo".into(),
                     version: "0.1.0".into(),
                 },
@@ -478,7 +478,7 @@ async fn agent_streams_program_via_http_bridge() {
     manifests.push(agent_consumer_manifest());
     let plan = resolve(&manifests).expect("resolve");
 
-    let consumer = odyssey::kernel::manifest::PluginId {
+    let consumer = odyssey::kernel::PluginId {
         name: "agent".into(),
         version: "0.1.0".into(),
     };
@@ -558,13 +558,13 @@ impl Resource for PanickingResource {
 
 #[tokio::test]
 async fn panicking_handler_records_step_fail_not_crash() {
-    use odyssey::capability::cspace::CapabilitySpace;
-    use odyssey::capability::events::GraphEventBus;
-    use odyssey::capability::{CapabilityBudget, Reachable};
-    use odyssey::kernel::factory::CapabilityFactory;
-    use odyssey::kernel::manifest::{
-        CapabilityDecl, IsolationMode, PluginId, PluginManifest,
-    };
+    use odyssey::kernel::space::CapabilitySpace;
+    use odyssey::kernel::space::events::GraphEventBus;
+    use odyssey::host::resolver::Reachable;
+    use odyssey::kernel::CapabilityBudget;
+    use odyssey::host::factory::CapabilityFactory;
+    use odyssey::host::manifest::{CapabilityDecl, IsolationMode, PluginManifest};
+    use odyssey::kernel::PluginId;
     use odyssey::plugins::agent::AgentResource;
     use std::sync::Arc;
 
@@ -581,8 +581,8 @@ async fn panicking_handler_records_step_fail_not_crash() {
             out_type: "any".into(),
             streaming: false,
             contract_name: "panic_cap".into(),
-            authority: odyssey::capability::AuthorityContract::empty(),
-            protocol: odyssey::capability::Protocol::empty(),
+            authority: odyssey::kernel::AuthorityContract::empty(),
+            protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
         consumes: vec![],
@@ -591,7 +591,7 @@ async fn panicking_handler_records_step_fail_not_crash() {
     };
     let panicker = Arc::new(PanickingResource { panicked: AtomicBool::new(false) });
     let _slot = factory.mint::<PanickingResource>(
-        odyssey::capability::CapKind::Sync,
+        odyssey::kernel::CapKind::Sync,
         &decl.exposes[0],
         &decl.plugin,
         CapabilityBudget::new(5000),

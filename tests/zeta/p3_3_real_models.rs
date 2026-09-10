@@ -15,7 +15,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use odyssey::capability::{CapabilityChunk, Resource};
+use odyssey::kernel::{CapabilityChunk, Resource};
 use odyssey::plugins::generator::{
     handler, MarkovModel, MockModel, Model, ModelKind,
 };

@@ -19,11 +19,12 @@
 
 use std::sync::Arc;
 
-use odyssey::capability::{CapabilitySpace, Resource, Slot};
-use odyssey::kernel::manifest::{CapabilityDecl, PluginId};
-use odyssey::kernel::manifest_builder::ManifestBuilder;
-use odyssey::kernel::resolver::{resolve, ResolvedBinding, ResolvedPlan};
-use odyssey::capability::Reachable;
+use odyssey::kernel::{CapabilitySpace, Resource, Slot};
+use odyssey::host::manifest::{CapabilityDecl};
+use odyssey::kernel::PluginId;
+use odyssey::host::manifest::ManifestBuilder;
+use odyssey::host::resolver::{resolve, ResolvedBinding, ResolvedPlan};
+use odyssey::host::resolver::Reachable;
 use odyssey::plugins::agent::{
     handler_from_plan, AgentResource,
 };
@@ -37,7 +38,7 @@ const TIMEOUT_MS: u32 = 5000;
 /// because each test only mints one consumer.
 fn agent_manifest_with_requires(
     requires: Vec<(&'static str, &'static str)>, // (handle, contract)
-) -> odyssey::kernel::manifest::PluginManifest {
+) -> odyssey::host::manifest::PluginManifest {
     let mut b = ManifestBuilder::new("agent", "agent", "agent")
         .in_type("object")
         .out_type("object");
@@ -54,7 +55,7 @@ fn agent_manifest_with_requires(
 /// parser details). The three `.action(...)` calls publish the
 /// `read → READ, increment → WRITE, reset → ADMIN` vocabulary
 /// that the RuleAgent consults.
-fn counter_manifest() -> odyssey::kernel::manifest::PluginManifest {
+fn counter_manifest() -> odyssey::host::manifest::PluginManifest {
     ManifestBuilder::new("counter", "counter", "counter")
         .in_type("object")
         .out_type("object")
@@ -67,10 +68,10 @@ fn counter_manifest() -> odyssey::kernel::manifest::PluginManifest {
 /// Mint a counter cap and register it in cspace under the name
 /// "counter". Returns the slot id.
 fn mint_counter_for(
-    factory: &odyssey::kernel::factory::CapabilityFactory,
+    factory: &odyssey::host::factory::CapabilityFactory,
     cspace: &CapabilitySpace,
-) -> odyssey::capability::SlotId {
-    use odyssey::capability::{CapabilityBudget, CapKind};
+) -> odyssey::kernel::SlotId {
+    use odyssey::kernel::{CapabilityBudget, CapKind};
     let m = counter_manifest();
     let slot = factory.mint::<CounterResource>(
         CapKind::Sync,
@@ -89,12 +90,12 @@ fn mint_counter_for(
 /// Mint a real `Capability<CounterResource>` and return both
 /// the Arc and the slot id.
 fn mint_counter_arc(
-    factory: &odyssey::kernel::factory::CapabilityFactory,
+    factory: &odyssey::host::factory::CapabilityFactory,
 ) -> (
-    odyssey::capability::SlotId,
-    Arc<odyssey::capability::Capability<CounterResource>>,
+    odyssey::kernel::SlotId,
+    Arc<odyssey::kernel::Capability<CounterResource>>,
 ) {
-    use odyssey::capability::{CapabilityBudget, CapKind};
+    use odyssey::kernel::{CapabilityBudget, CapKind};
     let m = counter_manifest();
     let slot = factory.mint::<CounterResource>(
         CapKind::Sync,
@@ -234,7 +235,7 @@ fn same_binary_requires_empty_addresses_nothing() {
 fn same_binary_requires_two_handles_addresses_both() {
     // Mint both counter and echo.
     let (space, factory) = crate::common::boot();
-    use odyssey::capability::{CapabilityBudget, CapKind};
+    use odyssey::kernel::{CapabilityBudget, CapKind};
     let _counter_slot = mint_counter_for(&factory, &space);
     let m_echo = odyssey::plugins::echo::basic::manifest();
     let _echo_slot = factory.mint::<odyssey::plugins::echo::basic::EchoResource>(
@@ -308,7 +309,7 @@ fn same_handle_different_capability_reaches_different_caps() {
     // cspace. We use `restrict` to mint two derived caps from
     // the same counter source, named "counter_read" (READ-only)
     // and "counter_write" (READ | WRITE).
-    use odyssey::capability::{CapabilityRights, OperationRights};
+    use odyssey::kernel::{CapabilityRights, OperationRights};
     let (space, factory) = crate::common::boot();
     let (_counter_slot, _counter_arc) = mint_counter_arc(&factory);
 

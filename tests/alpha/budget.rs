@@ -3,7 +3,7 @@
 //! A `Slow` resource exceeds its budget returns a timeout error; a
 //! generous budget succeeds.
 
-use odyssey::capability::{CapabilityRights, Slot};
+use odyssey::kernel::{CapabilityRights, Slot};
 use odyssey::plugins::slow::SlowResource;
 use serde_json::json;
 

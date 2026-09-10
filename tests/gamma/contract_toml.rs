@@ -7,7 +7,7 @@
 //! now lives under `protocol`; the action vocabulary under
 //! `authority`.
 
-use odyssey::kernel::manifest::PluginManifest;
+use odyssey::host::manifest::PluginManifest;
 
 #[test]
 fn toml_protocol_parses_into_decl() {

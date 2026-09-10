@@ -3,7 +3,7 @@
 //! A `Capability<Channel>` is the producer's authority to send;
 //! revoking the channel slot severs the connection.
 
-use odyssey::capability::Slot;
+use odyssey::kernel::Slot;
 use serde_json::json;
 
 #[test]
@@ -11,11 +11,11 @@ fn channel_send_fails_after_revoke() {
     let (space, factory) = crate::common::boot();
     let (chan_handler, _cons_handler) =
         odyssey::plugins::test_only::channel::channel_pair("p4", 16);
-    let pid = odyssey::kernel::manifest::PluginId {
+    let pid = odyssey::kernel::PluginId {
         name: "channel".into(),
         version: "0.1.0".into(),
     };
-    let chan_decl = odyssey::kernel::manifest::CapabilityDecl {
+    let chan_decl = odyssey::host::manifest::CapabilityDecl {
         name: "channel_a".into(),
         in_type: "object".into(),
         out_type: "object".into(),
@@ -23,10 +23,10 @@ fn channel_send_fails_after_revoke() {
         ..Default::default()
     };
     let chan_slot = factory.mint::<odyssey::plugins::test_only::channel::ChannelResource>(
-        odyssey::capability::CapKind::Sync,
+        odyssey::kernel::CapKind::Sync,
         &chan_decl,
         &pid,
-        odyssey::capability::CapabilityBudget::new(crate::common::DEFAULT_TIMEOUT_MS),
+        odyssey::kernel::CapabilityBudget::new(crate::common::DEFAULT_TIMEOUT_MS),
         chan_handler,
     );
 

@@ -18,12 +18,13 @@
 
 use std::sync::{Arc, OnceLock};
 
-use odyssey::capability::{
+use odyssey::kernel::{
     Capability, CapabilityBudget, CapabilityRights, CapabilitySpace, CapKind, OperationRights,
     QuotaSpec, SlotId,
 };
-use odyssey::kernel::factory::CapabilityFactory;
-use odyssey::kernel::manifest::{CapabilityDecl, PluginId, PluginManifest};
+use odyssey::host::factory::CapabilityFactory;
+use odyssey::host::manifest::{CapabilityDecl, PluginManifest};
+use odyssey::kernel::PluginId;
 use odyssey::plugins::test_only::broker::{handler as broker_handler, BrokerResource};
 use odyssey::plugins::test_only::counter::CounterResource;
 
@@ -202,6 +203,6 @@ pub fn mint_broker(
 /// empty `AuthorityContract`. Tests that want a `Protocol`
 /// should construct one directly.
 #[allow(dead_code)]
-pub fn empty_contract() -> odyssey::capability::AuthorityContract {
-    odyssey::capability::AuthorityContract::default()
+pub fn empty_contract() -> odyssey::kernel::AuthorityContract {
+    odyssey::kernel::AuthorityContract::default()
 }

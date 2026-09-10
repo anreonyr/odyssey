@@ -17,13 +17,14 @@
 //!   reverse order; the recorded event sequence matches the
 //!   expected boot shape.
 
-use odyssey::capability::{
-    events::{DeriveKind, GraphEvent},
+use odyssey::kernel::{
+    space::events::{DeriveKind, GraphEvent},
     Capability, CapabilityBudget, CapabilityRights, CapabilitySpace, CapKind, OperationRights, SlotId,
 };
-use odyssey::kernel::factory::CapabilityFactory;
-use odyssey::kernel::manifest::{CapabilityDecl, PluginId};
-use odyssey::kernel::manifest_builder::ManifestBuilder as MB;
+use odyssey::host::factory::CapabilityFactory;
+use odyssey::host::manifest::{CapabilityDecl};
+use odyssey::kernel::PluginId;
+use odyssey::host::manifest::ManifestBuilder as MB;
 use odyssey::plugins::test_only::counter::{handler as counter_handler, CounterResource};
 
 const TIMEOUT_MS: u32 = 5000;

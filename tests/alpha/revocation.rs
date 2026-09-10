@@ -3,7 +3,7 @@
 //! `cspace.revoke(slot_id)` makes subsequent `Slot::invoke` calls
 //! fail; the slot reference itself stays valid (no panic).
 
-use odyssey::capability::Slot;
+use odyssey::kernel::Slot;
 use odyssey::plugins::test_only::counter::CounterResource;
 use serde_json::json;
 

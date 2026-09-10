@@ -4,11 +4,12 @@
 
 use std::sync::Arc;
 
-use odyssey::capability::{
+use odyssey::kernel::{
     Capability, CapabilityBudget, CapabilityRights, CapabilitySpace, CapKind, OperationRights,
 };
-use odyssey::kernel::factory::CapabilityFactory;
-use odyssey::kernel::manifest::{CapabilityDecl, PluginId};
+use odyssey::host::factory::CapabilityFactory;
+use odyssey::host::manifest::{CapabilityDecl};
+use odyssey::kernel::PluginId;
 use odyssey::plugins::test_only::counter::CounterResource;
 
 /// On pre-Phase-5 code, the child's `wall_clock_total_ms` is fresh

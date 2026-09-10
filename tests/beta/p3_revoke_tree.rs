@@ -3,7 +3,7 @@
 //! Revoking an intermediate hop (`revoke_tree`) severs every
 //! descendant.
 
-use odyssey::capability::{CapabilityRights, OperationRights, Slot};
+use odyssey::kernel::{CapabilityRights, OperationRights, Slot};
 use odyssey::plugins::test_only::counter::CounterResource;
 use serde_json::json;
 

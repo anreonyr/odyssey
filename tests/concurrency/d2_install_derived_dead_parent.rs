@@ -18,12 +18,13 @@
 
 use std::sync::Arc;
 
-use odyssey::capability::{
+use odyssey::kernel::{
     Capability, CapabilityBudget, CapabilityRights, CapabilitySpace, CapKind, OperationRights,
     SlotId,
 };
-use odyssey::kernel::factory::CapabilityFactory;
-use odyssey::kernel::manifest::{CapabilityDecl, PluginId};
+use odyssey::host::factory::CapabilityFactory;
+use odyssey::host::manifest::{CapabilityDecl};
+use odyssey::kernel::PluginId;
 use odyssey::plugins::test_only::counter::CounterResource;
 
 /// Test 1 — sequential: revoke the parent first, then try to grant.
@@ -54,7 +55,7 @@ fn grant_after_revoke_tree_refuses_dead_parent() {
     );
 
     match grant_result {
-        Err(odyssey::capability::CapabilityError::SlotEmpty(_)) => {
+        Err(odyssey::kernel::CapabilityError::SlotEmpty(_)) => {
             // Phase-5 code: parent-live check fires.
         }
         Ok(new_slot) => {

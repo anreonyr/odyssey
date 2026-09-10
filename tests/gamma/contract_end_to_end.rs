@@ -5,7 +5,7 @@
 //! protocol metadata and authority action table that live on
 //! disk are what's observable on the slot.
 
-use odyssey::kernel::manifest::PluginManifest;
+use odyssey::host::manifest::PluginManifest;
 
 #[test]
 fn toml_protocol_reaches_capability_meta() {
@@ -16,10 +16,10 @@ fn toml_protocol_reaches_capability_meta() {
 
     let (space, factory) = crate::common::boot();
     let slot = factory.mint::<odyssey::plugins::test_only::counter::CounterResource>(
-        odyssey::capability::CapKind::Sync,
+        odyssey::kernel::CapKind::Sync,
         cap,
         &m.plugin,
-        odyssey::capability::CapabilityBudget::new(crate::common::DEFAULT_TIMEOUT_MS),
+        odyssey::kernel::CapabilityBudget::new(crate::common::DEFAULT_TIMEOUT_MS),
         odyssey::plugins::test_only::counter::handler(),
     );
     let observed = space.slot_meta(slot).unwrap();

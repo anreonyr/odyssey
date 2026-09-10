@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use odyssey::capability::{Capability, CapabilityRights, OperationRights, Slot, SlotId};
+use odyssey::kernel::{Capability, CapabilityRights, OperationRights, Slot, SlotId};
 use odyssey::plugins::test_only::broker::BrokerResource;
 use odyssey::plugins::test_only::counter::CounterResource;
 use serde_json::json;

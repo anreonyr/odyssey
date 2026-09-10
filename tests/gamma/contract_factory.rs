@@ -5,13 +5,13 @@
 //! test name `contract_factory` is preserved so the test id
 //! (`γ.3`) keeps its semantic.
 
-use odyssey::capability::Protocol;
+use odyssey::kernel::Protocol;
 use serde_json::json;
 
 #[test]
 fn factory_forwards_decl_protocol() {
     let (space, factory) = crate::common::boot();
-    let decl = odyssey::kernel::manifest::CapabilityDecl {
+    let decl = odyssey::host::manifest::CapabilityDecl {
         name: "demo".into(),
         in_type: "object".into(),
         out_type: "object".into(),
@@ -25,13 +25,13 @@ fn factory_forwards_decl_protocol() {
         ..Default::default()
     };
     let slot = factory.mint::<odyssey::plugins::test_only::counter::CounterResource>(
-        odyssey::capability::CapKind::Sync,
+        odyssey::kernel::CapKind::Sync,
         &decl,
-        &odyssey::kernel::manifest::PluginId {
+        &odyssey::kernel::PluginId {
             name: "demo".into(),
             version: "0.1.0".into(),
         },
-        odyssey::capability::CapabilityBudget::new(crate::common::DEFAULT_TIMEOUT_MS),
+        odyssey::kernel::CapabilityBudget::new(crate::common::DEFAULT_TIMEOUT_MS),
         odyssey::plugins::test_only::counter::handler(),
     );
     // Phase 3 P3.2 — `slot.meta().protocol` carries the

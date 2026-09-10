@@ -41,14 +41,13 @@
 //!   under `src/plugins/` declares a non-empty `contract_name`.
 //!   This guards against future contributors forgetting the field.
 
-use odyssey::capability::{
+use odyssey::kernel::{
     Capability, CapabilityBudget, CapabilitySpace, CapKind, Resource,
 };
-use odyssey::kernel::factory::CapabilityFactory;
-use odyssey::kernel::manifest::{
-    CapabilityDecl, CapabilityRequirement, IsolationMode, PluginId, PluginManifest, ResourceHints,
-};
-use odyssey::kernel::resolver::{resolve, ResolveError, ResolvedBinding, ResolvedPlan};
+use odyssey::host::factory::CapabilityFactory;
+use odyssey::host::manifest::{CapabilityDecl, CapabilityRequirement, IsolationMode, PluginManifest, ResourceHints};
+use odyssey::kernel::PluginId;
+use odyssey::host::resolver::{resolve, ResolveError, ResolvedBinding, ResolvedPlan};
 
 // ---------------------------------------------------------------------------
 // Test fixtures

@@ -3,7 +3,7 @@
 //! A `Capability` minted with `calls_per_minute = N` denies the
 //! (N+1)-th call.
 
-use odyssey::capability::{OperationRights, QuotaSpec, Slot};
+use odyssey::kernel::{OperationRights, QuotaSpec, Slot};
 use odyssey::plugins::test_only::counter::CounterResource;
 use serde_json::json;
 

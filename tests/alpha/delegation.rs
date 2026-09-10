@@ -3,7 +3,7 @@
 //! A plugin (`BrokerResource`) holding a capability can mint a derived
 //! slot via `cspace.restrict`.
 
-use odyssey::capability::{OperationRights, Slot, SlotId};
+use odyssey::kernel::{OperationRights, Slot, SlotId};
 use odyssey::plugins::test_only::broker::BrokerResource;
 use odyssey::plugins::test_only::counter::CounterResource;
 use serde_json::json;

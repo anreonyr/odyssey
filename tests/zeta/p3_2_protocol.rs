@@ -16,11 +16,11 @@
 
 use std::sync::Arc;
 
-use odyssey::capability::{Capability, CapabilityBudget, CapKind, Resource};
-use odyssey::kernel::factory::CapabilityFactory;
-use odyssey::kernel::manifest_builder::ManifestBuilder as MB;
+use odyssey::kernel::{Capability, CapabilityBudget, CapKind, Resource};
+use odyssey::host::factory::CapabilityFactory;
+use odyssey::host::manifest::ManifestBuilder as MB;
 use odyssey::plugins::test_only::counter::{handler as counter_handler, CounterResource};
-use odyssey::capability::{AuthorityContract, Protocol};
+use odyssey::kernel::{AuthorityContract, Protocol};
 use serde_json::{json, Value};
 
 const TIMEOUT_MS: u32 = 5000;
@@ -72,8 +72,8 @@ fn dispatch_unchanged_with_or_without_protocol_metadata() {
     // Now invoke each cap with the same input via a Slot.
     // Since protocol is metadata-only, both caps produce the
     // same Result for identical input.
-    let slot_a = odyssey::capability::Slot::<CounterResource>::new(space.clone(), _cap_a);
-    let slot_b = odyssey::capability::Slot::<CounterResource>::new(space.clone(), _cap_b);
+    let slot_a = odyssey::kernel::Slot::<CounterResource>::new(space.clone(), _cap_a);
+    let slot_b = odyssey::kernel::Slot::<CounterResource>::new(space.clone(), _cap_b);
     let read_a = slot_a.invoke(json!({"op": "read"}));
     let read_b = slot_b.invoke(json!({"op": "read"}));
     assert_eq!(read_a, read_b, "protocol metadata must not affect read result");
@@ -141,8 +141,8 @@ fn authority_vocabulary_drives_dispatch_authority() {
     // (c) dispatching a `read` action and verifying it succeeds
     //     (the agent reads "READ" from authority.operation_for,
     //     finds the cap holds READ, and invokes).
-    use odyssey::kernel::manifest::PluginId;
-    use odyssey::kernel::resolver::{ResolvedBinding, ResolvedPlan};
+    use odyssey::kernel::PluginId;
+    use odyssey::host::resolver::{ResolvedBinding, ResolvedPlan};
     use odyssey::plugins::agent::handler_from_plan;
 
     let (space, factory) = crate::common::boot();
@@ -245,8 +245,8 @@ fn mint_counter_with_protocol(
     factory: &CapabilityFactory,
     cap_name: &str,
     protocol: Protocol,
-) -> odyssey::capability::SlotId {
-    let decl = odyssey::kernel::manifest::CapabilityDecl {
+) -> odyssey::kernel::SlotId {
+    let decl = odyssey::host::manifest::CapabilityDecl {
         name: cap_name.into(),
         in_type: "object".into(),
         out_type: "object".into(),
@@ -261,7 +261,7 @@ fn mint_counter_with_protocol(
     factory.mint::<CounterResource>(
         CapKind::Sync,
         &decl,
-        &odyssey::kernel::manifest::PluginId {
+        &odyssey::kernel::PluginId {
             name: "counter".into(),
             version: "0.1.0".into(),
         },

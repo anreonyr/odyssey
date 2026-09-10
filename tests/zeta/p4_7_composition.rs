@@ -14,8 +14,9 @@
 //! (`AgentResource::open`); different reachable → different
 //! outcomes.
 
-use odyssey::capability::{
-    CapabilityChunk, CapabilityRights, OperationRights, Reachable, Resource,
+use odyssey::host::resolver::Reachable;
+use odyssey::kernel::{
+    CapabilityChunk, CapabilityRights, OperationRights, Resource,
 };
 use odyssey::plugins::agent::{AgentResource, ProgramStep};
 use odyssey::plugins::database::{handler as database_handler, DatabaseResource};
@@ -28,19 +29,18 @@ use serde_json::{json, Value};
 // =========================================================================
 
 struct World {
-    space: odyssey::capability::CapabilitySpace,
-    echo_slot: odyssey::capability::SlotId,
-    database_slot: odyssey::capability::SlotId,
-    sandbox_slot: odyssey::capability::SlotId,
+    space: odyssey::kernel::CapabilitySpace,
+    echo_slot: odyssey::kernel::SlotId,
+    database_slot: odyssey::kernel::SlotId,
+    sandbox_slot: odyssey::kernel::SlotId,
 }
 
 fn build_world() -> World {
-    use odyssey::capability::cspace::CapabilitySpace;
-    use odyssey::capability::events::GraphEventBus;
-    use odyssey::kernel::factory::CapabilityFactory;
-    use odyssey::kernel::manifest::{
-        CapabilityDecl, IsolationMode, PluginId, PluginManifest,
-    };
+    use odyssey::kernel::space::CapabilitySpace;
+    use odyssey::kernel::space::events::GraphEventBus;
+    use odyssey::host::factory::CapabilityFactory;
+    use odyssey::host::manifest::{CapabilityDecl, IsolationMode, PluginManifest};
+    use odyssey::kernel::PluginId;
 
     let bus = GraphEventBus::default();
     let space = CapabilitySpace::with_bus(bus);
@@ -55,8 +55,8 @@ fn build_world() -> World {
             out_type: "any".into(),
             streaming: false,
             contract_name: "echo".into(),
-            authority: odyssey::capability::AuthorityContract::empty(),
-            protocol: odyssey::capability::Protocol::empty(),
+            authority: odyssey::kernel::AuthorityContract::empty(),
+            protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
         consumes: vec![],
@@ -64,10 +64,10 @@ fn build_world() -> World {
         resources: Default::default(),
     };
     let echo_slot = factory.mint::<EchoResource>(
-        odyssey::capability::CapKind::Sync,
+        odyssey::kernel::CapKind::Sync,
         &echo_decl.exposes[0],
         &echo_decl.plugin,
-        odyssey::capability::CapabilityBudget::new(5000),
+        odyssey::kernel::CapabilityBudget::new(5000),
         echo_handler(),
     );
 
@@ -80,10 +80,10 @@ fn build_world() -> World {
             out_type: "any".into(),
             streaming: false,
             contract_name: "database".into(),
-            authority: odyssey::capability::AuthorityContract::empty()
+            authority: odyssey::kernel::AuthorityContract::empty()
                 .with_action("read", "DB_READ")
                 .with_action("write", "DB_WRITE"),
-            protocol: odyssey::capability::Protocol::empty(),
+            protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
         consumes: vec![],
@@ -91,10 +91,10 @@ fn build_world() -> World {
         resources: Default::default(),
     };
     let db_slot = factory.mint::<DatabaseResource>(
-        odyssey::capability::CapKind::Sync,
+        odyssey::kernel::CapKind::Sync,
         &db_decl.exposes[0],
         &db_decl.plugin,
-        odyssey::capability::CapabilityBudget::new(5000),
+        odyssey::kernel::CapabilityBudget::new(5000),
         database_handler(),
     );
 
@@ -108,9 +108,9 @@ fn build_world() -> World {
             out_type: "any".into(),
             streaming: false,
             contract_name: "sandbox".into(),
-            authority: odyssey::capability::AuthorityContract::empty()
+            authority: odyssey::kernel::AuthorityContract::empty()
                 .with_action("execute", "EXECUTE"),
-            protocol: odyssey::capability::Protocol::empty(),
+            protocol: odyssey::kernel::Protocol::empty(),
         }],
         requires: vec![],
         consumes: vec![],
@@ -118,10 +118,10 @@ fn build_world() -> World {
         resources: Default::default(),
     };
     let sb_slot = factory.mint::<SandboxResource>(
-        odyssey::capability::CapKind::Sync,
+        odyssey::kernel::CapKind::Sync,
         &sb_decl.exposes[0],
         &sb_decl.plugin,
-        odyssey::capability::CapabilityBudget::new(5000),
+        odyssey::kernel::CapabilityBudget::new(5000),
         sandbox_handler(),
     );
 
@@ -144,7 +144,7 @@ async fn drain_events(mut rx: tokio::sync::mpsc::Receiver<CapabilityChunk>) -> V
 fn build_agent(
     name: &str,
     reachable: Vec<Reachable>,
-    space: odyssey::capability::CapabilitySpace,
+    space: odyssey::kernel::CapabilitySpace,
 ) -> std::sync::Arc<AgentResource> {
     std::sync::Arc::new(AgentResource::from_reachable(name, reachable, space))
 }
@@ -434,7 +434,7 @@ async fn three_sub_agents_running_concurrently_form_a_capability_graph() {
 
 #[tokio::test]
 async fn child_agent_observable_after_parent_revoke_tree() {
-    use odyssey::capability::{CapabilityRights, OperationRights};
+    use odyssey::kernel::{CapabilityRights, OperationRights};
 
     let world = build_world();
 
@@ -514,20 +514,20 @@ async fn child_agent_observable_after_parent_revoke_tree() {
 /// Drain helper local to edge test 4: count-based step_start
 /// drain (returns once `count` step_starts have been seen).
 async fn drain_until_step_starts_count(
-    rx: &mut tokio::sync::mpsc::Receiver<odyssey::capability::CapabilityChunk>,
+    rx: &mut tokio::sync::mpsc::Receiver<odyssey::kernel::CapabilityChunk>,
     count: usize,
 ) -> Vec<Value> {
     let mut events: Vec<Value> = Vec::new();
     let mut seen = 0usize;
     while seen < count {
         match tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv()).await {
-            Ok(Some(odyssey::capability::CapabilityChunk::Item(v))) => {
+            Ok(Some(odyssey::kernel::CapabilityChunk::Item(v))) => {
                 if v["event"] == "step_start" {
                     seen += 1;
                 }
                 events.push(v);
             }
-            Ok(Some(odyssey::capability::CapabilityChunk::Done)) => break,
+            Ok(Some(odyssey::kernel::CapabilityChunk::Done)) => break,
             Ok(None) => break,
             Err(_) => panic!("timed out waiting for step_starts; saw {events:?}"),
         }
