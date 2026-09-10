@@ -39,6 +39,7 @@ use crate::kernel::manifest::{CapabilityDecl, PluginId, PluginManifest};
 use crate::kernel::registry::Registry;
 use crate::kernel::resolver::{resolve, ResolvedPlan};
 use crate::plugins::{
+    database::{database_plugin, handler as database_handler, DatabaseResource},
     echo::{
         basic::{echo_plugin, handler as echo_handler, EchoResource},
         chain::{echo_chain_plugin, EchoChainResource},
@@ -71,6 +72,7 @@ const RUNTIME_PLUGINS: &[&str] = &[
     "echo_stream",
     "generator",
     "echo-chain",
+    "database",
 ];
 
 /// Returns the cordis `Plugin` activator for a runtime plugin
@@ -88,6 +90,7 @@ fn activator_for(name: &str) -> Option<Arc<dyn cordis::Plugin>> {
         "echo_stream" => Some(echo_stream_plugin()),
         "generator" => Some(generator_plugin()),
         "echo-chain" => Some(echo_chain_plugin()),
+        "database" => Some(database_plugin()),
         _ => None,
     }
 }
@@ -259,6 +262,9 @@ async fn mint_one_plugin(
             ).await
         }
         "echo-chain" => mint_echo_chain(ctx, factory, cspace, plan, m).await,
+        "database" => mint_simple::<DatabaseResource, _>(
+            ctx, factory, m, CapKind::Sync, "slot:database", |_, _| database_handler(),
+        ).await,
         // B1: instead of silently returning an empty vec, fail
         // loudly. `mint_runtime_plugins` already checked that
         // every RUNTIME_PLUGINS name has a loaded manifest; if
@@ -713,6 +719,7 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
 /// case `dir` would point at the wire-format drop-in.)
 fn load_manifests(_dir: &str) -> Result<Vec<PluginManifest>, Box<dyn std::error::Error>> {
     use crate::plugins::{
+        database::manifest as database_manifest,
         echo::{basic::manifest as echo_basic_manifest, chain::manifest as echo_chain_manifest, stream::manifest as echo_stream_manifest},
         generator::manifest as generator_manifest,
         reverse::manifest as reverse_manifest,
@@ -721,6 +728,7 @@ fn load_manifests(_dir: &str) -> Result<Vec<PluginManifest>, Box<dyn std::error:
     };
 
     let manifests = [
+        database_manifest(),
         echo_basic_manifest(),
         echo_chain_manifest(),
         echo_stream_manifest(),

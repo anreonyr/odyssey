@@ -22,6 +22,7 @@
 //! When the loader lands, the manifest moves back to
 //! `src/plugins/<name>/` and gains a real `mod.rs`.
 
+pub mod database;
 pub mod echo;
 pub mod generator;
 pub mod reverse;
