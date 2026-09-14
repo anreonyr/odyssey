@@ -658,6 +658,6 @@ use crate::core::identity::kind::CapKind as _CapKind;
 #[allow(unused_imports)]
 use crate::core::rights::rights::OperationRights as _OperationRights;
 #[allow(unused_imports)]
-use crate::capability::enforce::quota::QuotaKind as _QuotaKind;
+use crate::core::quota::quota::QuotaKind as _QuotaKind;
 #[allow(unused_imports)]
 use crate::core::meta::chunk::CapabilityChunk as _CapabilityChunk;

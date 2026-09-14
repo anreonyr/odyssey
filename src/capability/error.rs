@@ -12,7 +12,7 @@
 
 use std::fmt;
 
-use crate::capability::enforce::quota::QuotaKind;
+use crate::core::quota::quota::QuotaKind;
 use crate::core::identity::ids::SlotId;
 use crate::core::rights::rights::OperationRights;
 

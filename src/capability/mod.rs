@@ -8,7 +8,9 @@ pub mod error;
 pub mod handle;
 pub mod init;
 
-pub use enforce::quota::{CapabilityBudget, QuotaKind, QuotaSnapshot, QuotaSpec, QuotaState};
+pub use enforce::quota::{CapabilityBudget, QuotaState};
+// `QuotaSpec`, `QuotaKind`, `QuotaSnapshot` live in `core::quota`
+// (re-exported from the crate root as `crate::QuotaSpec` etc.).
 pub use enforce::space::{
     CapabilitySpace, DeriveKind, CapabilityEvent, GraphEventBus, CapabilityEventReceiver, RevokeMode,
     TryRecvError,

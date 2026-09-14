@@ -1,0 +1,78 @@
+//! Quota value types — `QuotaSpec`, `QuotaKind`, `QuotaSnapshot`.
+//!
+//! Phase 8 split: these are pure data types (no locking, no
+//! `Arc`, no runtime state) and belong in `core`. The
+//! runtime-state counterparts (`QuotaState`, `CapabilityBudget`)
+//! stay in `capability::enforce::quota` because they hold locks
+//! and depend on `Clock`.
+
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
+
+/// Declarative rate-limit specification.
+///
+/// `QuotaSpec` is the *static* declaration (immutable per
+/// capability derivation). `QuotaState` is the *dynamic*
+/// accounting object (`Arc<RwLock<...>>`) shared between the
+/// parent and every child.
+///
+/// Phase 5 keeps only `calls_per_minute` — the only field the
+/// kernel actually enforces. Phase 8: dropped `tokens_per_minute`
+/// / `bytes_per_minute` entirely (Phase 5 D5).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuotaSpec {
+    /// Maximum *calls* (sync invocations or stream opens) per
+    /// minute. 0 means unlimited.
+    pub calls_per_minute: u32,
+}
+
+impl QuotaSpec {
+    pub fn unlimited() -> Self {
+        Self::default()
+    }
+
+    pub fn with_calls_per_minute(mut self, n: u32) -> Self {
+        self.calls_per_minute = n;
+        self
+    }
+
+    /// A child quota is the *intersection* of parent and child
+    /// (seL4 attenuation — you cannot amplify quota either).
+    pub fn intersect(&self, other: &QuotaSpec) -> QuotaSpec {
+        QuotaSpec {
+            calls_per_minute: match (self.calls_per_minute, other.calls_per_minute) {
+                (0, x) | (x, 0) => x, // 0 = unlimited; treat as identity
+                (a, b) => a.min(b),
+            },
+        }
+    }
+
+    pub fn is_unlimited(&self) -> bool {
+        self.calls_per_minute == 0
+    }
+}
+
+/// Which quota axis a check exhausted. Phase 5 keeps only
+/// `Calls` — `Tokens` / `Bytes` were dead in the runtime path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QuotaKind {
+    Calls,
+}
+
+impl fmt::Display for QuotaKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Calls => write!(f, "calls"),
+        }
+    }
+}
+
+/// Snapshot used-this-minute for diagnostics / HTTP bridge.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct QuotaSnapshot {
+    pub calls_used: u32,
+    /// Last quota exhaustion, for diagnostics. Cleared on next
+    /// successful check.
+    pub last_exhausted: Option<QuotaKind>,
+}

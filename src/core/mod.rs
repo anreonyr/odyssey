@@ -26,6 +26,7 @@ pub mod contract;
 pub mod identity;
 pub mod manifest;
 pub mod meta;
+pub mod quota;
 pub mod rights;
 
 // Curated re-exports — the public surface of core.
@@ -43,4 +44,5 @@ pub use manifest::manifest::{
 };
 pub use meta::meta::{AuthorityContract, CapabilityAction, CapabilityMeta, Protocol};
 pub use meta::chunk::CapabilityChunk;
+pub use quota::quota::{QuotaKind, QuotaSnapshot, QuotaSpec};
 pub use rights::rights::{parse_operation, CapabilityRights, OperationRights};
