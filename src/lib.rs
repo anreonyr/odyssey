@@ -25,5 +25,4 @@ pub mod core;
 pub mod host;
 pub mod kernel;
 pub mod personality;
-pub mod plugins;
 pub mod runtime;
