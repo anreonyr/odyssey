@@ -1,5 +1,6 @@
-//! Metadata vocabulary — CapabilityChunk is the stream
-//! item type; CapabilityMeta + AuthorityContract + Protocol
-//! live alongside it in the next migration commit.
+//! Metadata vocabulary — CapabilityMeta, AuthorityContract,
+//! Protocol (the capability description), plus CapabilityChunk
+//! (the stream item type).
 
 pub mod chunk;
+pub mod meta;

@@ -8,8 +8,8 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::kernel::ids::CapabilityId;
-use crate::kernel::ids::PluginId;
+use crate::core::identity::ids::CapabilityId;
+use crate::core::identity::ids::PluginId;
 use crate::kernel::quota::QuotaSpec;
 
 /// Static description of a capability. Carried inside every token;

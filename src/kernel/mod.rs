@@ -39,23 +39,31 @@
 //! See `CHANGELOG.md` Phase 5 entry for the full list.
 
 // Phase 8: leaf value-type modules physically live under
-// `crate::core::*`; `#[path]` re-attaches them at their old
-// `kernel::*` paths so the rest of the codebase can migrate
-// incrementally without churn.
-#[path = "../core/identity/ids.rs"]
-pub mod ids;
-#[path = "../core/identity/kind.rs"]
-pub mod kind;
-#[path = "../core/clock/clock.rs"]
-pub mod clock;
-#[path = "../core/meta/chunk.rs"]
-pub mod chunk;
-#[path = "../core/rights/rights.rs"]
-pub mod rights;
+// `crate::core::*`. Inline `pub mod` blocks here re-export
+// from the canonical core path so the old `use crate::kernel::ids::*`
+// paths continue to work — and both paths point at the SAME
+// items (no duplicate type identity).
+pub mod ids {
+    pub use crate::core::identity::ids::*;
+}
+pub mod kind {
+    pub use crate::core::identity::kind::*;
+}
+pub mod clock {
+    pub use crate::core::clock::clock::*;
+}
+pub mod chunk {
+    pub use crate::core::meta::chunk::*;
+}
+pub mod meta {
+    pub use crate::core::meta::meta::*;
+}
+pub mod rights {
+    pub use crate::core::rights::rights::*;
+}
 
 pub mod cap;
 pub mod error;
-pub mod meta;
 pub mod quota;
 pub mod resource;
 pub mod slot;
