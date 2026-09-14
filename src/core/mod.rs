@@ -18,8 +18,11 @@
 //!   `CapabilityDecl`, `CapabilityRequirement`, `HostServiceRef`,
 //!   `IsolationMode`, `ResourceHints`, `ManifestError`, TOML
 //!   loader.
+//! - `contract` — abstract traits: `Resource`, `Builtin`,
+//!   `BuiltinFactory`.
 
 pub mod clock;
+pub mod contract;
 pub mod identity;
 pub mod manifest;
 pub mod meta;
@@ -30,6 +33,8 @@ pub mod rights;
 // folder name. So `core::clock::clock::Clock` etc. — verbose but
 // follows the strict-hierarchy rule.
 pub use clock::clock::{Clock, MockClock, SystemClock};
+pub use contract::builtin::BuiltinManifest;
+pub use contract::resource::Resource;
 pub use identity::ids::{CapabilityId, PluginId, SlotId};
 pub use identity::kind::CapKind;
 pub use manifest::manifest::{

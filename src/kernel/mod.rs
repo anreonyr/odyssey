@@ -36,9 +36,10 @@ pub mod error {
 pub mod quota {
     pub use crate::capability::enforce::quota::*;
 }
-pub mod resource {
-    pub use crate::capability::resource::*;
-}
+// Resource trait moved to core/contract/resource.rs in this commit.
+// `kernel::resource` no longer exists; consumers should depend on
+// `crate::core::contract::resource::Resource` (or the curated
+// `crate::core::Resource` re-export at the crate root).
 pub mod slot {
     pub use crate::capability::handle::slot::*;
 }
@@ -55,7 +56,6 @@ pub use ids::{CapabilityId, PluginId, SlotId};
 pub use kind::CapKind;
 pub use meta::{AuthorityContract, CapabilityAction, CapabilityMeta, Protocol};
 pub use quota::{CapabilityBudget, QuotaKind, QuotaSnapshot, QuotaSpec, QuotaState};
-pub use resource::Resource;
 pub use rights::{parse_operation, CapabilityRights, OperationRights};
 pub use slot::Slot;
 pub use space::{

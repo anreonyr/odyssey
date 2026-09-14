@@ -7,14 +7,18 @@
 //!
 //! Input is expected to be `{ "text": "..." }`; output is the
 //! reversed string. Any input that isn't a JSON object containing
-//! a `text` field produces a domain error (`Err("reverse: expected
-//! {\"text\": \"<string>\"}, got <shape>")`).
+//! a `text` field produces a domain error.
 
 use std::sync::Arc;
 
-use odyssey::capability::resource::Resource;
-use odyssey::core::identity::ids::PluginId;
+use odyssey::capability::enforce::quota::CapabilityBudget;
+use odyssey::core::Resource;
+use odyssey::core::contract::builtin::BuiltinManifest;
+use odyssey::core::identity::ids::{PluginId, SlotId};
+use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
+use odyssey::personality::lifecycle::mint::CapabilityFactory;
+use odyssey::personality::lifecycle::run::ReverseMint;
 use serde_json::{json, Value};
 
 /// Reverse resource — `invoke` reverses the `text` field of its
@@ -37,16 +41,41 @@ impl Resource for ReverseResource {
     }
 }
 
-/// Manifest for the reverse plugin.
-pub fn manifest() -> PluginManifest {
-    ManifestBuilder::new("reverse", "reverse", "reverse")
-        .host("dispatcher")
-        .action("reverse", "EXECUTE")
-        .timeout_ms(5000)
-        .build()
+pub struct ReverseBuiltin;
+
+impl BuiltinManifest for ReverseBuiltin {
+    fn manifest(&self) -> PluginManifest {
+        ManifestBuilder::new("reverse", "reverse", "reverse")
+            .host("dispatcher")
+            .action("reverse", "EXECUTE")
+            .timeout_ms(5000)
+            .build()
+    }
 }
 
-/// Construct the typed reverse handler.
-pub fn mint(_plugin: &PluginId, _decl: &CapabilityDecl) -> Arc<ReverseResource> {
-    Arc::new(ReverseResource)
+impl ReverseBuiltin {
+    pub fn mint(
+        &self,
+        factory: &CapabilityFactory,
+        plugin: &PluginId,
+        decl: &CapabilityDecl,
+        kind: CapKind,
+        budget: CapabilityBudget,
+    ) -> Result<SlotId, String> {
+        Ok(factory.mint(kind, decl, plugin, budget, Arc::new(ReverseResource)))
+    }
 }
+
+impl ReverseMint for ReverseBuiltin {
+    fn reverse_mint(
+        &self,
+        factory: &CapabilityFactory,
+        plugin: &PluginId,
+        decl: &CapabilityDecl,
+        kind: CapKind,
+        budget: CapabilityBudget,
+    ) -> Result<SlotId, String> {
+        self.mint(factory, plugin, decl, kind, budget)
+    }
+}
+

@@ -16,9 +16,14 @@
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
-use odyssey::capability::resource::Resource;
-use odyssey::core::identity::ids::PluginId;
+use odyssey::capability::enforce::quota::CapabilityBudget;
+use odyssey::core::Resource;
+use odyssey::core::contract::builtin::BuiltinManifest;
+use odyssey::core::identity::ids::{PluginId, SlotId};
+use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
+use odyssey::personality::lifecycle::mint::CapabilityFactory;
+use odyssey::personality::lifecycle::run::DatabaseMint;
 use serde_json::{json, Value};
 
 type Store = Arc<RwLock<HashMap<String, Value>>>;
@@ -69,22 +74,50 @@ impl Resource for DatabaseResource {
     }
 }
 
-/// Manifest for the database plugin.
-pub fn manifest() -> PluginManifest {
-    ManifestBuilder::new("database", "database", "database")
-        .host("dispatcher")
-        .action("get", "READ")
-        .action("set", "WRITE")
-        .action("delete", "WRITE")
-        .timeout_ms(5000)
-        .build()
+pub struct DatabaseBuiltin;
+
+impl BuiltinManifest for DatabaseBuiltin {
+    fn manifest(&self) -> PluginManifest {
+        ManifestBuilder::new("database", "database", "database")
+            .host("dispatcher")
+            .action("get", "READ")
+            .action("set", "WRITE")
+            .action("delete", "WRITE")
+            .timeout_ms(5000)
+            .build()
+    }
 }
 
-/// Construct the typed database handler. Returns an
-/// `Arc<DatabaseResource>` whose backing store is shared with
-/// other clones.
-pub fn mint(_plugin: &PluginId, _decl: &CapabilityDecl) -> Arc<DatabaseResource> {
-    Arc::new(DatabaseResource {
-        store: Arc::new(RwLock::new(HashMap::new())),
-    })
+impl DatabaseBuiltin {
+    pub fn mint(
+        &self,
+        factory: &CapabilityFactory,
+        plugin: &PluginId,
+        decl: &CapabilityDecl,
+        kind: CapKind,
+        budget: CapabilityBudget,
+    ) -> Result<SlotId, String> {
+        Ok(factory.mint(
+            kind,
+            decl,
+            plugin,
+            budget,
+            Arc::new(DatabaseResource {
+                store: Arc::new(RwLock::new(HashMap::new())),
+            }),
+        ))
+    }
+}
+
+impl DatabaseMint for DatabaseBuiltin {
+    fn database_mint(
+        &self,
+        factory: &CapabilityFactory,
+        plugin: &PluginId,
+        decl: &CapabilityDecl,
+        kind: CapKind,
+        budget: CapabilityBudget,
+    ) -> Result<SlotId, String> {
+        self.mint(factory, plugin, decl, kind, budget)
+    }
 }

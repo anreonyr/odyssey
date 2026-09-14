@@ -23,7 +23,7 @@ use crate::core::manifest::manifest::CapabilityDecl;
 use crate::core::rights::rights::{CapabilityRights, OperationRights};
 use crate::kernel::cap::typed::Capability;
 use crate::kernel::quota::CapabilityBudget;
-use crate::kernel::resource::Resource;
+use crate::core::contract::resource::Resource;
 use crate::kernel::space::CapabilitySpace;
 
 // ---------------------------------------------------------------------------

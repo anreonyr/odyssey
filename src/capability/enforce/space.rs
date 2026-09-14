@@ -30,7 +30,7 @@ use crate::core::meta::meta::CapabilityMeta;
 use crate::core::rights::rights::CapabilityRights;
 
 use crate::capability::handle::cap::Capability;
-use crate::capability::resource::Resource;
+use crate::core::contract::resource::Resource;
 
 // ---------------------------------------------------------------------------
 // GraphEvent — observability vocabulary

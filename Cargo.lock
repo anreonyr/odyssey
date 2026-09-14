@@ -344,6 +344,7 @@ dependencies = [
  "cordis-rust",
  "futures-core",
  "futures-util",
+ "odyssey-builtins",
  "semver",
  "serde",
  "serde_json",

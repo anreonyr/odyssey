@@ -31,7 +31,7 @@ use crate::core::identity::ids::{CapabilityId, SlotId};
 use crate::core::identity::kind::CapKind;
 use crate::core::meta::meta::CapabilityMeta;
 use crate::capability::enforce::quota::CapabilityBudget;
-use crate::capability::resource::Resource;
+use crate::core::contract::resource::Resource;
 use crate::core::rights::rights::{CapabilityRights, OperationRights};
 
 /// Typed, owned handle to a single capability slot. `Arc<Capability<R>>`

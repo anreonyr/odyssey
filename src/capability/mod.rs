@@ -7,7 +7,6 @@ pub mod enforce;
 pub mod error;
 pub mod handle;
 pub mod init;
-pub mod resource;
 
 pub use enforce::quota::{CapabilityBudget, QuotaKind, QuotaSnapshot, QuotaSpec, QuotaState};
 pub use enforce::space::{
@@ -18,4 +17,4 @@ pub use error::CapabilityError;
 pub use handle::cap::{AnyCapability, Capability};
 pub use handle::slot::Slot;
 pub use init::new_kernel;
-pub use resource::Resource;
+// `Resource` trait moved to core/contract/resource.rs in Phase 8.
