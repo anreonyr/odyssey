@@ -8,9 +8,9 @@
 //! tests/{alpha,beta,gamma,delta,epsilon,zeta}/` — this binary
 //! is the runtime.
 
-use odyssey::runtime::lifecycle;
+use odyssey::personality::lifecycle::run::run;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    lifecycle::run().await
+    run().await
 }

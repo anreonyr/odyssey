@@ -1,9 +1,14 @@
-//! HTTP bridge — enumerates registered capabilities from the
-//! `CapabilitySpace` and routes invocations through them.
+//! Personality / lifecycle / serve — HTTP bridge for capability dispatch.
 //!
-//!   GET  /api/caps    →  enumerate capabilities
-//!   POST /api/invoke  →  invoke a sync capability
-//!   POST /api/stream  →  open a streaming capability (SSE)
+//! Phase 8: merged the Phase 5 split (`runtime/http_bridge.rs`
+//! for the axum router + `runtime/lifecycle/shutdown.rs` for
+//! the spawn wrapper) into one cohesive module.
+//!
+//! Routes:
+//!
+//! - `GET  /api/caps`    → list capabilities
+//! - `POST /api/invoke`  → invoke a sync capability
+//! - `POST /api/stream`  → open a streaming capability (SSE)
 
 use std::convert::Infallible;
 use std::future::Future;
@@ -18,11 +23,14 @@ use axum::{
     routing::{get, post},
     Router,
 };
-use crate::kernel::{CapabilityChunk, CapabilitySpace};
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tokio::sync::mpsc;
+
+use crate::capability::enforce::space::CapabilitySpace;
+use crate::core::meta::chunk::CapabilityChunk;
+use crate::core::meta::meta::CapabilityMeta;
 
 #[derive(Clone)]
 struct AppState {
@@ -57,11 +65,6 @@ struct ErrorResp {
 }
 
 pub fn router(cspace: CapabilitySpace) -> Router {
-    // Phase 5 m6: the `Context` parameter was carried over from
-    // the Phase 4 router but never consulted by any of the
-    // handlers (the HTTP bridge talks to the cspace directly).
-    // Removed; the parameter was always suppressed with `let _ =
-    // ctx;` and removing it eliminates the suppression as well.
     Router::new()
         .route("/", get(index))
         .route("/api/caps", get(list_caps))
@@ -71,7 +74,11 @@ pub fn router(cspace: CapabilitySpace) -> Router {
 }
 
 async fn index() -> impl IntoResponse {
-    Html(include_str!("../../frontend/index.html"))
+    // Phase 8: the HTML UI moves out of the binary's
+    // `include_str!` — the example binary now reads it from
+    // `examples/frontend/index.html` at runtime. The library
+    // stays UI-free.
+    Html(include_str!("../../../examples/frontend/index.html"))
 }
 
 async fn list_caps(State(state): State<AppState>) -> Json<Vec<CapInfo>> {
@@ -80,7 +87,7 @@ async fn list_caps(State(state): State<AppState>) -> Json<Vec<CapInfo>> {
             .cspace
             .enumerate()
             .into_iter()
-            .map(|m| CapInfo {
+            .map(|m: CapabilityMeta| CapInfo {
                 name: m.name.clone(),
                 id: m.id.to_string(),
                 streaming: m.streaming,
@@ -184,4 +191,22 @@ pub async fn serve(
         .await
         .expect("serve");
     eprintln!("[http] shut down");
+}
+
+/// Spawn the HTTP bridge on `addr` and return the task handle.
+///
+/// The bridge runs until either side returns from the serve
+/// future. We pass a Ctrl-C future to `serve` so the orchestrator
+/// can shut the bridge down by simply dropping the awaiter.
+pub fn spawn_http_bridge(addr: SocketAddr, cspace: CapabilitySpace) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        serve(
+            addr,
+            cspace,
+            async {
+                let _ = tokio::signal::ctrl_c().await;
+            },
+        )
+        .await;
+    })
 }
