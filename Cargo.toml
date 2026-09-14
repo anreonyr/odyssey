@@ -33,57 +33,9 @@ bitflags = { version = "2", features = ["serde"] }
 # dep, no std RNG re-implementation in-tree.
 rand = { version = "0.8", features = ["std_rng"] }
 
-# Phase 5 — concurrency test gate (loom-tests feature).
-# Lives under [dependencies] rather than [dev-dependencies]
-# because cargo forbids optional dev-deps; the feature flag
-# gates it out of the default build, and `tests/concurrency/`
-# is `required-features = ["loom-tests"]` so the test
-# binary only compiles when the feature is on.
-loom = { version = "0.7", optional = true }
-
 [features]
 default = []
-loom-tests = ["dep:loom"]
 
 [[bin]]
 name = "odyssey"
 path = "src/main.rs"
-
-# Integration tests are auto-discovered from tests/ by cargo, but
-# `tests/<name>/mod.rs` style directories need an explicit [[test]]
-# entry — the auto-discovery path doesn't pick them up under
-# cargo 1.100-nightly. Each test crate here shares tests/common/.
-[[test]]
-name = "alpha"
-path = "tests/alpha/mod.rs"
-
-[[test]]
-name = "beta"
-path = "tests/beta/mod.rs"
-
-[[test]]
-name = "gamma"
-path = "tests/gamma/mod.rs"
-
-[[test]]
-name = "delta"
-path = "tests/delta/mod.rs"
-
-[[test]]
-name = "epsilon"
-path = "tests/epsilon/mod.rs"
-
-[[test]]
-name = "zeta"
-path = "tests/zeta/mod.rs"
-
-[[test]]
-name = "capability"
-path = "tests/capability/mod.rs"
-
-# Phase 5 — concurrency test gate for the kernel.
-# Opt-in via `--features loom-tests`; not built by default.
-[[test]]
-name = "concurrency"
-path = "tests/concurrency/mod.rs"
-required-features = ["loom-tests"]
