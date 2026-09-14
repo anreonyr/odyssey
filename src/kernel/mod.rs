@@ -7,12 +7,18 @@
 //!
 //! Submodules:
 //!
-//! - `ids` — `CapabilityId`, `SlotId`, `PluginId`. Pure value types.
-//! - `kind` — `CapKind` (sync vs stream).
-//! - `rights` — `OperationRights` + `CapabilityRights` + `parse_operation`.
+//! Phase 8 split: the leaf value-type modules (`ids`, `kind`,
+//! `clock`, `chunk`, `rights`) have been moved to `crate::core::*`.
+//! The kernel module is now a thin re-export shim for those
+//! modules and a real implementation site for the rest. This
+//! keeps existing `use crate::kernel::ids::CapabilityId` import
+//! paths working during the multi-commit migration.
+//!
+//! Submodules:
+//!
+//! - `ids`, `kind`, `clock`, `chunk`, `rights` — re-export shims
+//!   pointing at the moved files under `crate::core::*`.
 //! - `meta` — `CapabilityMeta` + `AuthorityContract` + `Protocol`.
-//! - `chunk` — `CapabilityChunk` (stream item enum).
-//! - `clock` — `Clock` trait + `SystemClock` + `MockClock`.
 //! - `error` — `CapabilityError` (typed variants).
 //! - `resource` — `Resource` trait.
 //! - `quota` — `QuotaSpec` + `QuotaState` + `CapabilityBudget`.
@@ -32,16 +38,26 @@
 //! D2, M1, D3, D1, M2, M3, M4, n1, n3, R1, R4, R5, R6, R7, m3.
 //! See `CHANGELOG.md` Phase 5 entry for the full list.
 
-pub mod cap;
-pub mod chunk;
-pub mod clock;
-pub mod error;
+// Phase 8: leaf value-type modules physically live under
+// `crate::core::*`; `#[path]` re-attaches them at their old
+// `kernel::*` paths so the rest of the codebase can migrate
+// incrementally without churn.
+#[path = "../core/identity/ids.rs"]
 pub mod ids;
+#[path = "../core/identity/kind.rs"]
 pub mod kind;
+#[path = "../core/clock/clock.rs"]
+pub mod clock;
+#[path = "../core/meta/chunk.rs"]
+pub mod chunk;
+#[path = "../core/rights/rights.rs"]
+pub mod rights;
+
+pub mod cap;
+pub mod error;
 pub mod meta;
 pub mod quota;
 pub mod resource;
-pub mod rights;
 pub mod slot;
 pub mod space;
 
