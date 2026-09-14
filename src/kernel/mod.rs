@@ -59,7 +59,7 @@ pub use quota::{CapabilityBudget, QuotaKind, QuotaSnapshot, QuotaSpec, QuotaStat
 pub use rights::{parse_operation, CapabilityRights, OperationRights};
 pub use slot::Slot;
 pub use space::{
-    CapabilitySpace, DeriveKind, GraphEvent, GraphEventBus, GraphEventReceiver,
+    CapabilitySpace, DeriveKind, CapabilityEvent, GraphEventBus, CapabilityEventReceiver,
     TryRecvError,
 };
 // CapabilityGraph was deleted in the Phase 8 cleanup (zero

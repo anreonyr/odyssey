@@ -16,7 +16,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::capability::enforce::quota::CapabilityBudget;
-use crate::capability::enforce::space::{CapabilitySpace, GraphEvent};
+use crate::capability::enforce::space::CapabilitySpace;
+use crate::personality::lifecycle::lifecycle_event::{LifecycleEvent, LifecycleEventBus};
 use crate::capability::init::new_kernel;
 use crate::core::contract::resource::Resource;
 use crate::core::clock::clock::SystemClock;
@@ -77,10 +78,11 @@ where
     eprintln!("[main] press Ctrl-C to stop");
     let _ = server_handle.await;
 
-    // 5. Teardown.
-    cspace.publish_event(GraphEvent::ShutdownStarted);
-    ruin_runtime_plugins(&cspace, &plan, &minted).await;
-    cspace.publish_event(GraphEvent::ShutdownCompleted {
+    // 5. Teardown — lifecycle events go to the personality bus.
+    let lifecycle = LifecycleEventBus::new();
+    let _ = lifecycle.publish(LifecycleEvent::ShutdownStarted);
+    ruin_runtime_plugins(&cspace, &lifecycle, &plan, &minted).await;
+    let _ = lifecycle.publish(LifecycleEvent::ShutdownCompleted {
         remaining_slots: cspace.len(),
     });
     ctx.stop().await;

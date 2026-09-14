@@ -25,12 +25,14 @@
 
 use std::collections::HashMap;
 
-use crate::capability::enforce::space::{CapabilitySpace, GraphEvent};
+use crate::capability::enforce::space::CapabilitySpace;
+use crate::personality::lifecycle::lifecycle_event::{LifecycleEvent, LifecycleEventBus};
 use crate::core::identity::ids::{PluginId, SlotId};
 use crate::personality::composition::resolve::ResolvedPlan;
 
 pub async fn ruin_runtime_plugins(
     cspace: &CapabilitySpace,
+    lifecycle: &LifecycleEventBus,
     plan: &ResolvedPlan,
     minted: &HashMap<PluginId, Vec<SlotId>>,
 ) {
@@ -39,16 +41,16 @@ pub async fn ruin_runtime_plugins(
         let Some(slot_ids) = minted.get(plugin_id) else {
             continue;
         };
-        // Phase 3 P3.7 — emit PluginDeactivated before
-        // revoking. The subsequent `revoke_tree` calls emit
-        // Revoked + RevokeTree events from cspace. Order:
-        //   PluginDeactivated { plugin }
+        // Phase 8 split: lifecycle events go to the
+        // personality's own bus, not the kernel's capability bus.
+        // Order:
+        //   LifecycleEvent::PluginDeactivated { plugin }
         //   (per slot:)
-        //     Revoked { slot, capability }
-        //     RevokeTree { root, total }
+        //     CapabilityEvent::Revoked { slot, capability }
+        //     CapabilityEvent::RevokeTree { root, total }
         // — one PluginDeactivated per plugin, then per-slot
         // pairs of Revoked + RevokeTree.
-        cspace.publish_event(GraphEvent::PluginDeactivated {
+        let _ = lifecycle.publish(LifecycleEvent::PluginDeactivated {
             plugin: plugin_id.clone(),
         });
         let mut total_revoked = 0usize;

@@ -10,7 +10,7 @@ pub mod init;
 
 pub use enforce::quota::{CapabilityBudget, QuotaKind, QuotaSnapshot, QuotaSpec, QuotaState};
 pub use enforce::space::{
-    CapabilitySpace, DeriveKind, GraphEvent, GraphEventBus, GraphEventReceiver, RevokeMode,
+    CapabilitySpace, DeriveKind, CapabilityEvent, GraphEventBus, CapabilityEventReceiver, RevokeMode,
     TryRecvError,
 };
 pub use error::CapabilityError;

@@ -33,12 +33,11 @@ use crate::capability::handle::cap::Capability;
 use crate::core::contract::resource::Resource;
 
 // ---------------------------------------------------------------------------
-// GraphEvent — observability vocabulary
+// CapabilityEvent — kernel-side observability vocabulary
 // ---------------------------------------------------------------------------
 
 /// Default channel capacity. 256 events covers any plausible
-/// boot or teardown sequence (we emit ≤ 4 events per plugin
-/// + 2 shutdown markers, so 64 plugins fit comfortably).
+/// boot or teardown sequence.
 pub const DEFAULT_CAPACITY: usize = 256;
 
 /// How a derived cap was produced from its parent.
@@ -55,10 +54,14 @@ pub enum DeriveKind {
     Transfer,
 }
 
-/// One graph mutation. The boot pipeline and the cspace both
-/// publish these; receivers see the full timeline.
+/// One capability-graph mutation. Phase 8 split: lifecycle
+/// events (`PluginActivated`, `PluginDeactivated`,
+/// `ShutdownStarted`, `ShutdownCompleted`) moved out to
+/// `personality::LifecycleEvent` because the kernel has no
+/// knowledge of "plugins" or "shutdown" — those are
+/// personality concerns.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GraphEvent {
+pub enum CapabilityEvent {
     Minted {
         plugin: PluginId,
         slot: SlotId,
@@ -78,24 +81,14 @@ pub enum GraphEvent {
         root: SlotId,
         total: usize,
     },
-    PluginActivated {
-        plugin: PluginId,
-    },
-    PluginDeactivated {
-        plugin: PluginId,
-    },
-    ShutdownStarted,
-    ShutdownCompleted {
-        remaining_slots: usize,
-    },
 }
 
-pub type GraphEventReceiver = tokio::sync::broadcast::Receiver<GraphEvent>;
+pub type CapabilityEventReceiver = tokio::sync::broadcast::Receiver<CapabilityEvent>;
 pub type TryRecvError = tokio::sync::broadcast::error::TryRecvError;
 
 #[derive(Clone)]
 pub struct GraphEventBus {
-    tx: tokio::sync::broadcast::Sender<GraphEvent>,
+    tx: tokio::sync::broadcast::Sender<CapabilityEvent>,
 }
 
 impl GraphEventBus {
@@ -108,11 +101,11 @@ impl GraphEventBus {
         Self { tx }
     }
 
-    pub fn subscribe(&self) -> GraphEventReceiver {
+    pub fn subscribe(&self) -> CapabilityEventReceiver {
         self.tx.subscribe()
     }
 
-    pub fn publish(&self, ev: GraphEvent) -> Result<usize, GraphEvent> {
+    pub fn publish(&self, ev: CapabilityEvent) -> Result<usize, CapabilityEvent> {
         self.tx.send(ev).map_err(|e| e.0)
     }
 
@@ -215,7 +208,7 @@ impl CapabilitySpace {
         }
     }
 
-    pub fn subscribe(&self) -> GraphEventReceiver {
+    pub fn subscribe(&self) -> CapabilityEventReceiver {
         self.inner.events.subscribe()
     }
 
@@ -263,7 +256,7 @@ impl CapabilitySpace {
         drop(names);
         drop(parents);
 
-        self.publish_event(GraphEvent::Minted {
+        self.publish_event(CapabilityEvent::Minted {
             plugin,
             slot,
             capability: name,
@@ -436,7 +429,7 @@ impl CapabilitySpace {
         revoke_tree(self, root)
     }
 
-    pub fn publish_event(&self, ev: GraphEvent) {
+    pub fn publish_event(&self, ev: CapabilityEvent) {
         let _ = self.inner.events.publish(ev);
     }
 
@@ -565,7 +558,7 @@ fn derive_with<R: Resource>(
     let new_id = space.next_derived_id();
     let derived = source.derive(rights, new_id);
     let new_slot = space.install_derived(from, derived, new_name)?;
-    space.publish_event(GraphEvent::Derived {
+    space.publish_event(CapabilityEvent::Derived {
         parent: from,
         child: new_slot,
         kind,
@@ -616,7 +609,7 @@ fn revoke_single(space: &CapabilitySpace, slot: SlotId) -> bool {
         if let Some(cap) = cap_for_marker {
             cap.set_revoked_dyn(true);
         }
-        space.publish_event(GraphEvent::Revoked {
+        space.publish_event(CapabilityEvent::Revoked {
             slot,
             capability: cap_name,
         });
@@ -652,7 +645,7 @@ pub fn revoke_tree(space: &CapabilitySpace, root: SlotId) -> usize {
             removed += 1;
         }
     }
-    space.publish_event(GraphEvent::RevokeTree { root, total: removed });
+    space.publish_event(CapabilityEvent::RevokeTree { root, total: removed });
     removed
 }
 
