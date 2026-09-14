@@ -1,1 +1,11 @@
-// Personality — orchestration.\n//\n// Placeholder during the Phase 8 migration.
+//! Personality — orchestration.
+//!
+//! Phase 8 split: personality holds the
+//! planner-then-executor split.
+//!
+//! - `composition` — pure computation step (resolve manifest
+//!   graph into mint order + binding table).
+//! - `lifecycle` — action step (mint, ruin, serve_http).
+//!   Added in a later commit.
+
+pub mod composition;
