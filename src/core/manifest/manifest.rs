@@ -147,9 +147,15 @@ pub struct HostServiceRef {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ResourceHints {
-    pub cpu: Option<String>,
-    pub mem_mb: Option<u32>,
-    pub io_bps: Option<u64>,
+    /// Per-call wall-clock budget in milliseconds. The only field
+    /// the kernel actually uses.
+    ///
+    /// Phase 8 cleanup: `cpu`, `mem_mb`, `io_bps` were serde-
+    /// decorated but had zero readers anywhere in `src/`. Same
+    /// family of dead code as Phase 5 D5 (the `tokens_per_minute` /
+    /// `bytes_per_minute` quota fields). Serde's
+    /// `deny_unknown_fields = false` silently drops them on load
+    /// so no manifest breaks.
     pub timeout_ms: Option<u32>,
 }
 
