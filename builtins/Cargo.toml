@@ -1,0 +1,9 @@
+[package]
+name = "odyssey-builtins"
+version = "0.1.0"
+edition = "2024"
+description = "Built-in capability plugins for odyssey (echo, reverse, database)."
+
+[dependencies]
+odyssey = { path = ".." }
+serde_json = "1"

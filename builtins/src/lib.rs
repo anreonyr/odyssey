@@ -1,0 +1,23 @@
+//! Built-in capability plugins for odyssey.
+//!
+//! Phase 8 re-creates three of the Phase 5 `plugins/` deleted
+//! in commit 12 — the simplest ones, kept as workspace-member
+//! builtins so the library stays clean of any concrete plugin
+//! code.
+//!
+//! Each builtin exports:
+//! - `manifest()` — a typed `PluginManifest` for the personality
+//!   layer to resolve and mint.
+//! - `mint()` — constructs the typed `Resource` handler that
+//!   gets wrapped into a `Capability<R>` by the personality
+//!   factory.
+//!
+//! Builtins:
+//! - `echo` — pass-through (returns input verbatim).
+//! - `reverse` — string reverse.
+//! - `database` — key-value store with `get` / `set` / `delete`
+//!   operations.
+
+pub mod database;
+pub mod echo;
+pub mod reverse;
