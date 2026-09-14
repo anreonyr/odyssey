@@ -145,7 +145,7 @@ pub async fn activate_runtime_plugins(
                 // time; this marks the plugin's lifecycle event
                 // (the cordis handler returned Ok).
                 cspace.publish_event(
-                    crate::kernel::space::events::GraphEvent::PluginActivated {
+                    crate::capability::enforce::space::GraphEvent::PluginActivated {
                         plugin: plugin_id.clone(),
                     },
                 );

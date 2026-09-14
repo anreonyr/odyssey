@@ -6,7 +6,7 @@
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-use crate::kernel::chunk::CapabilityChunk;
+use crate::core::meta::chunk::CapabilityChunk;
 
 /// The kernel-side shape of a resource. Plugin handlers implement
 /// one or both of `invoke` / `open`; default impls return

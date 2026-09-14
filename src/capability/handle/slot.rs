@@ -8,24 +8,24 @@ use std::sync::Arc;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-use crate::kernel::cap::Capability;
-use crate::kernel::chunk::CapabilityChunk;
-use crate::kernel::error::CapabilityError;
-use crate::kernel::ids::SlotId;
-use crate::kernel::kind::CapKind;
-use crate::kernel::meta::CapabilityMeta;
-use crate::kernel::resource::Resource;
-use crate::kernel::rights::{CapabilityRights, OperationRights};
+use crate::capability::handle::cap::Capability;
+use crate::core::meta::chunk::CapabilityChunk;
+use crate::capability::error::CapabilityError;
+use crate::core::identity::ids::SlotId;
+use crate::core::identity::kind::CapKind;
+use crate::core::meta::meta::CapabilityMeta;
+use crate::capability::resource::Resource;
+use crate::core::rights::rights::{CapabilityRights, OperationRights};
 
 /// Typed, unforgeable reference to a slot.
 pub struct Slot<R: Resource> {
-    space: super::space::CapabilitySpace,
+    space: crate::capability::enforce::space::CapabilitySpace,
     id: SlotId,
     _phantom: PhantomData<R>,
 }
 
 impl<R: Resource> Slot<R> {
-    pub fn new(space: super::space::CapabilitySpace, id: SlotId) -> Self {
+    pub fn new(space: crate::capability::enforce::space::CapabilitySpace, id: SlotId) -> Self {
         Self {
             space,
             id,

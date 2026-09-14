@@ -64,7 +64,7 @@ pub async fn ruin_runtime_plugins(
         // ζ.17 (multi_slot_plugin_shutdown) for the multi-slot
         // case.
         cspace.publish_event(
-            crate::kernel::space::events::GraphEvent::PluginDeactivated {
+            crate::capability::enforce::space::GraphEvent::PluginDeactivated {
                 plugin: plugin_id.clone(),
             },
         );

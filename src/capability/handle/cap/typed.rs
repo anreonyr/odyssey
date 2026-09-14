@@ -24,15 +24,15 @@ use std::sync::Arc;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-use crate::kernel::chunk::CapabilityChunk;
-use crate::kernel::clock::Clock;
-use crate::kernel::error::CapabilityError;
-use crate::kernel::ids::{CapabilityId, SlotId};
-use crate::kernel::kind::CapKind;
-use crate::kernel::meta::CapabilityMeta;
-use crate::kernel::quota::CapabilityBudget;
-use crate::kernel::resource::Resource;
-use crate::kernel::rights::{CapabilityRights, OperationRights};
+use crate::core::meta::chunk::CapabilityChunk;
+use crate::core::clock::clock::Clock;
+use crate::capability::error::CapabilityError;
+use crate::core::identity::ids::{CapabilityId, SlotId};
+use crate::core::identity::kind::CapKind;
+use crate::core::meta::meta::CapabilityMeta;
+use crate::capability::enforce::quota::CapabilityBudget;
+use crate::capability::resource::Resource;
+use crate::core::rights::rights::{CapabilityRights, OperationRights};
 
 /// Typed, owned handle to a single capability slot. `Arc<Capability<R>>`
 /// is what the kernel stores; `Slot<R>::capability()` returns one

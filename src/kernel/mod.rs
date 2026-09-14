@@ -1,48 +1,10 @@
-//! Kernel — the pure capability core.
+//! Phase 8: re-export shim for the legacy kernel paths.
 //!
-//! Phase 5: this module is the **pure kernel**. It contains no I/O,
-//! no `Instant::now()` direct calls (those go through `clock::Clock`),
-//! no filesystem, no tokio runtime (except where `tokio::sync::mpsc`
-//! is the canonical stream-channel type — that migration is deferred).
-//!
-//! Submodules:
-//!
-//! Phase 8 split: the leaf value-type modules (`ids`, `kind`,
-//! `clock`, `chunk`, `rights`) have been moved to `crate::core::*`.
-//! The kernel module is now a thin re-export shim for those
-//! modules and a real implementation site for the rest. This
-//! keeps existing `use crate::kernel::ids::CapabilityId` import
-//! paths working during the multi-commit migration.
-//!
-//! Submodules:
-//!
-//! - `ids`, `kind`, `clock`, `chunk`, `rights` — re-export shims
-//!   pointing at the moved files under `crate::core::*`.
-//! - `meta` — `CapabilityMeta` + `AuthorityContract` + `Protocol`.
-//! - `error` — `CapabilityError` (typed variants).
-//! - `resource` — `Resource` trait.
-//! - `quota` — `QuotaSpec` + `QuotaState` + `CapabilityBudget`.
-//! - `cap` — `Capability<R>` (typed) + `AnyCapability` (erased).
-//! - `slot` — `Slot<R>` (unforgeable typed reference).
-//! - `space` — `CapabilitySpace` (the namespace) + events + graph + namespace helpers.
-//!
-//! ## Phase 5 dependencies
-//!
-//! - `kernel` → nothing (it is a leaf in the dependency graph; host
-//!   and runtime depend on it, not the other way around).
-//! - `host` → depends on `kernel`.
-//! - `runtime` → depends on `host` and `kernel`.
-//!
-//! ## Phase 5 fixes included in this module
-//!
-//! D2, M1, D3, D1, M2, M3, M4, n1, n3, R1, R4, R5, R6, R7, m3.
-//! See `CHANGELOG.md` Phase 5 entry for the full list.
+//! After this commit the kernel layer physically lives under
+//! `crate::capability::*`. This shim re-exports the same items
+//! at the old `kernel::*` paths so the rest of the codebase
+//! (runtime/, plugins/, tests/) can migrate incrementally.
 
-// Phase 8: leaf value-type modules physically live under
-// `crate::core::*`. Inline `pub mod` blocks here re-export
-// from the canonical core path so the old `use crate::kernel::ids::*`
-// paths continue to work — and both paths point at the SAME
-// items (no duplicate type identity).
 pub mod ids {
     pub use crate::core::identity::ids::*;
 }
@@ -62,12 +24,27 @@ pub mod rights {
     pub use crate::core::rights::rights::*;
 }
 
-pub mod cap;
-pub mod error;
-pub mod quota;
-pub mod resource;
-pub mod slot;
-pub mod space;
+// Capability impl types — were inline modules, now re-exports from
+// `crate::capability::*`. The modules themselves stay accessible at
+// `kernel::cap::*` etc. so existing call sites compile unchanged.
+pub mod cap {
+    pub use crate::capability::handle::cap::*;
+}
+pub mod error {
+    pub use crate::capability::error::*;
+}
+pub mod quota {
+    pub use crate::capability::enforce::quota::*;
+}
+pub mod resource {
+    pub use crate::capability::resource::*;
+}
+pub mod slot {
+    pub use crate::capability::handle::slot::*;
+}
+pub mod space {
+    pub use crate::capability::enforce::space::*;
+}
 
 // Curated re-exports — the public surface of the kernel.
 pub use cap::{AnyCapability, Capability};
@@ -82,7 +59,9 @@ pub use resource::Resource;
 pub use rights::{parse_operation, CapabilityRights, OperationRights};
 pub use slot::Slot;
 pub use space::{
-    CapabilityGraph, CapabilitySpace, DeriveKind, GraphEvent, GraphEventBus, GraphEventReceiver,
+    CapabilitySpace, DeriveKind, GraphEvent, GraphEventBus, GraphEventReceiver,
     TryRecvError,
 };
-
+// CapabilityGraph was deleted in the Phase 8 cleanup (zero
+// production callers; only tests used it). The legacy re-export
+// is removed to force callers to drop their dependency.

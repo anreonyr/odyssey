@@ -1,29 +1,110 @@
-//! Quota accounting state. Sliding-window, held behind `Arc` so
-//! derived caps share the parent's bucket.
+//! Quota subsystem — `QuotaSpec` (declaration) + `QuotaState` (accounting)
+//! + `CapabilityBudget` (per-call ceiling + wall-clock counter).
 //!
-//! Phase 5:
-//!   - `tokens_per_minute` / `bytes_per_minute` removed (D5).
-//!   - `try_tokens` / `try_bytes` removed (D5).
-//!   - `Instant::now()` replaced with `Clock::now()` injection.
-//!   - `QuotaSpec` is now `{ calls_per_minute: u32 }` only.
-//!
-//! `evict`'s dead `len` closure parameter is gone (n-M5).
+//! Phase 8: merged into one file. The Phase 5 split (spec.rs +
+//! state.rs) was justified while the kernel was a leaf layer
+//! with deep directories; in the new layout one file holds
+//! the three types cohesively.
 
+use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
-use crate::kernel::clock::Clock;
+use serde::{Deserialize, Serialize};
 
-use super::spec::{QuotaKind, QuotaSnapshot, QuotaSpec};
+use crate::core::clock::clock::Clock;
 
+// ---------------------------------------------------------------------------
+// QuotaSpec — declarative rate-limit
+// ---------------------------------------------------------------------------
+
+/// Declarative rate-limit specification. Phase 5 keeps only
+/// `calls_per_minute` — the only field the kernel actually enforces.
+///
+/// `QuotaSpec` is the *static* declaration (immutable per capability
+/// derivation). `QuotaState` is the *dynamic* accounting object
+/// (`Arc<RwLock<...>>`) shared between the parent and every child.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuotaSpec {
+    /// Maximum *calls* (sync invocations or stream opens) per minute.
+    /// 0 means unlimited.
+    pub calls_per_minute: u32,
+}
+
+impl QuotaSpec {
+    pub fn unlimited() -> Self {
+        Self::default()
+    }
+
+    pub fn with_calls_per_minute(mut self, n: u32) -> Self {
+        self.calls_per_minute = n;
+        self
+    }
+
+    /// A child quota is the *intersection* of parent and child
+    /// (seL4 attenuation — you cannot amplify quota either).
+    pub fn intersect(&self, other: &QuotaSpec) -> QuotaSpec {
+        QuotaSpec {
+            calls_per_minute: match (self.calls_per_minute, other.calls_per_minute) {
+                (0, x) | (x, 0) => x, // 0 = unlimited; treat as identity
+                (a, b) => a.min(b),
+            },
+        }
+    }
+
+    pub fn is_unlimited(&self) -> bool {
+        self.calls_per_minute == 0
+    }
+}
+
+// ---------------------------------------------------------------------------
+// QuotaKind — single-variant axis marker
+// ---------------------------------------------------------------------------
+
+/// Which quota axis a check exhausted. Phase 5 keeps only `Calls` —
+/// `Tokens` / `Bytes` were dead in the runtime path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QuotaKind {
+    Calls,
+}
+
+impl fmt::Display for QuotaKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Calls => write!(f, "calls"),
+        }
+    }
+}
+
+/// Snapshot used-this-minute for diagnostics / HTTP bridge.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct QuotaSnapshot {
+    pub calls_used: u32,
+    /// Last quota exhaustion, for diagnostics. Cleared on next successful check.
+    pub last_exhausted: Option<QuotaKind>,
+}
+
+// ---------------------------------------------------------------------------
+// QuotaState — runtime accounting
+// ---------------------------------------------------------------------------
+
+/// Quota accounting state. Sliding-window, held behind `Arc` so
+/// derived caps share the parent's bucket.
+///
+/// Phase 5:
+///   - `tokens_per_minute` / `bytes_per_minute` removed (D5).
+///   - `try_tokens` / `try_bytes` removed (D5).
+///   - `Instant::now()` replaced with `Clock::now()` injection.
+///   - `QuotaSpec` is now `{ calls_per_minute: u32 }` only.
 pub struct QuotaState {
     spec: QuotaSpec,
     clock: Arc<dyn Clock>,
     inner: RwLock<QuotaStateInner>,
 }
 
-impl std::fmt::Debug for QuotaState {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for QuotaState {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("QuotaState")
             .field("spec", &self.spec)
             .field("clock", &"<dyn Clock>")
@@ -90,10 +171,8 @@ impl QuotaState {
 }
 
 // ---------------------------------------------------------------------------
-// Budget
+// CapabilityBudget — per-call wall-clock + quota
 // ---------------------------------------------------------------------------
-
-use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Single-call wall-clock budget. Held inside every token via `Arc`,
 /// which lets multiple clones enforce the same limit consistently.
@@ -116,12 +195,20 @@ pub struct CapabilityBudget {
 impl CapabilityBudget {
     /// New budget with the spec defaults (no quota) and a `SystemClock`.
     pub fn new(timeout_ms: u32) -> Self {
-        Self::with_clock(timeout_ms, QuotaSpec::unlimited(), Arc::new(crate::kernel::clock::SystemClock))
+        Self::with_clock(
+            timeout_ms,
+            QuotaSpec::unlimited(),
+            Arc::new(crate::core::clock::clock::SystemClock),
+        )
     }
 
     /// New budget with a quota spec and the system clock.
     pub fn with_spec(timeout_ms: u32, spec: QuotaSpec) -> Self {
-        Self::with_clock(timeout_ms, spec, Arc::new(crate::kernel::clock::SystemClock))
+        Self::with_clock(
+            timeout_ms,
+            spec,
+            Arc::new(crate::core::clock::clock::SystemClock),
+        )
     }
 
     /// New budget with full control over the clock (production + tests).

@@ -22,7 +22,7 @@ pub mod shutdown;
 
 use crate::host::factory::CapabilityFactory;
 use crate::host::resolver::{resolve, ResolvedPlan};
-use crate::kernel::space::events::GraphEvent;
+use crate::capability::enforce::space::GraphEvent;
 use crate::kernel::CapabilitySpace;
 
 pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
@@ -152,7 +152,7 @@ mod orchestrator_tests {
         // `ShutdownCompleted`. We exercise that ordering on an
         // empty cspace (no real mint) to keep the test
         // deterministic and synchronous.
-        use crate::kernel::space::events::GraphEvent;
+        use crate::capability::enforce::space::GraphEvent;
         use crate::kernel::CapabilitySpace;
 
         let cspace = CapabilitySpace::new();

@@ -4,12 +4,17 @@
 //! errors returned by `Capability::invoke_op`. Callers (pipeline,
 //! HTTP bridge, agent) pattern-match on the variant instead of doing
 //! substring matching on error messages.
+//!
+//! Phase 8 cleanup: dropped the `contains()` substring helper
+//! (test-only) and the `From<CapabilityError> for cordis::Error`
+//! impl — the latter was a boundary leak (capability knew about
+//! cordis). The cordis glue moves to `personality/glue/cordis_error.rs`.
 
 use std::fmt;
 
-use crate::kernel::ids::SlotId;
-use crate::kernel::quota::QuotaKind;
-use crate::kernel::rights::OperationRights;
+use crate::capability::enforce::quota::QuotaKind;
+use crate::core::identity::ids::SlotId;
+use crate::core::rights::rights::OperationRights;
 
 /// Errors returned by capability operations on the CSpace.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -109,22 +114,6 @@ impl fmt::Display for CapabilityError {
 }
 
 impl std::error::Error for CapabilityError {}
-
-impl CapabilityError {
-    /// Substring predicate that delegates to the `Display`
-    /// impl. Tests assert against the rendered message ("capability
-    /// revoked", "operation denied", …) without going through
-    /// `to_string()` first.
-    pub fn contains(&self, pat: &str) -> bool {
-        self.to_string().contains(pat)
-    }
-}
-
-impl From<CapabilityError> for cordis::Error {
-    fn from(e: CapabilityError) -> Self {
-        cordis::Error::msg(e.to_string())
-    }
-}
 
 impl From<CapabilityError> for String {
     fn from(e: CapabilityError) -> Self {
