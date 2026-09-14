@@ -10,7 +10,7 @@ use serde_json::Value;
 
 use crate::core::identity::ids::CapabilityId;
 use crate::core::identity::ids::PluginId;
-use crate::kernel::quota::QuotaSpec;
+use crate::capability::enforce::quota::QuotaSpec;
 
 /// Static description of a capability. Carried inside every token;
 /// surfaced to the HTTP bridge for enumeration.

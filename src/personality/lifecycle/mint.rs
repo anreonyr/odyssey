@@ -21,10 +21,10 @@ use crate::core::identity::kind::CapKind;
 use crate::core::meta::meta::CapabilityMeta;
 use crate::core::manifest::manifest::CapabilityDecl;
 use crate::core::rights::rights::{CapabilityRights, OperationRights};
-use crate::kernel::cap::typed::Capability;
-use crate::kernel::quota::CapabilityBudget;
+use crate::capability::handle::cap::Capability;
+use crate::capability::enforce::quota::CapabilityBudget;
 use crate::core::contract::resource::Resource;
-use crate::kernel::space::CapabilitySpace;
+use crate::capability::enforce::space::CapabilitySpace;
 
 // ---------------------------------------------------------------------------
 // Mint-time helpers — turn a manifest declaration into a `CapabilityMeta`
