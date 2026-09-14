@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = [".", "echo-cdylib"]
+members = ["."]
 
 [package]
 name = "odyssey"
