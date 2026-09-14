@@ -14,9 +14,14 @@
 //!   `CapabilityChunk`.
 //! - `rights` — `OperationRights`, `CapabilityRights`,
 //!   `parse_operation`.
+//! - `manifest` — `PluginManifest`, `ManifestBuilder`,
+//!   `CapabilityDecl`, `CapabilityRequirement`, `HostServiceRef`,
+//!   `IsolationMode`, `ResourceHints`, `ManifestError`, TOML
+//!   loader.
 
 pub mod clock;
 pub mod identity;
+pub mod manifest;
 pub mod meta;
 pub mod rights;
 
@@ -27,6 +32,10 @@ pub mod rights;
 pub use clock::clock::{Clock, MockClock, SystemClock};
 pub use identity::ids::{CapabilityId, PluginId, SlotId};
 pub use identity::kind::CapKind;
+pub use manifest::manifest::{
+    from_path, from_toml_str, CapabilityDecl, CapabilityRequirement, HostServiceRef,
+    IsolationMode, ManifestBuilder, ManifestError, PluginManifest, ResourceHints,
+};
 pub use meta::meta::{AuthorityContract, CapabilityAction, CapabilityMeta, Protocol};
 pub use meta::chunk::CapabilityChunk;
 pub use rights::rights::{parse_operation, CapabilityRights, OperationRights};

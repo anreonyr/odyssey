@@ -5,7 +5,8 @@
 //! kernel boundary (see `QuotaKind::Tokens`/`Bytes` deleted in this
 //! same pass). Operators who set those limits in their manifests
 //! get a `tracing::warn!` from the loader and the limits are dropped
-//! on the floor; see `host::manifest::load`.
+//! on the floor (the loader's `deny_unknown_fields = false`
+//! silently strips the unknown keys).
 
 use std::fmt;
 

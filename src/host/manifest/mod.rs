@@ -1,17 +1,11 @@
-//! Host-side manifest data shape.
+//! Phase 8: re-export shim.
 //!
-//! Phase 5: split from `kernel::manifest`. The data types live
-//! here (parsing is the host's concern); `PluginId` itself
-//! migrates to `kernel::ids` because it is a pure identity used
-//! everywhere.
+//! The manifest content physically lives in `crate::core::manifest`.
+//! This module re-exports it at the old `host::manifest::Foo` path
+//! so the 43+ existing `use crate::host::manifest::*` import sites
+//! keep working during the migration.
 
-pub mod builder;
-pub mod load;
-pub mod types;
-
-pub use builder::ManifestBuilder;
-pub use load::{from_path as load_from_path, from_toml_str as load_from_toml_str};
-pub use types::{
-    CapabilityDecl, CapabilityRequirement, HostServiceRef, IsolationMode,
-    ManifestError, PluginManifest, ResourceHints,
+pub use crate::core::manifest::manifest::{
+    from_path, from_toml_str, CapabilityDecl, CapabilityRequirement, HostServiceRef,
+    IsolationMode, ManifestBuilder, ManifestError, PluginManifest, ResourceHints,
 };
