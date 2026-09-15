@@ -291,10 +291,7 @@ impl ManifestBuilder {
             }],
             requires,
             host,
-            resources: ResourceHints {
-                timeout_ms,
-                ..Default::default()
-            },
+            resources: ResourceHints { timeout_ms },
         }
     }
 }

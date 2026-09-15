@@ -8,4 +8,6 @@
 //! never read). See `meta.rs` for the rationale.
 
 pub mod chunk;
+// See `core/clock/mod.rs` for the rationale behind the allow.
+#[allow(clippy::module_inception)]
 pub mod meta;
