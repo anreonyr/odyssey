@@ -439,6 +439,125 @@ fn agent_reaches_only_its_bindings_and_reports_revocation() {
     );
 }
 
+/// A plugin that requires its own contract is refused as
+/// `SelfRequirement`, not as a `Cycle`.
+///
+/// The distinction matters to whoever reads the boot failure: a cycle
+/// between plugins is a graph mistake, whereas this one has no mint
+/// order at all. It also pins that the answer does not depend on the
+/// topological sort noticing the self-edge second-hand through
+/// in-degree bookkeeping.
+#[test]
+fn plugin_requiring_its_own_contract_is_a_self_requirement() {
+    use odyssey::core::manifest::manifest::ManifestBuilder;
+    use odyssey::personality::composition::resolve::{ResolveError, resolve};
+
+    let self_requiring = ManifestBuilder::new("ouroboros")
+        .expose("loop", "loop")
+        .requires("loop", "loop")
+        .build();
+
+    match resolve(&[self_requiring]) {
+        Err(ResolveError::SelfRequirement { plugin, contract }) => {
+            assert_eq!(plugin.name, "ouroboros");
+            assert_eq!(contract, "loop");
+        }
+        other => panic!("expected SelfRequirement, got {other:?}"),
+    }
+
+    // A mutual pair is still a genuine cycle, not a self-requirement.
+    let a = ManifestBuilder::new("a")
+        .expose("a_cap", "a_contract")
+        .requires("b_cap", "b_contract")
+        .build();
+    let b = ManifestBuilder::new("b")
+        .expose("b_cap", "b_contract")
+        .requires("a_cap", "a_contract")
+        .build();
+    match resolve(&[a, b]) {
+        Err(ResolveError::Cycle { chain }) => {
+            assert_eq!(chain.len(), 2, "both plugins form the cycle: {chain:?}");
+        }
+        other => panic!("expected Cycle for a mutual pair, got {other:?}"),
+    }
+}
+
+/// `agent_describe`'s input shape is closed.
+///
+/// The agent observes and never invokes, so a body carrying an extra
+/// field — the obvious guess being `op` — must be refused rather than
+/// answered. Accepting it would let a caller read a description as
+/// evidence that a dispatch happened.
+#[test]
+fn agent_describe_refuses_unknown_fields() {
+    use odyssey::core::contract::resource::Resource;
+    use odyssey::core::manifest::manifest::CapabilityDecl;
+    use odyssey_builtins::agent::AgentDescribeResource;
+    use odyssey_builtins::echo::EchoBuiltin;
+
+    let cspace = CapabilitySpace::new();
+    let factory = CapabilityFactory::with_clock(cspace.clone(), Arc::new(SystemClock));
+    let decl = CapabilityDecl {
+        name: "echo".into(),
+        in_type: "any".into(),
+        out_type: "any".into(),
+        kind: CapKind::Sync,
+        contract_name: "echo".into(),
+    };
+    EchoBuiltin.mint(
+        &factory,
+        &PluginId {
+            name: "echo".into(),
+            version: "0.1.0".into(),
+        },
+        &decl,
+        CapKind::Sync,
+        CapabilityBudget::new(5000),
+        &[],
+    );
+
+    let resource = AgentDescribeResource::new(
+        cspace,
+        vec![
+            odyssey::personality::composition::resolve::ResolvedBinding {
+                handle: "echo".into(),
+                provider: PluginId {
+                    name: "echo".into(),
+                    version: "0.1.0".into(),
+                },
+                capability: "echo".into(),
+                contract: "echo".into(),
+            },
+        ],
+    );
+
+    // The shape the operation documents still works.
+    let ok = resource
+        .invoke(serde_json::json!({"handle": "echo"}))
+        .expect("the documented shape must still be accepted");
+    assert_eq!(ok["live"], serde_json::json!(true));
+
+    // An extra field is refused, and the message names it.
+    let err = resource
+        .invoke(serde_json::json!({"handle": "echo", "op": "invoke"}))
+        .expect_err("an unknown field must be refused");
+    assert!(err.contains("unknown field `op`"), "unhelpful error: {err}");
+    assert!(
+        err.contains("handle"),
+        "the error should name the accepted field: {err}"
+    );
+
+    // And the refusal happens before any capability is resolved, so a
+    // bad field never reaches the cspace.
+    let err = resource
+        .invoke(serde_json::json!({"handle": "nope", "op": "invoke"}))
+        .expect_err("the field check precedes the handle lookup");
+    assert!(
+        err.contains("unknown field"),
+        "expected the field error first, got: {err}"
+    );
+}
+
 /// The frontend's inline script reads the keys the live API returns.
 ///
 /// This is the only test that exercises the HTTP bridge and the page
@@ -519,8 +638,22 @@ fn frontend_script_binds_to_the_live_api() {
         bin.display()
     );
 
+    // Ask the OS for a free port and hand it to the child. A fixed port
+    // would mean competing with whatever already holds it — and, worse, a
+    // connect would still succeed against that other server, so every
+    // assertion below would silently judge a build that is not the one
+    // under test. Measured: a stale server on the fixed port made an
+    // earlier version of this test pass while reading the old binary.
+    let addr: SocketAddr = {
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").expect("a free port");
+        let addr = probe.local_addr().expect("the probe's address");
+        drop(probe);
+        addr
+    };
+
     let mut server = Server(
         Command::new(&bin)
+            .env("ODYSSEY_ADDR", addr.to_string())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .spawn()
@@ -529,17 +662,30 @@ fn frontend_script_binds_to_the_live_api() {
 
     // Poll the bridge rather than sleeping a fixed amount: the server
     // binds after minting, so a fixed wait is either slow or flaky.
-    let addr: SocketAddr = "127.0.0.1:3030".parse().unwrap();
     let mut up = false;
     for _ in 0..100 {
         if TcpStream::connect_timeout(&addr, Duration::from_millis(100)).is_ok() {
             up = true;
             break;
         }
-        if let Ok(Some(status)) = server.0.try_wait() {
-            panic!("the example binary exited before serving: {status}");
+        if server.0.try_wait().ok().flatten().is_some() {
+            break;
         }
         sleep(Duration::from_millis(100));
+    }
+
+    // Even on a private port, a connect can succeed against a stranger if
+    // the child died before binding and something else took the port in
+    // between. Reaping the child is the only way to tell "bound it" from
+    // "lost the race" — and the settle delay is load-bearing, because a
+    // `try_wait` taken the instant a connect succeeds can still see a
+    // process that is on its way out.
+    sleep(Duration::from_millis(500));
+    if let Ok(Some(status)) = server.0.try_wait() {
+        panic!(
+            "the example binary exited with {status} instead of serving {addr}; \
+             the assertions would have run against whatever answers that port"
+        );
     }
     assert!(up, "the HTTP bridge never came up on {addr}");
 

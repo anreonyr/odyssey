@@ -102,11 +102,28 @@ pub fn default_ruin(cspace: &CapabilitySpace, slot_ids: &[SlotId]) -> Result<usi
     Ok(revoked)
 }
 
-/// Top-level entry point. Boots the kernel, resolves the
-/// provided `(manifest, mint_fn, ruin_fn)` triples, mints each
-/// capability via the matching `mint_fn`, serves HTTP, and
-/// tears down on Ctrl-C.
+/// The bridge address `run` uses when the caller does not pick one.
+pub const DEFAULT_BRIDGE_ADDR: &str = "127.0.0.1:3030";
+
+/// Top-level entry point on the default bridge address. Boots the
+/// kernel, resolves the provided `(manifest, mint_fn, ruin_fn)`
+/// triples, mints each capability via the matching `mint_fn`,
+/// serves HTTP, and tears down on Ctrl-C.
 pub async fn run(
+    plugins: &[(PluginManifest, MintFn, RuinFn)],
+) -> Result<(), Box<dyn std::error::Error>> {
+    run_on(DEFAULT_BRIDGE_ADDR.parse().unwrap(), plugins).await
+}
+
+/// `run` with an explicit bridge address.
+///
+/// The address is a parameter rather than a constant so a test can
+/// give its spawned server a port of its own. Without that, a test
+/// that starts the example binary either fights whatever already
+/// holds the fixed port, or — worse — silently connects to it and
+/// asserts against a build that is not the one under test.
+pub async fn run_on(
+    addr: std::net::SocketAddr,
     plugins: &[(PluginManifest, MintFn, RuinFn)],
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 1. Setup — the resolver takes manifests alone; the
@@ -125,8 +142,8 @@ pub async fn run(
     // the registry.
     let minted = mint_from_registry(&factory, &plan, plugins).await?;
     // 4. Serve.
-    let server_handle = spawn_http_bridge("127.0.0.1:3030".parse().unwrap(), cspace.clone());
-    eprintln!("\n[main] HTTP bridge up — open http://127.0.0.1:3030/");
+    let server_handle = spawn_http_bridge(addr, cspace.clone());
+    eprintln!("\n[main] HTTP bridge up — open http://{addr}/");
     eprintln!("[main] press Ctrl-C to stop");
     let _ = server_handle.await;
 

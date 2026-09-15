@@ -47,6 +47,21 @@ pub enum ResolveError {
     Cycle {
         chain: Vec<String>,
     },
+    /// A plugin declared a `requires` that resolves back to one of
+    /// its own capabilities.
+    ///
+    /// Reported on its own rather than as a `Cycle` because the two
+    /// mean different things to a reader: a cycle between plugins
+    /// is a graph mistake, while this is a plugin asking to depend
+    /// on itself — and no mint order satisfies that, since the
+    /// plugin would have to be minted before it could bind to
+    /// itself. Detecting it directly also keeps the answer stable:
+    /// the generic cycle path would have to notice it second-hand,
+    /// through in-degree bookkeeping.
+    SelfRequirement {
+        plugin: PluginId,
+        contract: String,
+    },
     DuplicateName {
         plugin: PluginId,
     },
@@ -65,6 +80,11 @@ impl fmt::Display for ResolveError {
             Self::Cycle { chain } => {
                 write!(f, "dependency cycle detected ({} plugin(s))", chain.len())
             }
+            Self::SelfRequirement { plugin, contract } => write!(
+                f,
+                "{}@{} requires contract `{contract}`, which it provides itself",
+                plugin.name, plugin.version
+            ),
             Self::DuplicateName { plugin } => write!(
                 f,
                 "duplicate plugin name `{}@{}`",
@@ -306,9 +326,9 @@ impl ResolvedPlan {
 
 /// Walk every manifest, build the contract index, expand the
 /// `requires` edges, run the topo sort, and project the
-/// result into a `ResolvedPlan`. The three failure modes
-/// (`Unprovided`, `Ambiguous`, `Cycle`) all surface before
-/// any plugin starts minting.
+/// result into a `ResolvedPlan`. Every failure mode
+/// (`Unprovided`, `Ambiguous`, `SelfRequirement`, `Cycle`)
+/// surfaces before any plugin starts minting.
 pub fn resolve(manifests: &[PluginManifest]) -> Result<ResolvedPlan, ResolveError> {
     // 1. Contract index.
     let by_contract = build_contract_index(manifests)?;
@@ -331,6 +351,12 @@ pub fn resolve(manifests: &[PluginManifest]) -> Result<ResolvedPlan, ResolveErro
                     })?;
             let provider_pid = provider.plugin.clone();
             let provider_cap_name = provider.cap_name;
+            if provider_pid == pid {
+                return Err(ResolveError::SelfRequirement {
+                    plugin: pid,
+                    contract: req.contract.clone(),
+                });
+            }
             add_edge(
                 &mut edges,
                 &mut in_degree,

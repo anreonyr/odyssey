@@ -207,12 +207,23 @@ fn operation_names(rights: OperationRights) -> Vec<&'static str> {
     .collect()
 }
 
-/// Reads one handle out of a request body, if the body is an object
-/// and the field is a string.
-fn handle_field(input: &Value) -> Result<&str, AgentError> {
+/// Reads the only field `agent_describe` accepts.
+///
+/// The shape is closed on purpose. Before this was strict, a body of
+/// `{"handle": "echo", "op": "invoke"}` answered with echo's
+/// description and ignored `op` — a caller who believed the agent
+/// dispatches would have read that as "the call went through". The
+/// agent observes and never invokes, so an unknown field is refused
+/// rather than dropped.
+fn describe_input(input: &Value) -> Result<&str, AgentError> {
     let object = input
         .as_object()
         .ok_or_else(|| AgentError::Input("expected a JSON object".to_string()))?;
+    if let Some(unknown) = object.keys().find(|k| k.as_str() != "handle") {
+        return Err(AgentError::Input(format!(
+            "unknown field `{unknown}`; the only accepted field is `handle`"
+        )));
+    }
     object
         .get("handle")
         .and_then(Value::as_str)
@@ -256,7 +267,7 @@ impl AgentDescribeResource {
 
 impl Resource for AgentDescribeResource {
     fn invoke(&self, input: Value) -> Result<Value, String> {
-        let handle = handle_field(&input).map_err(|e| e.to_string())?;
+        let handle = describe_input(&input).map_err(|e| e.to_string())?;
         self.core.describe(handle).map_err(|e| e.to_string())
     }
 }

@@ -22,7 +22,7 @@
 //! mints it after its providers; listing it last keeps the
 //! example's order match the mint order it produces.
 
-use odyssey::personality::lifecycle::run::run;
+use odyssey::personality::lifecycle::run::{DEFAULT_BRIDGE_ADDR, run_on};
 use odyssey_builtins::{agent, database, echo, reverse, streaming_echo};
 
 #[tokio::main(flavor = "current_thread")]
@@ -35,5 +35,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         agent::AgentListBuiltin::register(),
         agent::AgentDescribeBuiltin::register(),
     ];
-    run(&plugins).await
+    // `ODYSSEY_ADDR` lets a test give its own instance a port of its
+    // own; without it the smoke test competes for the fixed one.
+    let addr = std::env::var("ODYSSEY_ADDR").unwrap_or_else(|_| DEFAULT_BRIDGE_ADDR.to_string());
+    run_on(
+        addr.parse().expect("ODYSSEY_ADDR must be host:port"),
+        &plugins,
+    )
+    .await
 }
