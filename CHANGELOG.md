@@ -6,12 +6,17 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Changed — Phase 9: cleanup
+### Changed — Phase 9 + 9.5: cleanup
 
-A 10-commit pass that prunes dead code, unifies the runtime
-on the typed `CapKind` enum, retires the cordis / TOML /
-AuthorityContract / Protocol dependencies, and tightens
-the layering invariant test.
+A 14-commit pass (9 Phase 9 + 5 Phase 9.5) that prunes dead
+code, unifies the runtime on the typed `CapKind` enum,
+retires the cordis / TOML / AuthorityContract / Protocol
+dependencies, and tightens the layering invariant test.
+Phase 9.5 is the 5-commit review-driven follow-up that
+closed gaps the Phase 9 commits left behind (a latent
+walker false positive in the syn-based layering test,
+orphan `thiserror`/`toml` deps, and one more real
+dead-code item in the resolver).
 
 - **`streaming: bool` → `kind: CapKind`** across
   `CapabilityMeta`, `CapabilityDecl`, and `ManifestBuilder`.
@@ -65,12 +70,21 @@ the layering invariant test.
   `ContractEntry::manifest` field (with its
   `#[allow(dead_code)]`) + the `by_plugin: BTreeMap` that
   was built, returned, then dropped with `let _ = …`.
-  Dead re-exports cleaned from `src/core/mod.rs` and
-  `src/capability/mod.rs`.
+  Phase 9.5 follow-up: the `ContractEntry::manifest` and
+  `by_plugin` removals are Phase 9.5 work; the previous
+  Phase 9 commit stopped at the `#[allow(dead_code)]` +
+  `let _ = by_plugin;` silencer. Dead re-exports cleaned
+  from `src/core/mod.rs` and `src/capability/mod.rs`.
 
 - **`Cargo.toml` slimmed.** Dropped `cordis-rust`,
-  `semver`, `thiserror`, `toml`. `syn = "2"` added as a
-  dev-dep for the layered test.
+  `semver`, `thiserror`, `toml`. Phase 9 dropped
+  `cordis-rust` + `semver` when the cordis seam and the
+  Phase 5-era semver-typed parsing went away; Phase 9.5
+  dropped `thiserror` + `toml` when the TOML loader
+  deletion (which used `toml::from_str` and
+  `thiserror::Error`) was audited and the orphan deps
+  surfaced. `syn = "2"` added as a dev-dep for the
+  layered test.
 
 - **Layering test rewritten with `syn`.** The previous
   line-scanner missed group imports (`use
@@ -83,6 +97,12 @@ the layering invariant test.
   The scanner now covers `builtins/src/`. New positive
   sanity check pins the only personality symbol a builtin
   needs (`personality::lifecycle::mint::CapabilityFactory`).
+  Phase 9.5 follow-up: closed a latent false positive in
+  the `use_tree_contains_mint` walker (a bare
+  `use …::personality;` could fall through the `Path`
+  arm's recursion and falsely match the three-segment
+  sanity check); also collapsed a `collapsible_if` clippy
+  lint the Phase 9 commit left behind.
 
 - **HTTP bridge switched `invoke_dyn` → `invoke_dyn_typed`.**
   The previous bridge regressed Phase 5 M4 by returning
