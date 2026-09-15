@@ -438,3 +438,138 @@ fn agent_reaches_only_its_bindings_and_reports_revocation() {
         "one unbound row fails the whole list rather than being dropped"
     );
 }
+
+/// The frontend's inline script reads the keys the live API returns.
+///
+/// This is the only test that exercises the HTTP bridge and the page
+/// together. Both halves were already covered separately — `curl`
+/// against the endpoints, and reading the HTML — and neither catches the
+/// failure that matters here: a field renamed on one side while the
+/// other keeps looking for the old name, which renders as a dash rather
+/// than an error. `tests/frontend.mjs` loads the real page script into a
+/// DOM shim, drives it against a server this test spawns, and asserts
+/// the resulting element tree.
+///
+/// Skipped when `node` is unavailable: the assertion needs a JS engine,
+/// and silently passing would be worse than not running.
+#[test]
+fn frontend_script_binds_to_the_live_api() {
+    use std::io::Write;
+    use std::net::{SocketAddr, TcpStream};
+    use std::path::PathBuf;
+    use std::process::{Command, Stdio};
+    use std::thread::sleep;
+
+    // Kills the spawned server on every exit path, panic included, so a
+    // failed assertion cannot leave port 3030 held.
+    struct Server(std::process::Child);
+
+    impl Server {
+        fn stop(&mut self) {
+            let pid = self.0.id() as i32;
+            // SAFETY: `kill` takes an integer pid and cannot invalidate
+            // memory; the child is still live here.
+            unsafe {
+                libc::kill(pid, libc::SIGINT);
+            }
+            for _ in 0..20 {
+                if matches!(self.0.try_wait(), Ok(Some(_))) {
+                    return;
+                }
+                sleep(Duration::from_millis(50));
+            }
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
+    impl Drop for Server {
+        fn drop(&mut self) {
+            self.stop();
+        }
+    }
+
+    let Ok(node) = Command::new("node").arg("--version").output() else {
+        eprintln!("skipping: node is not installed");
+        return;
+    };
+    assert!(
+        node.status.success(),
+        "node is installed but unusable: {}",
+        String::from_utf8_lossy(&node.stderr)
+    );
+
+    let bin: PathBuf = match option_env!("CARGO_BIN_EXE_basic") {
+        Some(path) => path.into(),
+        // Cargo sets CARGO_BIN_EXE_* for [[bin]] targets; `basic` is an
+        // [[example]], so fall back to the default target layout this
+        // test itself was built into.
+        None => {
+            let mut dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+            dir.push("target");
+            dir.push(std::env::var("PROFILE").unwrap_or_else(|_| "debug".into()));
+            dir.push("examples");
+            dir.push("basic");
+            dir
+        }
+    };
+    assert!(
+        bin.exists(),
+        "the example binary is missing at {} — run `cargo build --example basic` first",
+        bin.display()
+    );
+
+    let mut server = Server(
+        Command::new(&bin)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("the example binary should spawn"),
+    );
+
+    // Poll the bridge rather than sleeping a fixed amount: the server
+    // binds after minting, so a fixed wait is either slow or flaky.
+    let addr: SocketAddr = "127.0.0.1:3030".parse().unwrap();
+    let mut up = false;
+    for _ in 0..100 {
+        if TcpStream::connect_timeout(&addr, Duration::from_millis(100)).is_ok() {
+            up = true;
+            break;
+        }
+        if let Ok(Some(status)) = server.0.try_wait() {
+            panic!("the example binary exited before serving: {status}");
+        }
+        sleep(Duration::from_millis(100));
+    }
+    assert!(up, "the HTTP bridge never came up on {addr}");
+
+    let page: PathBuf = [env!("CARGO_MANIFEST_DIR"), "examples/frontend/index.html"]
+        .iter()
+        .collect();
+
+    let mut script = std::env::temp_dir();
+    script.push(format!("odyssey-frontend-{}.mjs", std::process::id()));
+    std::fs::File::create(&script)
+        .and_then(|mut f| f.write_all(include_bytes!("frontend.mjs")))
+        .expect("the frontend test script should be writable");
+
+    let out = Command::new("node")
+        .arg(&script)
+        .env("ODYSSEY_URL", format!("http://{addr}"))
+        .env("ODYSSEY_PAGE", &page)
+        .output()
+        .expect("node should run the frontend test script");
+    let _ = std::fs::remove_file(&script);
+
+    assert!(
+        out.status.success(),
+        "frontend data-binding check failed:\n{}\n{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("frontend data-binding OK"),
+        "the check exited 0 without reporting success: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+}

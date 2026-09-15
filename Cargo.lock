@@ -309,6 +309,7 @@ dependencies = [
  "bitflags",
  "futures-core",
  "futures-util",
+ "libc",
  "odyssey-builtins",
  "serde",
  "serde_json",

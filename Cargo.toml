@@ -24,6 +24,10 @@ tokio-stream = { version = "0.1", features = ["sync"] }
 bitflags = { version = "2", features = ["serde"] }
 
 [dev-dependencies]
+# `tests/smoke.rs::frontend_script_binds_to_the_live_api` signals the
+# example binary it spawns; SIGINT first so the orchestrator's teardown
+# runs, SIGKILL only as a fallback.
+libc = "0.2.189"
 # The example binary at examples/basic.rs depends on the
 # `odyssey-builtins` workspace member. Putting it in
 # `[dev-dependencies]` keeps the library crate independent of
