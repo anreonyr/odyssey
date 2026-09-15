@@ -27,6 +27,16 @@ the first time.
   no external cancellation signal — the receiver drop is
   the cancellation signal.
 
+  Input shape is `{"text": "<string>", "count": N}` plus an
+  optional `delay_ms`. The producer emits its chunks
+  back-to-back, so over localhost all of them land in one TCP
+  packet and the browser shows them simultaneously — the
+  streaming effect is invisible. `delay_ms` inserts a
+  `tokio::time::sleep` between chunks (default `0`, which
+  keeps the smoke test fast); the frontend's default input is
+  `{"text": "hi", "count": 5, "delay_ms": 150}` so a manual
+  click shows five chunks arriving progressively over ~750ms.
+
 - **Smoke test.** `tests/smoke.rs::streaming_echo_builtin_
   round_trips_through_typed_open` (`#[tokio::test(flavor =
   "current_thread")]`, bounded by `tokio::time::timeout(2s)`)

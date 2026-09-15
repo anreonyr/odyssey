@@ -3,11 +3,11 @@
 A seL4-style capability kernel implemented in Rust. Three strictly
 layered modules — `core` (value types + abstract traits), `capability`
 (kernel implementation), `personality` (orchestration) — cooperate via
-trait objects and a workspace-member `builtins/` crate that supplies
-typed capability handlers. No plugins are compiled into the library;
-the example binary at `examples/basic.rs` wires the three retained
-builtins (echo / reverse / database) into the orchestrator and serves
-the HTTP bridge on `127.0.0.1:3030`.
+the `AnyCapability` erased view and a workspace-member `builtins/`
+crate that supplies typed capability handlers. No plugins are
+compiled into the library; the example binary at `examples/basic.rs`
+wires the four builtins (echo / reverse / database / streaming_echo)
+into the orchestrator and serves the HTTP bridge on `127.0.0.1:3030`.
 
 ## Possession model
 
@@ -115,6 +115,14 @@ POST /api/stream  →  open a streaming capability by name (SSE)
 The HTML UI is at `examples/frontend/index.html`; `serve.rs` embeds
 it via `include_str!`.
 
+`POST /api/stream` takes `{"capability": "<name>", "input": <json>}`
+and answers with an SSE stream of `chunk` events followed by one
+`done` event. `streaming_echo` (the only streaming builtin today)
+reads `{"text": "<string>", "count": N}` and an optional
+`delay_ms`; the delay exists so the browser can display chunks
+progressively rather than as one TCP packet's worth of simultaneous
+output.
+
 ## Layout
 
 ```
@@ -171,7 +179,8 @@ odyssey/
         ├── lib.rs
         ├── echo.rs
         ├── reverse.rs
-        └── database.rs
+        ├── database.rs
+        └── streaming_echo.rs
 ```
 
 ## Build
@@ -179,7 +188,7 @@ odyssey/
 ```sh
 cargo build --workspace                  # library + builtins
 cargo build --workspace --examples       # library + builtins + examples/basic.rs
-cargo test                              # integration tests: layering (3) + smoke (1)
+cargo test                              # integration tests: layering (3) + smoke (3)
 cargo run --example basic               # boot the orchestrator + HTTP bridge
 ```
 
@@ -208,56 +217,89 @@ impl <Name>Builtin {
         decl: &CapabilityDecl,
         kind: CapKind,
         budget: CapabilityBudget,
-    ) -> Result<SlotId, String> {
+    ) -> SlotId {
         // build Arc<<Name>Resource>, call factory.mint(kind, decl, plugin, budget, handler)
     }
 }
 
-// Each builtin also implements the personality-side Mint trait
-// (the typed mint dispatch surface). The trait lives in
-// personality::lifecycle::run and is the second of the two
-// traits a builtin must implement.
-impl Mint for <Name>Builtin {
-    fn mint(...) -> Result<SlotId, String> {
-        <Name>Builtin::mint(self, ...)
+// `register()` is the single entry point the orchestrator
+// consumes: it publishes the manifest and the two dispatch
+// function pointers together, so a builtin cannot ship one
+// half without the other. Phase 10 replaced the per-plugin
+// `Mint` marker trait with the `MintFn` function pointer
+// below (the trait was pure forwarding boilerplate); Phase 11
+// added the symmetric `RuinFn`. No builtin ships a custom
+// teardown yet — every `RuinFn` is `default_ruin`.
+pub type MintFn = fn(
+    factory: &CapabilityFactory,
+    plugin: &PluginId,
+    decl: &CapabilityDecl,
+    kind: CapKind,
+    budget: CapabilityBudget,
+) -> SlotId;
+
+pub type RuinFn = fn(cspace: &CapabilitySpace, slot_ids: &[SlotId]) -> Result<usize, String>;
+
+impl <Name>Builtin {
+    pub fn register() -> (PluginManifest, MintFn, RuinFn) {
+        (
+            <Name>Builtin.manifest(),
+            |factory, plugin, decl, kind, budget| {
+                <Name>Builtin.mint(factory, plugin, decl, kind, budget)
+            },
+            default_ruin,
+        )
     }
 }
 ```
 
-The example binary at `examples/basic.rs` wires the three builtins:
+The example binary at `examples/basic.rs` builds the registry from
+those helpers:
 
 ```rust
-use std::sync::Arc;
 use odyssey::personality::lifecycle::run::run;
-use odyssey_builtins::{database, echo, reverse};
+use odyssey_builtins::{database, echo, reverse, streaming_echo};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    run(
-        Arc::new(echo::EchoBuiltin),
-        Arc::new(reverse::ReverseBuiltin),
-        Arc::new(database::DatabaseBuiltin),
-    )
-    .await
+    let plugins = vec![
+        echo::EchoBuiltin::register(),
+        reverse::ReverseBuiltin::register(),
+        database::DatabaseBuiltin::register(),
+        streaming_echo::StreamingEchoBuiltin::register(),
+    ];
+    run(&plugins).await
 }
 ```
 
-`run` boots the kernel, collects manifests from the three
+`run` boots the kernel, collects manifests from the four
 builtins, resolves the dependency graph, mints each capability
-into the cspace via the builtin's typed `mint()` method, brings
-up the HTTP bridge, waits for Ctrl-C, and tears down in reverse
+into the cspace via the registry's typed `MintFn`, brings up
+the HTTP bridge, waits for Ctrl-C, and tears down in reverse
 mint order.
 
 ## Test
 
-`cargo test` runs `tests/layering.rs`, which reads every
-`src/**/*.rs` file and asserts:
+`cargo test` runs two integration binaries: `tests/layering.rs` (3
+tests) and `tests/smoke.rs` (3 tests).
+
+`tests/layering.rs` parses every `.rs` file with `syn`, walks every
+`UseTree`, and asserts:
 
 - `src/core/**` has no `use crate::capability` or
   `use crate::personality` imports.
 - `src/capability/**` has no `use crate::personality` imports.
 - `src/personality/**` uses `crate::capability` (the typed mint
   dispatch lands here, not in `core`).
+
+It also scans the `builtins/` workspace member, and handles group
+imports (`use crate::{capability, personality};`), aliased imports,
+and nested groups — the earlier line-scanner missed all three.
+
+`tests/smoke.rs` covers the behavioural side: an echo mint + typed
+slot + invoke round-trip, a `streaming_echo` `open` round-trip that
+collects every chunk, and the sync-invoke-on-a-streaming-cap
+`KindMismatch` rejection.
 
 These invariants catch accidental layer crossings during future
 refactors.
