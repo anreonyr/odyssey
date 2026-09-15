@@ -213,15 +213,30 @@ fn use_tree_contains_mint(tree: &UseTree) -> bool {
     // sequence anywhere in the path. Group, rename, glob, and
     // bare-name leaves all participate in the match.
     //
-    // Phase 9.5 fix: the leaf `UseTree::Name` / `UseTree::Rename`
-    // arms previously bailed unconditionally, so a module-only
-    // import like `use …::personality::lifecycle::mint;` failed
-    // to match. (All three current builtins import the leaf
-    // item `use …::mint::CapabilityFactory;` so the bug was
-    // latent; a future import simplification would have
-    // silently broken the positive sanity test.) The leaf now
-    // also tries to consume the ident against the head of
-    // `need`.
+    // Phase 9.5 history:
+    //   - First fix (`a0db405`): the leaf `UseTree::Name` /
+    //     `UseTree::Rename` arms previously bailed
+    //     unconditionally, so a module-only import like
+    //     `use …::personality::lifecycle::mint;` failed to
+    //     match. The leaf now also tries to consume the
+    //     ident against the head of `need`.
+    //   - This commit: the first fix was over-permissive —
+    //     a single-segment prefix import like
+    //     `use odyssey::personality;` also matched because
+    //     the `Path` arm's fall-through recursion
+    //     (`walk(&p.tree, need)` on line 243) re-enters the
+    //     `Name` arm with the full `need` slice intact, so
+    //     any leaf ident matching `need.first()` would
+    //     return true even though only one of three segments
+    //     was consumed. Closing the gap with a `need.len()
+    //     == 1` guard: the leaf arms only fire when the
+    //     recursion has already consumed the first two
+    //     segments, leaving exactly one left. Module-only
+    //     imports of the form
+    //     `use …::personality::lifecycle::mint;` still
+    //     match (consumption reaches the leaf with
+    //     `need == ["mint"]`); bare `use …::personality;`
+    //     no longer falsely passes.
     fn walk(tree: &UseTree, need: &[&str]) -> bool {
         match tree {
             UseTree::Path(p) => {
@@ -242,8 +257,12 @@ fn use_tree_contains_mint(tree: &UseTree) -> bool {
                 // that branches doesn't hide the match).
                 walk(&p.tree, need)
             }
-            UseTree::Name(n) => need.first() == Some(&n.ident.to_string().as_str()),
-            UseTree::Rename(r) => need.first() == Some(&r.ident.to_string().as_str()),
+            UseTree::Name(n) => {
+                need.first() == Some(&n.ident.to_string().as_str()) && need.len() == 1
+            }
+            UseTree::Rename(r) => {
+                need.first() == Some(&r.ident.to_string().as_str()) && need.len() == 1
+            }
             UseTree::Glob(_) => false,
             UseTree::Group(g) => g.items.iter().any(|t| walk(t, need)),
         }
