@@ -74,7 +74,7 @@ personality ──▶ capability ──▶ core
 - `core` — value types (`CapabilityId`, `SlotId`, `PluginId`,
   `CapabilityMeta`, `OperationRights`, `QuotaSpec`, ...) + abstract
   traits (`Resource`, `BuiltinManifest`). Pure leaf layer. No I/O,
-  no `Instant::now()` direct calls (use `clock::Clock`), no cordis.
+  no `Instant::now()` direct calls (use `clock::Clock`).
 
 - `capability` — kernel implementation: `Capability<R>`, `Slot<R>`,
   `AnyCapability`, `CapabilitySpace`, `QuotaState`,

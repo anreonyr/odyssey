@@ -96,18 +96,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
-name = "cordis-rust"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d89b92bb8363f05253770c958ccee91962c193fd6295a1b0b70930caa4d51075"
-dependencies = [
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
-]
-
-[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -341,7 +329,6 @@ version = "0.1.0"
 dependencies = [
  "axum",
  "bitflags",
- "cordis-rust",
  "futures-core",
  "futures-util",
  "odyssey-builtins",

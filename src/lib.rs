@@ -4,7 +4,7 @@
 //!
 //! - `core` — pure value types + abstract traits. No
 //!   `Instant::now()` direct calls (use `clock::Clock`), no
-//!   filesystem, no cordis, no capability kernel implementation.
+//!   filesystem, no capability kernel implementation.
 //!   Both `capability` and `personality` depend on `core`; `core`
 //!   depends on nothing internal to the crate.
 //! - `capability` — kernel implementation: `Capability<R>`,

@@ -1,7 +1,7 @@
 //! Core — shared value types + abstract traits.
 //!
 //! Pure leaf layer. No I/O, no `Instant::now()` direct calls
-//! (use `clock::Clock`), no filesystem, no cordis, no
+//! (use `clock::Clock`), no filesystem, no
 //! capability kernel implementation. Both `capability` and
 //! `personality` depend on `core`; `core` depends on nothing
 //! internal to the crate.

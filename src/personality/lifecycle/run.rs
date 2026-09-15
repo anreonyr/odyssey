@@ -54,15 +54,10 @@ where
     ];
     println!("[boot] loaded {} builtin(s)", manifests.len());
 
-    let ctx = cordis::Context::new();
     let clock: Arc<dyn crate::core::clock::clock::Clock> = Arc::new(SystemClock);
     let kernel = new_kernel(clock);
     let cspace: CapabilitySpace = kernel.space().clone();
     let factory = CapabilityFactory::with_clock(cspace.clone(), Arc::new(SystemClock));
-
-    ctx.provide("capability_space", cspace.clone()).await?;
-    ctx.provide("capability_factory", factory.clone()).await?;
-    println!("[main] core services provided");
 
     // 2. Resolve.
     let plan: ResolvedPlan = resolve(&manifests).map_err(|e| format!("resolver: {e}"))?;
@@ -85,7 +80,6 @@ where
     let _ = lifecycle.publish(LifecycleEvent::ShutdownCompleted {
         remaining_slots: cspace.len(),
     });
-    ctx.stop().await;
     Ok(())
 }
 
