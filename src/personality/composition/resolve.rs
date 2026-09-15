@@ -17,7 +17,7 @@
 //! scoped but the four live in one file so the orchestrator
 //! (`resolve`) reads linearly.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fmt;
 
 use crate::core::identity::ids::PluginId;
@@ -78,8 +78,6 @@ impl std::error::Error for ResolveError {}
 #[derive(Debug, Clone)]
 struct ContractEntry<'a> {
     plugin: PluginId,
-    #[allow(dead_code)]
-    manifest: &'a PluginManifest,
     cap_name: &'a str,
 }
 
@@ -93,20 +91,28 @@ struct ContractEntry<'a> {
 /// is what lets the rest of the resolver assume "every
 /// contract has exactly one provider" and run a single
 /// hash-table lookup per `requires` entry.
-type ContractIndex<'a> = (
-    BTreeMap<String, ContractEntry<'a>>,
-    BTreeMap<PluginId, &'a PluginManifest>,
-);
+type ContractIndex<'a> = BTreeMap<String, ContractEntry<'a>>;
 
 fn build_contract_index(
     manifests: &[PluginManifest],
 ) -> Result<ContractIndex<'_>, ResolveError> {
     let mut by_contract: BTreeMap<String, ContractEntry<'_>> = BTreeMap::new();
-    let mut by_plugin: BTreeMap<PluginId, &PluginManifest> = BTreeMap::new();
+    // Phase 9.5 cleanup: the previous code carried a
+    // `BTreeMap<PluginId, &PluginManifest>` alongside the
+    // contract index. It was built, returned, then
+    // immediately dropped at the call site with
+    // `let _ = by_plugin;`. The map's only load-bearing
+    // effect was the duplicate-name check via
+    // `insert().is_some()`. Replaced with a `HashSet` so the
+    // dedup logic stays (and keeps `O(1)` average for the
+    // small manifest counts the orchestrator handles today)
+    // without shipping the never-read `&PluginManifest`
+    // payload.
+    let mut seen: HashSet<PluginId> = HashSet::new();
 
     for m in manifests {
         let pid = m.plugin.clone();
-        if by_plugin.insert(pid.clone(), m).is_some() {
+        if !seen.insert(pid.clone()) {
             return Err(ResolveError::DuplicateName { plugin: pid });
         }
         for e in &m.exposes {
@@ -125,14 +131,13 @@ fn build_contract_index(
                 e.contract_name.clone(),
                 ContractEntry {
                     plugin: pid.clone(),
-                    manifest: m,
                     cap_name: &e.name,
                 },
             );
         }
     }
 
-    Ok((by_contract, by_plugin))
+    Ok(by_contract)
 }
 
 // ---------------------------------------------------------------------------
@@ -300,7 +305,7 @@ impl ResolvedPlan {
 /// any plugin starts minting.
 pub fn resolve(manifests: &[PluginManifest]) -> Result<ResolvedPlan, ResolveError> {
     // 1. Contract index.
-    let (by_contract, by_plugin) = build_contract_index(manifests)?;
+    let by_contract = build_contract_index(manifests)?;
 
     // 2. Edges + bindings.
     let mut edges: BTreeMap<PluginId, BTreeSet<PluginId>> = BTreeMap::new();
@@ -335,12 +340,6 @@ pub fn resolve(manifests: &[PluginManifest]) -> Result<ResolvedPlan, ResolveErro
 
     // 3. Topological sort.
     let mint_order = topological_sort(&edges, in_degree)?;
-
-    // Touch by_plugin so the unused warning stays quiet —
-    // the index build populates it as a side effect and we
-    // may consult it in a later phase (e.g. for capability
-    // type validation against the manifest).
-    let _ = by_plugin;
 
     Ok(ResolvedPlan { mint_order, bindings })
 }
