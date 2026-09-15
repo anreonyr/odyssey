@@ -18,8 +18,8 @@ use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
-use odyssey::personality::lifecycle::run::{default_ruin, MintFn, RuinFn};
-use serde_json::{json, Value};
+use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
+use serde_json::{Value, json};
 
 /// Reverse resource — `invoke` reverses the `text` field of its
 /// input. Domain error on malformed input.
@@ -27,15 +27,12 @@ pub struct ReverseResource;
 
 impl Resource for ReverseResource {
     fn invoke(&self, input: Value) -> Result<Value, String> {
-        let text = input
-            .get("text")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                format!(
-                    "reverse: expected {{\"text\": \"<string>\"}}, got {}",
-                    input
-                )
-            })?;
+        let text = input.get("text").and_then(|v| v.as_str()).ok_or_else(|| {
+            format!(
+                "reverse: expected {{\"text\": \"<string>\"}}, got {}",
+                input
+            )
+        })?;
         let reversed: String = text.chars().rev().collect();
         Ok(json!({ "text": reversed }))
     }

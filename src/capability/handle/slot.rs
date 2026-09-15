@@ -8,12 +8,12 @@ use std::sync::Arc;
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-use crate::capability::handle::cap::Capability;
-use crate::core::meta::chunk::CapabilityChunk;
 use crate::capability::error::CapabilityError;
-use crate::core::identity::ids::SlotId;
-use crate::core::meta::meta::CapabilityMeta;
+use crate::capability::handle::cap::Capability;
 use crate::core::contract::resource::Resource;
+use crate::core::identity::ids::SlotId;
+use crate::core::meta::chunk::CapabilityChunk;
+use crate::core::meta::meta::CapabilityMeta;
 use crate::core::rights::rights::{CapabilityRights, OperationRights};
 
 /// Typed, unforgeable reference to a slot.
@@ -58,11 +58,7 @@ impl<R: Resource> Slot<R> {
 
     /// Operation-aware invocation via the slot. Resolves the slot
     /// then defers to `Capability::invoke_op`.
-    pub fn invoke_op(
-        &self,
-        op: OperationRights,
-        input: Value,
-    ) -> Result<Value, CapabilityError> {
+    pub fn invoke_op(&self, op: OperationRights, input: Value) -> Result<Value, CapabilityError> {
         let cap = self
             .capability()
             .ok_or(CapabilityError::SlotEmpty(self.id))?;
@@ -71,10 +67,7 @@ impl<R: Resource> Slot<R> {
 
     /// Direct stream open via the slot. Phase 5 M4: typed
     /// `CapabilityError`.
-    pub fn open(
-        &self,
-        input: Value,
-    ) -> Result<mpsc::Receiver<CapabilityChunk>, CapabilityError> {
+    pub fn open(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, CapabilityError> {
         let cap = self
             .capability()
             .ok_or(CapabilityError::SlotEmpty(self.id))?;

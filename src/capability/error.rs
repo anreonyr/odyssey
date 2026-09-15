@@ -14,8 +14,8 @@
 
 use std::fmt;
 
-use crate::core::quota::quota::QuotaKind;
 use crate::core::identity::ids::SlotId;
+use crate::core::quota::quota::QuotaKind;
 use crate::core::rights::rights::OperationRights;
 
 /// Errors returned by capability operations on the CSpace.
@@ -49,7 +49,11 @@ pub enum CapabilityError {
     },
     /// Phase 5 M4: the requested call would mix sync / stream kinds.
     /// Phase 4 used a generic `String` error; typed variant now.
-    KindMismatch { name: String, expected: &'static str, got: &'static str },
+    KindMismatch {
+        name: String,
+        expected: &'static str,
+        got: &'static str,
+    },
     /// The rate-limit quota exhausted.
     QuotaExceeded { name: String, kind: QuotaKind },
     /// Per-call wall-clock budget exceeded. Phase 5 M3: the
@@ -75,25 +79,32 @@ impl fmt::Display for CapabilityError {
         match self {
             Self::AlreadyExists(n) => write!(f, "capability already installed: {n}"),
             Self::SlotEmpty(s) => write!(f, "slot {} empty or revoked", s.raw()),
-            Self::Revoked(s) => write!(
-                f,
-                "slot {s}: capability revoked",
-                s = s.raw()
-            ),
-            Self::AttenuationViolation { from, requested, held } => write!(
+            Self::Revoked(s) => write!(f, "slot {s}: capability revoked", s = s.raw()),
+            Self::AttenuationViolation {
+                from,
+                requested,
+                held,
+            } => write!(
                 f,
                 "attenuation violation at slot {}: requested {:?} not subset of {:?}",
                 from.raw(),
                 requested,
                 held
             ),
-            Self::OperationDenied { name, requested, held } => write!(
+            Self::OperationDenied {
+                name,
+                requested,
+                held,
+            } => write!(
                 f,
                 "operation denied for capability \"{name}\": requested {:?} not in {:?}",
-                requested,
-                held
+                requested, held
             ),
-            Self::KindMismatch { name, expected, got } => write!(
+            Self::KindMismatch {
+                name,
+                expected,
+                got,
+            } => write!(
                 f,
                 "capability \"{name}\": expected {expected} capability, called as {got}"
             ),

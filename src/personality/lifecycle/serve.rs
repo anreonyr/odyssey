@@ -15,13 +15,13 @@ use std::future::Future;
 use std::net::SocketAddr;
 
 use axum::{
+    Router,
     extract::State,
     response::{
-        sse::{Event, KeepAlive, Sse},
         Html, IntoResponse, Json,
+        sse::{Event, KeepAlive, Sse},
     },
     routing::{get, post},
-    Router,
 };
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -109,9 +109,14 @@ async fn invoke(
     State(state): State<AppState>,
     Json(req): Json<InvokeReq>,
 ) -> Result<Json<InvokeResp>, Json<ErrorResp>> {
-    let cap = state.cspace.lookup_by_name(&req.capability).ok_or_else(|| {
-        Json(ErrorResp { error: format!("capability not found: {}", req.capability) })
-    })?;
+    let cap = state
+        .cspace
+        .lookup_by_name(&req.capability)
+        .ok_or_else(|| {
+            Json(ErrorResp {
+                error: format!("capability not found: {}", req.capability),
+            })
+        })?;
 
     if cap.is_streaming() {
         return Err(Json(ErrorResp {
@@ -127,8 +132,13 @@ async fn invoke(
     // shape. Today every typed variant renders to a useful
     // string, so this is the more informative default.
     match cap.invoke_dyn_typed(req.input) {
-        Ok(value) => Ok(Json(InvokeResp { capability: req.capability, value })),
-        Err(e) => Err(Json(ErrorResp { error: e.to_string() })),
+        Ok(value) => Ok(Json(InvokeResp {
+            capability: req.capability,
+            value,
+        })),
+        Err(e) => Err(Json(ErrorResp {
+            error: e.to_string(),
+        })),
     }
 }
 
@@ -150,9 +160,7 @@ async fn stream(
                             CapabilityChunk::Item(v) => {
                                 Ok(Event::default().event("chunk").data(v.to_string()))
                             }
-                            CapabilityChunk::Done => {
-                                Ok(Event::default().event("done").data(""))
-                            }
+                            CapabilityChunk::Done => Ok(Event::default().event("done").data("")),
                         };
                         if event_tx.send(ev).await.is_err() {
                             break;
@@ -187,8 +195,7 @@ async fn stream(
         }
     }
 
-    Sse::new(tokio_stream::wrappers::ReceiverStream::new(event_rx))
-        .keep_alive(KeepAlive::default())
+    Sse::new(tokio_stream::wrappers::ReceiverStream::new(event_rx)).keep_alive(KeepAlive::default())
 }
 
 pub async fn serve(
@@ -213,13 +220,9 @@ pub async fn serve(
 /// can shut the bridge down by simply dropping the awaiter.
 pub fn spawn_http_bridge(addr: SocketAddr, cspace: CapabilitySpace) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        serve(
-            addr,
-            cspace,
-            async {
-                let _ = tokio::signal::ctrl_c().await;
-            },
-        )
+        serve(addr, cspace, async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
         .await;
     })
 }

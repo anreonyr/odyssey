@@ -31,14 +31,25 @@ use crate::core::manifest::manifest::PluginManifest;
 pub enum ResolveError {
     /// A consumer's `[[requires]] contract` had no matching
     /// `[[exposes]] contract_name` in any other manifest.
-    Unprovided { contract: String, by: String },
+    Unprovided {
+        contract: String,
+        by: String,
+    },
     /// Two providers published the same contract without a
     /// priority hint; the resolver can't pick one.
-    Ambiguous { contract: String, a: String, b: String },
+    Ambiguous {
+        contract: String,
+        a: String,
+        b: String,
+    },
     /// The dependency graph has a cycle. The chain lists the
     /// plugins that form the cycle, in `"name@version"` form.
-    Cycle { chain: Vec<String> },
-    DuplicateName { plugin: PluginId },
+    Cycle {
+        chain: Vec<String>,
+    },
+    DuplicateName {
+        plugin: PluginId,
+    },
 }
 
 impl fmt::Display for ResolveError {
@@ -48,15 +59,12 @@ impl fmt::Display for ResolveError {
                 f,
                 "no provider for contract `{contract}` (requested by {by})"
             ),
-            Self::Ambiguous { contract, a, b } => write!(
-                f,
-                "ambiguous contract `{contract}` (providers: {a}, {b})"
-            ),
-            Self::Cycle { chain } => write!(
-                f,
-                "dependency cycle detected ({} plugin(s))",
-                chain.len()
-            ),
+            Self::Ambiguous { contract, a, b } => {
+                write!(f, "ambiguous contract `{contract}` (providers: {a}, {b})")
+            }
+            Self::Cycle { chain } => {
+                write!(f, "dependency cycle detected ({} plugin(s))", chain.len())
+            }
             Self::DuplicateName { plugin } => write!(
                 f,
                 "duplicate plugin name `{}@{}`",
@@ -93,9 +101,7 @@ struct ContractEntry<'a> {
 /// hash-table lookup per `requires` entry.
 type ContractIndex<'a> = BTreeMap<String, ContractEntry<'a>>;
 
-fn build_contract_index(
-    manifests: &[PluginManifest],
-) -> Result<ContractIndex<'_>, ResolveError> {
+fn build_contract_index(manifests: &[PluginManifest]) -> Result<ContractIndex<'_>, ResolveError> {
     let mut by_contract: BTreeMap<String, ContractEntry<'_>> = BTreeMap::new();
     // Phase 9.5 cleanup: the previous code carried a
     // `BTreeMap<PluginId, &PluginManifest>` alongside the
@@ -317,15 +323,20 @@ pub fn resolve(manifests: &[PluginManifest]) -> Result<ResolvedPlan, ResolveErro
         edges.entry(pid.clone()).or_default();
         for req in &m.requires {
             let provider: &ContractEntry<'_> =
-                by_contract.get(&req.contract).ok_or_else(|| {
-                    ResolveError::Unprovided {
+                by_contract
+                    .get(&req.contract)
+                    .ok_or_else(|| ResolveError::Unprovided {
                         contract: req.contract.clone(),
                         by: pid.name.clone(),
-                    }
-                })?;
+                    })?;
             let provider_pid = provider.plugin.clone();
             let provider_cap_name = provider.cap_name;
-            add_edge(&mut edges, &mut in_degree, provider_pid.clone(), pid.clone());
+            add_edge(
+                &mut edges,
+                &mut in_degree,
+                provider_pid.clone(),
+                pid.clone(),
+            );
             bindings
                 .entry(pid.clone())
                 .or_default()
@@ -341,5 +352,8 @@ pub fn resolve(manifests: &[PluginManifest]) -> Result<ResolvedPlan, ResolveErro
     // 3. Topological sort.
     let mint_order = topological_sort(&edges, in_degree)?;
 
-    Ok(ResolvedPlan { mint_order, bindings })
+    Ok(ResolvedPlan {
+        mint_order,
+        bindings,
+    })
 }

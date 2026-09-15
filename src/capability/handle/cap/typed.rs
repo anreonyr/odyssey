@@ -18,20 +18,20 @@
 //!   instead of `String`. Substring matching in pipeline is replaced
 //!   by pattern-matching on the variant.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde_json::Value;
 use tokio::sync::mpsc;
 
-use crate::core::meta::chunk::CapabilityChunk;
-use crate::core::clock::clock::Clock;
+use crate::capability::enforce::quota::CapabilityBudget;
 use crate::capability::error::CapabilityError;
+use crate::core::clock::clock::Clock;
+use crate::core::contract::resource::Resource;
 use crate::core::identity::ids::{CapabilityId, SlotId};
 use crate::core::identity::kind::CapKind;
+use crate::core::meta::chunk::CapabilityChunk;
 use crate::core::meta::meta::CapabilityMeta;
-use crate::capability::enforce::quota::CapabilityBudget;
-use crate::core::contract::resource::Resource;
 use crate::core::rights::rights::{CapabilityRights, OperationRights};
 
 /// Typed, owned handle to a single capability slot. `Arc<Capability<R>>`
@@ -213,7 +213,9 @@ impl<R: Resource> Capability<R> {
             });
         }
         if self.is_revoked() {
-            return Err(CapabilityError::Revoked(self.slot.unwrap_or(SlotId::new(1))));
+            return Err(CapabilityError::Revoked(
+                self.slot.unwrap_or(SlotId::new(1)),
+            ));
         }
         let start = self.clock.now();
         let result = self.handler.invoke(input);
@@ -267,7 +269,9 @@ impl<R: Resource> Capability<R> {
             });
         }
         if self.is_revoked() {
-            return Err(CapabilityError::Revoked(self.slot.unwrap_or(SlotId::new(1))));
+            return Err(CapabilityError::Revoked(
+                self.slot.unwrap_or(SlotId::new(1)),
+            ));
         }
         if !self.operations.contains(requested) {
             return Err(CapabilityError::OperationDenied {
@@ -314,10 +318,7 @@ impl<R: Resource> Capability<R> {
     }
 
     /// Stream open. Phase 5 M4: returns typed `CapabilityError`.
-    pub fn open(
-        &self,
-        input: Value,
-    ) -> Result<mpsc::Receiver<CapabilityChunk>, CapabilityError> {
+    pub fn open(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, CapabilityError> {
         if self.kind != CapKind::Stream {
             return Err(CapabilityError::KindMismatch {
                 name: self.meta.name.clone(),
@@ -326,7 +327,9 @@ impl<R: Resource> Capability<R> {
             });
         }
         if self.is_revoked() {
-            return Err(CapabilityError::Revoked(self.slot.unwrap_or(SlotId::new(1))));
+            return Err(CapabilityError::Revoked(
+                self.slot.unwrap_or(SlotId::new(1)),
+            ));
         }
         if let Err(kind) = self.budget.try_call() {
             return Err(CapabilityError::QuotaExceeded {
@@ -334,12 +337,12 @@ impl<R: Resource> Capability<R> {
                 kind,
             });
         }
-        self.handler.open(input).map_err(|message| {
-            CapabilityError::Handler {
+        self.handler
+            .open(input)
+            .map_err(|message| CapabilityError::Handler {
                 name: self.meta.name.clone(),
                 message,
-            }
-        })
+            })
     }
 }
 

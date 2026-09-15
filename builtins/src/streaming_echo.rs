@@ -40,18 +40,15 @@ use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::core::meta::chunk::CapabilityChunk;
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
-use odyssey::personality::lifecycle::run::{default_ruin, MintFn, RuinFn};
-use serde_json::{json, Value};
+use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
+use serde_json::{Value, json};
 
 /// Streaming echo resource — `open` emits `count` chunks then
 /// `Done` over an mpsc channel.
 pub struct StreamingEchoResource;
 
 impl Resource for StreamingEchoResource {
-    fn open(
-        &self,
-        input: Value,
-    ) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
+    fn open(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
         let text = input
             .get("text")
             .and_then(|v| v.as_str())
@@ -62,19 +59,13 @@ impl Resource for StreamingEchoResource {
                 )
             })?
             .to_string();
-        let count = input
-            .get("count")
-            .and_then(|v| v.as_u64())
-            .ok_or_else(|| {
-                format!(
-                    "streaming_echo: expected {{\"count\": <u64>}}, got {}",
-                    input
-                )
-            })?;
-        let delay_ms = input
-            .get("delay_ms")
-            .and_then(|v| v.as_u64())
-            .unwrap_or(0);
+        let count = input.get("count").and_then(|v| v.as_u64()).ok_or_else(|| {
+            format!(
+                "streaming_echo: expected {{\"count\": <u64>}}, got {}",
+                input
+            )
+        })?;
+        let delay_ms = input.get("delay_ms").and_then(|v| v.as_u64()).unwrap_or(0);
 
         let (tx, rx) = mpsc::channel::<CapabilityChunk>(16);
         tokio::spawn(async move {

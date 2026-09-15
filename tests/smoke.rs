@@ -86,9 +86,7 @@ fn echo_builtin_round_trips_through_typed_mint() {
 
     let slot: Slot<EchoResource> = Slot::new(cspace, slot_id);
     let input = serde_json::json!({"hello": "world"});
-    let output = slot
-        .invoke(input.clone())
-        .expect("invoke should succeed");
+    let output = slot.invoke(input.clone()).expect("invoke should succeed");
 
     assert_eq!(
         output, input,
@@ -131,8 +129,7 @@ async fn streaming_echo_builtin_round_trips_through_typed_open() {
     // producer fails the test instead of hanging the runner.
     let chunks: Vec<CapabilityChunk> = tokio::time::timeout(
         Duration::from_secs(2),
-        tokio_stream::wrappers::ReceiverStream::new(rx)
-            .collect::<Vec<_>>(),
+        tokio_stream::wrappers::ReceiverStream::new(rx).collect::<Vec<_>>(),
     )
     .await
     .expect("streaming_echo producer hung within 2s budget");

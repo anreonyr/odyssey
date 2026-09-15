@@ -251,11 +251,7 @@ impl ManifestBuilder {
 
     /// Append a `[[requires]]` entry. May be called multiple
     /// times to declare multiple capability-keyed dependencies.
-    pub fn requires(
-        mut self,
-        handle: impl Into<String>,
-        contract: impl Into<String>,
-    ) -> Self {
+    pub fn requires(mut self, handle: impl Into<String>, contract: impl Into<String>) -> Self {
         self.requires.push(CapabilityRequirement {
             name: handle.into(),
             contract: contract.into(),

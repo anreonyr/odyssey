@@ -276,7 +276,10 @@ impl CapabilitySpace {
         Some(Arc::new(concrete.clone()))
     }
 
-    pub fn lookup_erased(&self, slot: SlotId) -> Option<Arc<dyn crate::capability::handle::cap::AnyCapability>> {
+    pub fn lookup_erased(
+        &self,
+        slot: SlotId,
+    ) -> Option<Arc<dyn crate::capability::handle::cap::AnyCapability>> {
         self.inner
             .slots
             .read()
@@ -285,7 +288,10 @@ impl CapabilitySpace {
             .map(|e| e.cap.clone())
     }
 
-    pub fn lookup_by_name(&self, name: &str) -> Option<Arc<dyn crate::capability::handle::cap::AnyCapability>> {
+    pub fn lookup_by_name(
+        &self,
+        name: &str,
+    ) -> Option<Arc<dyn crate::capability::handle::cap::AnyCapability>> {
         let slot = *self
             .inner
             .names
@@ -517,11 +523,13 @@ fn derive_with<R: Resource>(
         .ok_or(crate::capability::error::CapabilityError::SlotEmpty(from))?;
     let held = source.rights();
     if !held.contains(&rights) {
-        return Err(crate::capability::error::CapabilityError::AttenuationViolation {
-            from,
-            requested: rights.operations,
-            held: held.operations,
-        });
+        return Err(
+            crate::capability::error::CapabilityError::AttenuationViolation {
+                from,
+                requested: rights.operations,
+                held: held.operations,
+            },
+        );
     }
     let new_id = space.next_derived_id();
     let derived = source.derive(rights, new_id);
@@ -613,7 +621,9 @@ pub fn revoke_tree(space: &CapabilitySpace, root: SlotId) -> usize {
             removed += 1;
         }
     }
-    space.publish_event(CapabilityEvent::RevokeTree { root, total: removed });
+    space.publish_event(CapabilityEvent::RevokeTree {
+        root,
+        total: removed,
+    });
     removed
 }
-

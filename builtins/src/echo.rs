@@ -13,7 +13,7 @@ use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
-use odyssey::personality::lifecycle::run::{default_ruin, MintFn, RuinFn};
+use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
 use serde_json::Value;
 
 /// Echo resource — `invoke` returns its input unchanged.

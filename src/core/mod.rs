@@ -39,7 +39,7 @@ pub use manifest::manifest::{
     CapabilityDecl, CapabilityRequirement, HostServiceRef, IsolationMode, ManifestBuilder,
     PluginManifest, ResourceHints,
 };
-pub use meta::meta::CapabilityMeta;
 pub use meta::chunk::CapabilityChunk;
+pub use meta::meta::CapabilityMeta;
 pub use quota::quota::{QuotaKind, QuotaSnapshot, QuotaSpec};
-pub use rights::rights::{parse_operation, CapabilityRights, OperationRights};
+pub use rights::rights::{CapabilityRights, OperationRights, parse_operation};

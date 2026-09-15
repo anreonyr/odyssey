@@ -23,8 +23,8 @@ use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
-use odyssey::personality::lifecycle::run::{default_ruin, MintFn, RuinFn};
-use serde_json::{json, Value};
+use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
+use serde_json::{Value, json};
 
 type Store = Arc<RwLock<HashMap<String, Value>>>;
 
@@ -34,17 +34,25 @@ pub struct DatabaseResource {
 
 impl Resource for DatabaseResource {
     fn invoke(&self, input: Value) -> Result<Value, String> {
-        let op = input
-            .get("op")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| format!("database: expected {{\"op\": \"<get|set|delete>\", ...}}, got {}", input))?;
+        let op = input.get("op").and_then(|v| v.as_str()).ok_or_else(|| {
+            format!(
+                "database: expected {{\"op\": \"<get|set|delete>\", ...}}, got {}",
+                input
+            )
+        })?;
 
         match op {
             "get" => {
                 let key = input.get("key").and_then(|v| v.as_str()).ok_or_else(|| {
-                    format!("database.get: expected {{\"op\":\"get\",\"key\":\"<string>\"}}, got {}", input)
+                    format!(
+                        "database.get: expected {{\"op\":\"get\",\"key\":\"<string>\"}}, got {}",
+                        input
+                    )
                 })?;
-                let store = self.store.read().map_err(|e| format!("database: lock poisoned: {e}"))?;
+                let store = self
+                    .store
+                    .read()
+                    .map_err(|e| format!("database: lock poisoned: {e}"))?;
                 Ok(match store.get(key) {
                     Some(value) => json!({ "ok": true, "value": value }),
                     None => json!({ "ok": false }),
@@ -57,7 +65,10 @@ impl Resource for DatabaseResource {
                 let value = input.get("value").cloned().ok_or_else(|| {
                     format!("database.set: expected {{\"op\":\"set\",\"key\":\"<string>\",\"value\":...}}, got {}", input)
                 })?;
-                let mut store = self.store.write().map_err(|e| format!("database: lock poisoned: {e}"))?;
+                let mut store = self
+                    .store
+                    .write()
+                    .map_err(|e| format!("database: lock poisoned: {e}"))?;
                 store.insert(key.to_string(), value);
                 Ok(json!({ "ok": true }))
             }
@@ -65,11 +76,16 @@ impl Resource for DatabaseResource {
                 let key = input.get("key").and_then(|v| v.as_str()).ok_or_else(|| {
                     format!("database.delete: expected {{\"op\":\"delete\",\"key\":\"<string>\"}}, got {}", input)
                 })?;
-                let mut store = self.store.write().map_err(|e| format!("database: lock poisoned: {e}"))?;
+                let mut store = self
+                    .store
+                    .write()
+                    .map_err(|e| format!("database: lock poisoned: {e}"))?;
                 store.remove(key);
                 Ok(json!({ "ok": true }))
             }
-            other => Err(format!("database: unknown op {other:?}; expected get|set|delete")),
+            other => Err(format!(
+                "database: unknown op {other:?}; expected get|set|delete"
+            )),
         }
     }
 }

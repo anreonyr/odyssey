@@ -12,19 +12,19 @@
 //! The `kind` (sync / stream) is supplied by the caller since the
 //! host knows from the manifest whether the capability is streaming.
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
+use crate::capability::enforce::quota::CapabilityBudget;
+use crate::capability::enforce::space::CapabilitySpace;
+use crate::capability::handle::cap::Capability;
 use crate::core::clock::clock::{Clock, SystemClock};
+use crate::core::contract::resource::Resource;
 use crate::core::identity::ids::{CapabilityId, PluginId, SlotId};
 use crate::core::identity::kind::CapKind;
-use crate::core::meta::meta::CapabilityMeta;
 use crate::core::manifest::manifest::CapabilityDecl;
+use crate::core::meta::meta::CapabilityMeta;
 use crate::core::rights::rights::{CapabilityRights, OperationRights};
-use crate::capability::handle::cap::Capability;
-use crate::capability::enforce::quota::CapabilityBudget;
-use crate::core::contract::resource::Resource;
-use crate::capability::enforce::space::CapabilitySpace;
 
 // ---------------------------------------------------------------------------
 // Mint-time helpers — turn a manifest declaration into a `CapabilityMeta`
@@ -138,14 +138,7 @@ impl CapabilityFactory {
             operations: OperationRights::ALL,
             timeout_ms: budget.timeout_ms(),
         };
-        let cap = Capability::new(
-            meta,
-            handler,
-            budget,
-            rights,
-            kind,
-            Arc::clone(&self.clock),
-        );
+        let cap = Capability::new(meta, handler, budget, rights, kind, Arc::clone(&self.clock));
         let slot_id = self.space.allocate();
         self.space.install(slot_id, Arc::new(cap));
         slot_id

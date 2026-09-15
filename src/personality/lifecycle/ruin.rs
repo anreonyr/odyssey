@@ -26,9 +26,9 @@
 use std::collections::HashMap;
 
 use crate::capability::enforce::space::CapabilitySpace;
-use crate::personality::lifecycle::lifecycle_event::{LifecycleEvent, LifecycleEventBus};
 use crate::core::identity::ids::{PluginId, SlotId};
 use crate::personality::composition::resolve::ResolvedPlan;
+use crate::personality::lifecycle::lifecycle_event::{LifecycleEvent, LifecycleEventBus};
 
 pub async fn ruin_runtime_plugins(
     cspace: &CapabilitySpace,

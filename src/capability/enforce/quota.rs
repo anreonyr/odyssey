@@ -126,20 +126,12 @@ impl CapabilityBudget {
     /// New budget with the spec defaults (no quota) and a
     /// `SystemClock`.
     pub fn new(timeout_ms: u32) -> Self {
-        Self::with_clock(
-            timeout_ms,
-            QuotaSpec::unlimited(),
-            Arc::new(SystemClock),
-        )
+        Self::with_clock(timeout_ms, QuotaSpec::unlimited(), Arc::new(SystemClock))
     }
 
     /// New budget with a quota spec and the system clock.
     pub fn with_spec(timeout_ms: u32, spec: QuotaSpec) -> Self {
-        Self::with_clock(
-            timeout_ms,
-            spec,
-            Arc::new(SystemClock),
-        )
+        Self::with_clock(timeout_ms, spec, Arc::new(SystemClock))
     }
 
     /// New budget with full control over the clock (production
@@ -193,7 +185,8 @@ impl CapabilityBudget {
     pub(crate) fn record_elapsed(&self, elapsed: std::time::Duration) {
         // Round up so that sub-millisecond calls register as ≥1ms.
         let elapsed_ms = std::cmp::max(1u128, elapsed.as_micros().div_ceil(1000)) as u64;
-        self.wall_clock_total_ms.fetch_add(elapsed_ms, Ordering::Relaxed);
+        self.wall_clock_total_ms
+            .fetch_add(elapsed_ms, Ordering::Relaxed);
     }
 
     /// Construct a budget whose `QuotaState` AND wall-clock
