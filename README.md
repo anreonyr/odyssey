@@ -49,11 +49,15 @@ the typed capability.
   `CapabilityError::KindMismatch`.
 
 ```rust
-let slot: Slot<EchoResource> = ctx.require("slot:echo")?;
+// Builtins construct typed slots from the SlotId returned by
+// their inherent mint() method. The plugin's plugin code
+// stores the slot in a struct field; dispatch is just
+// `self.slot.invoke(input)`.
+let slot: Slot<EchoResource> = Slot::new(cspace.clone(), slot_id);
 
 slot.invoke(json!({"hello": "world"}))?;     // sync — wall-clock budget enforced
 // For streaming caps:
-// let stream: Slot<GeneratorResource> = ctx.require("slot:generate")?;
+// let stream: Slot<GeneratorResource> = Slot::new(cspace.clone(), stream_slot_id);
 // stream.open(json!("hi"))?;                  // returns Receiver<CapabilityChunk>
 ```
 
@@ -135,8 +139,7 @@ odyssey/
 │   │   │       ├── typed.rs  # Capability<R>
 │   │   │       └── erased.rs # AnyCapability
 │   │   ├── init.rs           # new_kernel(clock) -> KernelFactory
-│   │   ├── error.rs          # CapabilityError (typed variants)
-│   │   └── resource.rs       # re-export of crate::core::Resource
+│   │   └── error.rs          # CapabilityError (typed variants)
 │   ├── core/                 # shared value types + abstract traits
 │   │   ├── mod.rs
 │   │   ├── identity/{mod,ids,kind}.rs
@@ -207,6 +210,16 @@ impl <Name>Builtin {
         budget: CapabilityBudget,
     ) -> Result<SlotId, String> {
         // build Arc<<Name>Resource>, call factory.mint(kind, decl, plugin, budget, handler)
+    }
+}
+
+// Marker trait — the personality orchestrator's typed mint
+// dispatch requires each builtin to expose its mint under a
+// name the orchestrator can match on. Removed in Phase 9
+// (commit deleting marker traits).
+impl <Name>Mint for <Name>Builtin {
+    fn <name>_mint(...) -> Result<SlotId, String> {
+        self.mint(...)
     }
 }
 ```

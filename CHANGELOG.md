@@ -126,9 +126,9 @@ via cordis, it provides its own glue in the personality layer.
 the only consumer-test surface for `/api/graph`-style
 introspection. With tests discarded and no HTTP `/api/graph`
 endpoint planned, the entire graph snapshot machinery is
-gone. The `cspace.snapshot_index()` helper that backed it is
-also removed; introspection use cases can re-derive their own
-join on demand.
+gone. The internal `cspace.snapshot_index()` helper that
+backed the graph view remains in the file but has zero
+callers; Phase 9 cleanup deletes it.
 
 ### Removed — host/pipeline.rs
 
