@@ -34,6 +34,11 @@ bitflags = { version = "2", features = ["serde"] }
 # `builtins` (avoids a cyclic dependency, since `builtins`
 # depends on `odyssey`).
 odyssey-builtins = { path = "builtins" }
+# `tests/layering.rs` uses `syn` to walk use-trees. Subagent A's
+# audit flagged the previous line-scanner as bypassable by
+# group imports (`use crate::{capability, personality};`) and
+# as not scanning the `builtins/` workspace member.
+syn = { version = "2", features = ["full", "parsing", "visit"] }
 
 [features]
 default = []
