@@ -18,7 +18,7 @@ use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
-use odyssey::personality::lifecycle::run::ReverseMint;
+use odyssey::personality::lifecycle::run::Mint;
 use serde_json::{json, Value};
 
 /// Reverse resource — `invoke` reverses the `text` field of its
@@ -66,8 +66,8 @@ impl ReverseBuiltin {
     }
 }
 
-impl ReverseMint for ReverseBuiltin {
-    fn reverse_mint(
+impl Mint for ReverseBuiltin {
+    fn mint(
         &self,
         factory: &CapabilityFactory,
         plugin: &PluginId,
@@ -75,7 +75,7 @@ impl ReverseMint for ReverseBuiltin {
         kind: CapKind,
         budget: CapabilityBudget,
     ) -> Result<SlotId, String> {
-        self.mint(factory, plugin, decl, kind, budget)
+        ReverseBuiltin::mint(self, factory, plugin, decl, kind, budget)
     }
 }
 

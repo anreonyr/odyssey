@@ -13,7 +13,7 @@ use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
-use odyssey::personality::lifecycle::run::EchoMint;
+use odyssey::personality::lifecycle::run::Mint;
 use serde_json::Value;
 
 /// Echo resource — `invoke` returns its input unchanged.
@@ -54,8 +54,8 @@ impl EchoBuiltin {
     }
 }
 
-impl EchoMint for EchoBuiltin {
-    fn echo_mint(
+impl Mint for EchoBuiltin {
+    fn mint(
         &self,
         factory: &CapabilityFactory,
         plugin: &PluginId,
@@ -63,7 +63,7 @@ impl EchoMint for EchoBuiltin {
         kind: CapKind,
         budget: CapabilityBudget,
     ) -> Result<SlotId, String> {
-        self.mint(factory, plugin, decl, kind, budget)
+        EchoBuiltin::mint(self, factory, plugin, decl, kind, budget)
     }
 }
 

@@ -23,7 +23,7 @@ use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
-use odyssey::personality::lifecycle::run::DatabaseMint;
+use odyssey::personality::lifecycle::run::Mint;
 use serde_json::{json, Value};
 
 type Store = Arc<RwLock<HashMap<String, Value>>>;
@@ -109,8 +109,8 @@ impl DatabaseBuiltin {
     }
 }
 
-impl DatabaseMint for DatabaseBuiltin {
-    fn database_mint(
+impl Mint for DatabaseBuiltin {
+    fn mint(
         &self,
         factory: &CapabilityFactory,
         plugin: &PluginId,
@@ -118,6 +118,6 @@ impl DatabaseMint for DatabaseBuiltin {
         kind: CapKind,
         budget: CapabilityBudget,
     ) -> Result<SlotId, String> {
-        self.mint(factory, plugin, decl, kind, budget)
+        DatabaseBuiltin::mint(self, factory, plugin, decl, kind, budget)
     }
 }

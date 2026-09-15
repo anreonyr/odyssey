@@ -11,24 +11,52 @@
 //! Adding a fourth builtin means adding a fourth parameter and
 //! a fourth match arm. That's the cost we pay for keeping the
 //! typed `Capability<R>` invariant in the kernel.
+//!
+//! Phase 9 cleanup: the three per-plugin marker traits
+//! (`EchoMint` / `ReverseMint` / `DatabaseMint`) collapsed into
+//! a single `Mint` trait. Each builtin implements `Mint` to
+//! expose its typed `mint(factory, plugin, decl, kind, budget)`
+//! method. The orchestrator dispatches by plugin name through a
+//! `&dyn Mint` view, so a fourth builtin needs only a fourth
+//! `impl Mint for <Name>Builtin` block — no orchestrator
+//! changes required for the trait shape.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::capability::enforce::quota::CapabilityBudget;
 use crate::capability::enforce::space::CapabilitySpace;
-use crate::personality::lifecycle::lifecycle_event::{LifecycleEvent, LifecycleEventBus};
-use crate::capability::init::new_kernel;
-use crate::core::contract::resource::Resource;
 use crate::core::clock::clock::SystemClock;
 use crate::core::contract::builtin::BuiltinManifest;
 use crate::core::identity::ids::{PluginId, SlotId};
 use crate::core::identity::kind::CapKind;
-use crate::core::manifest::manifest::PluginManifest;
+use crate::core::manifest::manifest::{CapabilityDecl, PluginManifest};
 use crate::personality::composition::resolve::{resolve, ResolvedPlan};
+use crate::personality::lifecycle::lifecycle_event::{LifecycleEvent, LifecycleEventBus};
 use crate::personality::lifecycle::mint::CapabilityFactory;
 use crate::personality::lifecycle::ruin::ruin_runtime_plugins;
 use crate::personality::lifecycle::serve::spawn_http_bridge;
+
+/// Trait every builtin implements that exposes its typed mint
+/// method. Replaces the previous three per-plugin marker traits.
+///
+/// Builtins already implement `BuiltinManifest` (which returns
+/// the plugin's `PluginManifest`); `Mint` is the second and
+/// final trait a builtin must implement. Splitting it into a
+/// dedicated trait (rather than adding `mint` to
+/// `BuiltinManifest`) keeps `BuiltinManifest` free of the
+/// generic `R` parameter that would force every manifest
+/// reader to thread the resource type through.
+pub trait Mint {
+    fn mint(
+        &self,
+        factory: &CapabilityFactory,
+        plugin: &PluginId,
+        decl: &CapabilityDecl,
+        kind: CapKind,
+        budget: CapabilityBudget,
+    ) -> Result<SlotId, String>;
+}
 
 /// Top-level entry point. Boots the kernel, collects manifests
 /// from the three concrete builtins, resolves, mints, serves
@@ -39,12 +67,9 @@ pub async fn run<B1, B2, B3>(
     database: Arc<B3>,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
-    B1: BuiltinManifest + 'static,
-    B1: EchoMint,
-    B2: BuiltinManifest + 'static,
-    B2: ReverseMint,
-    B3: BuiltinManifest + 'static,
-    B3: DatabaseMint,
+    B1: BuiltinManifest + Mint + 'static,
+    B2: BuiltinManifest + Mint + 'static,
+    B3: BuiltinManifest + Mint + 'static,
 {
     // 1. Setup — load manifests from the three builtins.
     let manifests: Vec<PluginManifest> = vec![
@@ -54,17 +79,16 @@ where
     ];
     println!("[boot] loaded {} builtin(s)", manifests.len());
 
-    let clock: Arc<dyn crate::core::clock::clock::Clock> = Arc::new(SystemClock);
-    let kernel = new_kernel(clock);
-    let cspace: CapabilitySpace = kernel.space().clone();
+    let cspace: CapabilitySpace = CapabilitySpace::new();
     let factory = CapabilityFactory::with_clock(cspace.clone(), Arc::new(SystemClock));
 
     // 2. Resolve.
     let plan: ResolvedPlan = resolve(&manifests).map_err(|e| format!("resolver: {e}"))?;
     println!("\n[resolver]\n{}", plan.render());
 
-    // 3. Mint in resolved order — dispatch by plugin name.
-    let minted = mint_three_builtins(&factory, &plan, &manifests, &echo, &reverse, &database).await?;
+    // 3. Mint in resolved order — dispatch by plugin name through
+    // a `&dyn Mint` view of each builtin.
+    let minted = mint_three_builtins(&factory, &plan, &manifests, echo.as_ref(), reverse.as_ref(), database.as_ref()).await?;
 
     // 4. Serve.
     let server_handle =
@@ -83,55 +107,14 @@ where
     Ok(())
 }
 
-/// Marker traits — `run` requires the three builtins to provide
-/// their typed `mint(...)` methods so we can dispatch by plugin
-/// name.
-pub trait EchoMint {
-    fn echo_mint(
-        &self,
-        factory: &CapabilityFactory,
-        plugin: &PluginId,
-        decl: &crate::core::manifest::manifest::CapabilityDecl,
-        kind: CapKind,
-        budget: CapabilityBudget,
-    ) -> Result<SlotId, String>;
-}
-
-pub trait ReverseMint {
-    fn reverse_mint(
-        &self,
-        factory: &CapabilityFactory,
-        plugin: &PluginId,
-        decl: &crate::core::manifest::manifest::CapabilityDecl,
-        kind: CapKind,
-        budget: CapabilityBudget,
-    ) -> Result<SlotId, String>;
-}
-
-pub trait DatabaseMint {
-    fn database_mint(
-        &self,
-        factory: &CapabilityFactory,
-        plugin: &PluginId,
-        decl: &crate::core::manifest::manifest::CapabilityDecl,
-        kind: CapKind,
-        budget: CapabilityBudget,
-    ) -> Result<SlotId, String>;
-}
-
-async fn mint_three_builtins<B1, B2, B3>(
+async fn mint_three_builtins(
     factory: &CapabilityFactory,
     plan: &ResolvedPlan,
     manifests: &[PluginManifest],
-    echo: &Arc<B1>,
-    reverse: &Arc<B2>,
-    database: &Arc<B3>,
-) -> Result<HashMap<PluginId, Vec<SlotId>>, Box<dyn std::error::Error>>
-where
-    B1: BuiltinManifest + EchoMint,
-    B2: BuiltinManifest + ReverseMint,
-    B3: BuiltinManifest + DatabaseMint,
-{
+    echo: &dyn Mint,
+    reverse: &dyn Mint,
+    database: &dyn Mint,
+) -> Result<HashMap<PluginId, Vec<SlotId>>, Box<dyn std::error::Error>> {
     use std::collections::BTreeMap;
     let by_id: BTreeMap<PluginId, &PluginManifest> = manifests
         .iter()
@@ -146,10 +129,13 @@ where
             let kind = if decl.streaming { CapKind::Stream } else { CapKind::Sync };
             let budget = CapabilityBudget::new(m.resources.timeout_ms.unwrap_or(5000));
             let slot_id = match plugin_id.name.as_str() {
-                "echo" => echo.echo_mint(factory, plugin_id, decl, kind, budget),
-                "reverse" => reverse.reverse_mint(factory, plugin_id, decl, kind, budget),
-                "database" => database.database_mint(factory, plugin_id, decl, kind, budget),
-                other => { let msg = format!("unknown builtin {other:?}; add it to mint_three_builtins"); return Err(Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, msg))); },
+                "echo" => echo.mint(factory, plugin_id, decl, kind, budget),
+                "reverse" => reverse.mint(factory, plugin_id, decl, kind, budget),
+                "database" => database.mint(factory, plugin_id, decl, kind, budget),
+                other => {
+                    let msg = format!("unknown builtin {other:?}; add it to mint_three_builtins");
+                    return Err(Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, msg)));
+                }
             }
             .map_err(|e| format!("mint {}::{}: {e}", plugin_id.name, decl.name))?;
             plugin_slots.push(slot_id);
@@ -158,6 +144,3 @@ where
     }
     Ok(minted)
 }
-
-#[allow(dead_code)]
-fn _resource_bound<R: Resource>() {}

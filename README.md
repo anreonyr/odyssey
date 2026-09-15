@@ -138,7 +138,6 @@ odyssey/
 │   │   │       ├── mod.rs
 │   │   │       ├── typed.rs  # Capability<R>
 │   │   │       └── erased.rs # AnyCapability
-│   │   ├── init.rs           # new_kernel(clock) -> KernelFactory
 │   │   └── error.rs          # CapabilityError (typed variants)
 │   ├── core/                 # shared value types + abstract traits
 │   │   ├── mod.rs
@@ -213,13 +212,13 @@ impl <Name>Builtin {
     }
 }
 
-// Marker trait — the personality orchestrator's typed mint
-// dispatch requires each builtin to expose its mint under a
-// name the orchestrator can match on. Removed in Phase 9
-// (commit deleting marker traits).
-impl <Name>Mint for <Name>Builtin {
-    fn <name>_mint(...) -> Result<SlotId, String> {
-        self.mint(...)
+// Each builtin also implements the personality-side Mint trait
+// (the typed mint dispatch surface). The trait lives in
+// personality::lifecycle::run and is the second of the two
+// traits a builtin must implement.
+impl Mint for <Name>Builtin {
+    fn mint(...) -> Result<SlotId, String> {
+        <Name>Builtin::mint(self, ...)
     }
 }
 ```
