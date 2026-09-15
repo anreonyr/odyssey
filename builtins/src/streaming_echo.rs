@@ -11,6 +11,13 @@
 //! emits `N` `Item` chunks of `{ "text": <input>, "index": i }`
 //! for `i ∈ [0, N)`, then one `CapabilityChunk::Done` chunk.
 //!
+//! Optional `delay_ms` field adds a `tokio::time::sleep` between
+//! chunks; default 0 (no delay). The delay exists so a manual
+//! frontend demo can SEE the streaming effect — over localhost
+//! the chunks otherwise arrive in a single TCP packet and
+//! look like a synchronous dump. Set `delay_ms: 150` for
+//! visibly progressive SSE events in the browser.
+//!
 //! The producer task is `tokio::spawn`-ed from inside
 //! `Resource::open`. It owns `tx: mpsc::Sender<CapabilityChunk>`
 //! and a copy of `text` + `count`. Cancellation comes from the
@@ -64,10 +71,17 @@ impl Resource for StreamingEchoResource {
                     input
                 )
             })?;
+        let delay_ms = input
+            .get("delay_ms")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0);
 
         let (tx, rx) = mpsc::channel::<CapabilityChunk>(16);
         tokio::spawn(async move {
             for i in 0..count {
+                if delay_ms > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
+                }
                 let chunk = CapabilityChunk::Item(json!({
                     "text": text,
                     "index": i,
