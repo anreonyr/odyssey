@@ -29,6 +29,14 @@
 //! `use …::mint::CapabilityFactory;`), the test stays green
 //! as long as the API still resolves — it asserts the
 //! *behavioural* contract, not the import *shape*.
+//!
+//! Only `EchoBuiltin` is smoke-tested. The orchestrator
+//! dispatches all three builtins (`echo` / `reverse` /
+//! `database`) through the same `Mint::mint` trait method,
+//! so an echo round-trip exercises the trait surface; a
+//! per-builtin mint path is a thin wrapper around
+//! `factory.mint(...)` and would fail `cargo build` if it
+//! drifted.
 
 use std::sync::Arc;
 

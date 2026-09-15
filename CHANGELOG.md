@@ -8,15 +8,18 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed — Phase 9 + 9.5: cleanup
 
-A 14-commit pass (9 Phase 9 + 5 Phase 9.5) that prunes dead
+A 17-commit pass (9 Phase 9 + 8 Phase 9.5) that prunes dead
 code, unifies the runtime on the typed `CapKind` enum,
 retires the cordis / TOML / AuthorityContract / Protocol
 dependencies, and tightens the layering invariant test.
-Phase 9.5 is the 5-commit review-driven follow-up that
+Phase 9.5 is the 8-commit review-driven follow-up that
 closed gaps the Phase 9 commits left behind (a latent
 walker false positive in the syn-based layering test,
-orphan `thiserror`/`toml` deps, and one more real
-dead-code item in the resolver).
+orphan `thiserror`/`toml` deps, one more real
+dead-code item in the resolver, and a brittle positive
+shape-matching test that two consecutive fixes couldn't
+fully stabilise — replaced by a behavioural smoke
+test).
 
 - **`streaming: bool` → `kind: CapKind`** across
   `CapabilityMeta`, `CapabilityDecl`, and `ManifestBuilder`.
@@ -113,14 +116,19 @@ dead-code item in the resolver).
   on `Revoked(SlotId)` / `SlotEmpty(SlotId)` has the typed
   variant at the boundary.
 
-- **`examples/basic.rs` enriched.** New `demo_typed_slot`
-  helper boots a private cspace + factory, mints an echo
-  slot via the builtin's inherent `mint`, constructs a
-  typed `Slot<EchoResource>`, invokes it with a JSON
-  input, and prints the result — the orchestrator's
-  production path discards the slot reference after
-  mint, so this is the only example that demonstrates
-  typed-slot possession.
+- **`examples/basic.rs` enriched (later moved).** Phase 9
+  added a `demo_typed_slot` helper that boots a private
+  cspace + factory, mints an echo slot via the builtin's
+  inherent `mint`, constructs a typed `Slot<EchoResource>`,
+  invokes it with a JSON input, and prints the result —
+  the orchestrator's production path discards the slot
+  reference after mint, so this was the only example that
+  demonstrated typed-slot possession. Phase 9.5 moved the
+  helper to `tests/smoke.rs` as a real CI integration test
+  (dispatching through a `&dyn Mint` so the trait surface
+  Phase 9 consolidated is the path that's exercised, not
+  the inherent method); the example returned to its thin
+  pre-Phase-9 wrapper shape.
 
 - **`examples/frontend/index.html` UI updated.** Streaming
   input placeholder was `value="stream_echo"` (a Phase 5

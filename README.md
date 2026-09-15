@@ -163,7 +163,8 @@ odyssey/
 │   ├── basic.rs              # wires builtins → personality orchestrator
 │   └── frontend/index.html   # HTTP bridge UI
 ├── tests/
-│   └── layering.rs           # asserts core ⊥ capability ⊥ personality
+│   ├── layering.rs           # asserts core ⊥ capability ⊥ personality
+│   └── smoke.rs              # echo builtin mint + typed-slot + invoke round-trip
 └── builtins/                 # workspace member
     ├── Cargo.toml
     └── src/
@@ -178,7 +179,7 @@ odyssey/
 ```sh
 cargo build --workspace                  # library + builtins
 cargo build --workspace --examples       # library + builtins + examples/basic.rs
-cargo test                              # library tests (currently only tests/layering.rs)
+cargo test                              # integration tests: layering (3) + smoke (1)
 cargo run --example basic               # boot the orchestrator + HTTP bridge
 ```
 
