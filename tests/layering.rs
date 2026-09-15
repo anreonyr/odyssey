@@ -190,10 +190,10 @@ fn builtins_depend_on_personality_for_typed_mint() {
         // any path containing both segments in order.
         let ast = syn::parse_file(&content).expect("syn parse_file");
         for item in ast.items {
-            if let syn::Item::Use(item_use) = item {
-                if use_tree_contains_mint(&item_use.tree) {
-                    uses_mint = true;
-                }
+            if let syn::Item::Use(item_use) = item
+                && use_tree_contains_mint(&item_use.tree)
+            {
+                uses_mint = true;
             }
         }
     }
@@ -210,8 +210,18 @@ fn use_tree_contains_mint(tree: &UseTree) -> bool {
     // Match a path containing the consecutive segments
     // `personality`, `lifecycle`, `mint` in order. We walk
     // each `UseTree::Path` step and look for the three-segment
-    // sequence anywhere in the path. Group and rename nodes
-    // recurse.
+    // sequence anywhere in the path. Group, rename, glob, and
+    // bare-name leaves all participate in the match.
+    //
+    // Phase 9.5 fix: the leaf `UseTree::Name` / `UseTree::Rename`
+    // arms previously bailed unconditionally, so a module-only
+    // import like `use …::personality::lifecycle::mint;` failed
+    // to match. (All three current builtins import the leaf
+    // item `use …::mint::CapabilityFactory;` so the bug was
+    // latent; a future import simplification would have
+    // silently broken the positive sanity test.) The leaf now
+    // also tries to consume the ident against the head of
+    // `need`.
     fn walk(tree: &UseTree, need: &[&str]) -> bool {
         match tree {
             UseTree::Path(p) => {
@@ -232,7 +242,8 @@ fn use_tree_contains_mint(tree: &UseTree) -> bool {
                 // that branches doesn't hide the match).
                 walk(&p.tree, need)
             }
-            UseTree::Name(_) | UseTree::Rename(_) => false,
+            UseTree::Name(n) => need.first() == Some(&n.ident.to_string().as_str()),
+            UseTree::Rename(r) => need.first() == Some(&r.ident.to_string().as_str()),
             UseTree::Glob(_) => false,
             UseTree::Group(g) => g.items.iter().any(|t| walk(t, need)),
         }
