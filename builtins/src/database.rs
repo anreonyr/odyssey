@@ -23,7 +23,7 @@ use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
-use odyssey::personality::lifecycle::run::MintFn;
+use odyssey::personality::lifecycle::run::{default_ruin, MintFn, RuinFn};
 use serde_json::{json, Value};
 
 type Store = Arc<RwLock<HashMap<String, Value>>>;
@@ -105,14 +105,16 @@ impl DatabaseBuiltin {
         )
     }
 
-    /// Phase 10: colocated registration helper. See
+    /// Phase 11: colocated registration helper. Returns the
+    /// `(manifest, mint_fn, ruin_fn)` triple; see
     /// `builtins/src/echo.rs::register` for rationale.
-    pub fn register() -> (PluginManifest, MintFn) {
+    pub fn register() -> (PluginManifest, MintFn, RuinFn) {
         (
             DatabaseBuiltin.manifest(),
             |factory, plugin, decl, kind, budget| {
                 DatabaseBuiltin.mint(factory, plugin, decl, kind, budget)
             },
+            default_ruin,
         )
     }
 }

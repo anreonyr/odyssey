@@ -33,7 +33,7 @@ use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::core::meta::chunk::CapabilityChunk;
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
-use odyssey::personality::lifecycle::run::MintFn;
+use odyssey::personality::lifecycle::run::{default_ruin, MintFn, RuinFn};
 use serde_json::{json, Value};
 
 /// Streaming echo resource — `open` emits `count` chunks then
@@ -121,18 +121,17 @@ impl StreamingEchoBuiltin {
         factory.mint(kind, decl, plugin, budget, Arc::new(StreamingEchoResource))
     }
 
-    /// Phase 10 colocated registration helper. At Phase 11 the
-    /// third tuple element (`RuinFn`) hasn't been introduced
-    /// yet, so the return is the 2-tuple. The Phase 12 commit
-    /// that adds the symmetric `RuinFn` will extend this to a
-    /// 3-tuple; the call site at `examples/basic.rs` updates in
-    /// lockstep.
-    pub fn register() -> (PluginManifest, MintFn) {
+    /// Phase 11: colocated registration helper. Returns the
+    /// `(manifest, mint_fn, ruin_fn)` triple. `streaming_echo`
+    /// uses `default_ruin` today (no drain hook) — the slot is
+    /// reserved for the future when streaming drain is added.
+    pub fn register() -> (PluginManifest, MintFn, RuinFn) {
         (
             StreamingEchoBuiltin.manifest(),
             |factory, plugin, decl, kind, budget| {
                 StreamingEchoBuiltin.mint(factory, plugin, decl, kind, budget)
             },
+            default_ruin,
         )
     }
 }

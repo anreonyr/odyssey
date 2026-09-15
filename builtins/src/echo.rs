@@ -13,7 +13,7 @@ use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
-use odyssey::personality::lifecycle::run::MintFn;
+use odyssey::personality::lifecycle::run::{default_ruin, MintFn, RuinFn};
 use serde_json::Value;
 
 /// Echo resource — `invoke` returns its input unchanged.
@@ -52,17 +52,19 @@ impl EchoBuiltin {
         factory.mint(kind, decl, plugin, budget, Arc::new(EchoResource))
     }
 
-    /// Phase 10: colocated registration helper. Returns the
-    /// `(manifest, mint_fn)` pair the orchestrator's
-    /// `run(plugins)` expects. The colocated shape means a
-    /// contributor adding a new builtin can only forget
-    /// both halves at once, not one.
-    pub fn register() -> (PluginManifest, MintFn) {
+    /// Phase 11: colocated registration helper. Returns the
+    /// `(manifest, mint_fn, ruin_fn)` triple the orchestrator's
+    /// `run(plugins)` expects. The third element is the
+    /// default teardown (just `cspace.revoke_tree` per slot) —
+    /// no custom cleanup needed for stateless builtins like
+    /// echo.
+    pub fn register() -> (PluginManifest, MintFn, RuinFn) {
         (
             EchoBuiltin.manifest(),
             |factory, plugin, decl, kind, budget| {
                 EchoBuiltin.mint(factory, plugin, decl, kind, budget)
             },
+            default_ruin,
         )
     }
 }
