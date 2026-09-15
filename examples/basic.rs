@@ -7,15 +7,17 @@
 //! the example depends on BOTH. The library itself stays
 //! plugin-free.
 //!
-//! Phase 10: the registry of `(manifest, mint_fn)` pairs is
-//! built here at boot from the colocated `XBuiltin::register()`
-//! helpers in `builtins/src/`. Adding a new builtin means
-//! adding one `XBuiltin::register()` entry here and one
-//! module to `builtins/src/`; the orchestrator's `run`
-//! doesn't change.
+//! Phase 10/11: the registry of `(manifest, mint_fn, ruin_fn)`
+//! triples is built here at boot from the colocated
+//! `XBuiltin::register()` helpers in `builtins/src/`. Adding
+//! a new builtin means adding one `XBuiltin::register()`
+//! entry here and one module to `builtins/src/`; the
+//! orchestrator's `run` doesn't change. Every `RuinFn` is
+//! the default (just `cspace.revoke_tree` per slot) — no
+//! builtin ships a custom teardown yet.
 
 use odyssey::personality::lifecycle::run::run;
-use odyssey_builtins::{database, echo, reverse};
+use odyssey_builtins::{database, echo, reverse, streaming_echo};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -23,6 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         echo::EchoBuiltin::register(),
         reverse::ReverseBuiltin::register(),
         database::DatabaseBuiltin::register(),
+        streaming_echo::StreamingEchoBuiltin::register(),
     ];
     run(&plugins).await
 }

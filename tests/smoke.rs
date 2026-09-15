@@ -169,3 +169,43 @@ async fn streaming_echo_builtin_round_trips_through_typed_open() {
         );
     }
 }
+
+/// Phase 11 typed-mismatch smoke test. Calling `Slot::invoke`
+/// on a streaming cap must return `CapabilityError::KindMismatch`
+/// (sync call shape on a streaming resource). The check is
+/// sync because `Capability::invoke` is sync — the typed path
+/// runs before any task spawn.
+#[test]
+fn streaming_echo_kind_mismatch_on_invoke() {
+    use odyssey::capability::error::CapabilityError;
+
+    let cspace = CapabilitySpace::new();
+    let factory = CapabilityFactory::with_clock(cspace.clone(), Arc::new(SystemClock));
+
+    let builtin = StreamingEchoBuiltin;
+    let manifest = builtin.manifest();
+    let decl = &manifest.exposes[0];
+
+    let slot_id = builtin.mint(
+        &factory,
+        &PluginId {
+            name: "streaming_echo".into(),
+            version: "0.1.0".into(),
+        },
+        decl,
+        CapKind::Stream,
+        CapabilityBudget::new(5000),
+    );
+
+    let slot: Slot<StreamingEchoResource> = Slot::new(cspace, slot_id);
+    let err = slot
+        .invoke(serde_json::json!({"text": "hi", "count": 3}))
+        .expect_err("invoke on streaming cap must fail");
+    match err {
+        CapabilityError::KindMismatch { expected, got, .. } => {
+            assert_eq!(expected, "sync");
+            assert_eq!(got, "stream");
+        }
+        other => panic!("expected KindMismatch, got {other:?}"),
+    }
+}
