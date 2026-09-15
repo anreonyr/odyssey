@@ -37,7 +37,7 @@
   <h2>streaming invoke (SSE)</h2>
   <div class="row">
     <input id="stream-cap" placeholder="capability name" value="streaming_echo" style="flex: 0 0 200px; background:#161b22; color:#c9d1d9; border:1px solid #30363d; padding:6px;">
-    <textarea id="stream-input">streaming test</textarea>
+    <textarea id="stream-input">{"text": "hi", "count": 3}</textarea>
     <button onclick="invokeStream()">stream</button>
   </div>
   <pre id="stream-out" class="stream-out"></pre>
@@ -87,7 +87,13 @@
 
     async function invokeStream() {
       const cap = document.getElementById('stream-cap').value;
-      const input = JSON.parse(document.getElementById('stream-input').value);
+      let input;
+      try { input = JSON.parse(document.getElementById('stream-input').value); }
+      catch (e) {
+        const out = document.getElementById('stream-out');
+        out.innerHTML = '<span class="err">invalid json: '+e+'</span>';
+        return;
+      }
       const out = document.getElementById('stream-out');
       out.textContent = '';
       const r = await fetch('/api/stream', {
