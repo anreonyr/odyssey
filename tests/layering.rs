@@ -17,20 +17,25 @@
 //! a trait-object bridge too invasive for Phase 8).
 //!
 //! These invariants are enforced by parsing every `.rs` file in
-//! the three layer directories plus the `builtins/` workspace
-//! member with `syn`, walking every `use` tree, and flagging
-//! any path segment that names a forbidden layer.
+//! the three layer directories with `syn`, walking every `use`
+//! tree, and flagging any path segment that names a forbidden
+//! layer. Group imports, multi-line `use` statements, aliased
+//! imports, and nested groups are all handled correctly.
 //!
-//! Phase 9 note: the previous line-scanner only inspected
-//! `use ` / `pub use ` lines, so group imports like
-//! `use crate::{capability, personality};` bypassed the check
-//! (only the outer `use crate::{` line was matched, and it
-//! did not contain `crate::capability` as a substring). The
-//! syn-based walker handles nested groups, multi-line `use`
-//! statements, and aliased imports correctly. The scanner also
-//! now covers `builtins/src/`, which the previous version
-//! silently skipped (builtins are workspace members and can
-//! drift across layer boundaries if unchecked).
+//! Phase 9.5 history: the previous version also pinned a
+//! positive sanity check (`builtins_depend_on_personality_
+//! for_typed_mint`) via a custom walker that matched the
+//! three-segment `personality::lifecycle::mint` path. Two
+//! consecutive fixes (`a0db405` + `bfccc47`) closed a latent
+//! false-negative and the false-positive the fix opened —
+//! shape matching on use-trees is brittle. The check is gone;
+//! the integration is now covered by `tests/smoke.rs`, which
+//! performs an actual mint + typed-slot + invoke round-trip
+//! against `EchoBuiltin`. That test would fail at compile
+//! time if the import path broke, and at runtime if any of
+//! `Mint::mint` / `CapabilityFactory::with_clock` /
+//! `Slot::new` / `Slot::invoke` broke — same contract, real
+//! behaviour instead of text shape.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -162,112 +167,6 @@ fn capability_has_no_dependency_on_personality() {
         "src/capability/ must not import from personality:\n  {}",
         violations.join("\n  ")
     );
-}
-
-#[test]
-fn builtins_depend_on_personality_for_typed_mint() {
-    // The `builtins/` workspace member is plugin code. It
-    // legitimately reaches into `personality` for the typed
-    // mint API (`CapabilityFactory`) — that's the only
-    // personality symbol a builtin needs. This test pins that
-    // contract: builtins must use the factory. If a builtin
-    // ever stops importing `personality::lifecycle::mint`,
-    // the orchestrator has lost its connection to the kernel
-    // (same shape as the sanity test below for personality →
-    // capability).
-    let workspace = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let builtins_dir = workspace.join("builtins/src");
-    assert!(builtins_dir.is_dir(), "builtins/src should exist");
-
-    // Re-scan every builtin for the mint import. We use the
-    // same `find_uses` walker but check the *positive*
-    // presence rather than forbidding the layer.
-    let mut uses_mint = false;
-    for path in collect_rs_files(&builtins_dir) {
-        let content = read(&path);
-        // Look for `personality::lifecycle::mint` as a path
-        // segment combination. We walk use-trees looking for
-        // any path containing both segments in order.
-        let ast = syn::parse_file(&content).expect("syn parse_file");
-        for item in ast.items {
-            if let syn::Item::Use(item_use) = item
-                && use_tree_contains_mint(&item_use.tree)
-            {
-                uses_mint = true;
-            }
-        }
-    }
-    assert!(
-        uses_mint,
-        "builtins/src/ must import \
-         personality::lifecycle::mint::CapabilityFactory. \
-         No builtin uses the typed mint API — plugin code has \
-         lost its connection to the kernel?"
-    );
-}
-
-fn use_tree_contains_mint(tree: &UseTree) -> bool {
-    // Match a path containing the consecutive segments
-    // `personality`, `lifecycle`, `mint` in order. We walk
-    // each `UseTree::Path` step and look for the three-segment
-    // sequence anywhere in the path. Group, rename, glob, and
-    // bare-name leaves all participate in the match.
-    //
-    // Phase 9.5 history:
-    //   - First fix (`a0db405`): the leaf `UseTree::Name` /
-    //     `UseTree::Rename` arms previously bailed
-    //     unconditionally, so a module-only import like
-    //     `use …::personality::lifecycle::mint;` failed to
-    //     match. The leaf now also tries to consume the
-    //     ident against the head of `need`.
-    //   - This commit: the first fix was over-permissive —
-    //     a single-segment prefix import like
-    //     `use odyssey::personality;` also matched because
-    //     the `Path` arm's fall-through recursion
-    //     (`walk(&p.tree, need)` on line 243) re-enters the
-    //     `Name` arm with the full `need` slice intact, so
-    //     any leaf ident matching `need.first()` would
-    //     return true even though only one of three segments
-    //     was consumed. Closing the gap with a `need.len()
-    //     == 1` guard: the leaf arms only fire when the
-    //     recursion has already consumed the first two
-    //     segments, leaving exactly one left. Module-only
-    //     imports of the form
-    //     `use …::personality::lifecycle::mint;` still
-    //     match (consumption reaches the leaf with
-    //     `need == ["mint"]`); bare `use …::personality;`
-    //     no longer falsely passes.
-    fn walk(tree: &UseTree, need: &[&str]) -> bool {
-        match tree {
-            UseTree::Path(p) => {
-                // First, try to consume this ident against the
-                // head of `need` and continue with the tail.
-                if need.first() == Some(&p.ident.to_string().as_str()) {
-                    if need.len() == 1 {
-                        // Consumed the last segment; success if
-                        // the subtree is anything (Name, Rename,
-                        // Group, Glob, ...).
-                        return true;
-                    }
-                    if walk(&p.tree, &need[1..]) {
-                        return true;
-                    }
-                }
-                // Then, recurse without consuming (so a path
-                // that branches doesn't hide the match).
-                walk(&p.tree, need)
-            }
-            UseTree::Name(n) => {
-                need.first() == Some(&n.ident.to_string().as_str()) && need.len() == 1
-            }
-            UseTree::Rename(r) => {
-                need.first() == Some(&r.ident.to_string().as_str()) && need.len() == 1
-            }
-            UseTree::Glob(_) => false,
-            UseTree::Group(g) => g.items.iter().any(|t| walk(t, need)),
-        }
-    }
-    walk(tree, &["personality", "lifecycle", "mint"])
 }
 
 #[test]
