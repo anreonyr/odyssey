@@ -33,7 +33,7 @@ use odyssey_builtins::{database, echo, reverse};
 
 /// Phase 9 demo: drive the orchestrator's mint path with a
 /// minimal in-process test of the typed-slot shape. Returns
-/// the cspace + the SlotId of the echo capability so the
+/// the cspace + the `SlotId` of the echo capability so the
 /// outer example can demonstrate typed dispatch.
 ///
 /// In the production path the cspace is owned by `run()` and

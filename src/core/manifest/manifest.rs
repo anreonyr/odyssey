@@ -172,7 +172,7 @@ pub struct ResourceHints {
 /// | `version`      | `"0.1.0"`             |
 /// | `in_type`      | `"any"`               |
 /// | `out_type`     | `"any"`               |
-/// | `streaming`    | `false`               |
+/// | `kind`         | `CapKind::Sync`       |
 /// | `requires`     | `[]`                  |
 /// | `host`         | `[]`                  |
 /// | `timeout_ms`   | `None` → host default |

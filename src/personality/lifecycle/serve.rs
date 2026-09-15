@@ -29,6 +29,7 @@ use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::capability::enforce::space::CapabilitySpace;
+use crate::core::identity::kind::CapKind;
 use crate::core::meta::chunk::CapabilityChunk;
 use crate::core::meta::meta::CapabilityMeta;
 
@@ -95,7 +96,7 @@ async fn list_caps(State(state): State<AppState>) -> Json<Vec<CapInfo>> {
             .map(|m: CapabilityMeta| CapInfo {
                 name: m.name.clone(),
                 id: m.id.to_string(),
-                streaming: m.kind == crate::core::identity::kind::CapKind::Stream,
+                streaming: m.kind == CapKind::Stream,
                 timeout_ms: m.timeout_ms,
                 in_type: m.in_type.clone(),
                 out_type: m.out_type.clone(),
