@@ -84,12 +84,29 @@ treating the capability list as flat.
 - **Unreachable capabilities are marked rather than hidden.**
   The list is `/api/caps` minus `agent_list`; what is missing
   is drawn dimmed and named underneath. The two agent
-  capabilities are themselves unreachable — nothing declares
-  them in a `requires`, and they reach neither themselves nor
-  each other — so the page demonstrates the read-only boundary
-  on its own fixtures. That subtraction is by capability
-  name, which is exact here because each provider names its
-  capability after its contract.
+  capabilities are themselves unreachable — neither appears in
+  a `requires`, so neither is in the binding table the
+  reachable set is derived from. That subtraction is by
+  capability name, which is exact here because each provider
+  names its capability after its contract.
+
+- **`ResolveError::SelfRequirement`.** A manifest whose
+  `requires` resolves back to its own capabilities is now
+  rejected with its own error rather than surfacing as a
+  `Cycle`. The two are different mistakes to a reader, and no
+  mint order satisfies the self case: the plugin would have to
+  be minted before it could bind to itself. Previously it fell
+  out of the topological sort's in-degree bookkeeping — `add_edge`
+  counted the self-edge while the `BTreeSet` refused to store
+  it, so the node never reached in-degree zero and the generic
+  cycle check caught it second-hand.
+
+- **`agent_describe` refuses unknown fields.** A body of
+  `{"handle": "echo", "op": "invoke"}` used to answer with
+  echo's description and ignore `op` — which a caller who
+  believed the agent dispatches would read as "the call went
+  through". The agent observes and never invokes, so the input
+  shape is now closed and an extra field is an error.
 
 - **The page degrades rather than breaks without the agent.**
   Capability list and both invoke panels keep working; the

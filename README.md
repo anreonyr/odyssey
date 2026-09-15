@@ -125,9 +125,16 @@ reach, drawn dimmed when the answer is none. The agent table is one
 `operations` column on the page: `CapabilityMeta` carries no
 rights, so `/api/caps` structurally cannot report them —
 `AnyCapability::operations()` can, and only through the agent. The
-two agent capabilities themselves appear dimmed, because nothing
-declares them in a `requires` and they reach neither themselves nor
-each other.
+two agent capabilities themselves appear dimmed, because neither
+appears in a `requires`: they are absent from the reachable set for
+the same reason as any other capability, which is that the set is
+exactly what the binding table names.
+
+Reaching itself is not merely undeclared, it is refused: the
+resolver answers `ResolveError::SelfRequirement` for a manifest
+whose `requires` resolves back to its own capabilities. No mint
+order satisfies it, since the plugin would have to be minted before
+it could bind to itself.
 
 If the agent is not mounted the page degrades rather than breaks:
 the capability panel and both invoke panels keep working, and the
@@ -208,11 +215,15 @@ odyssey/
 ```sh
 cargo build --workspace                  # library + builtins
 cargo build --workspace --examples       # library + builtins + examples/basic.rs
-cargo test                              # integration tests: layering (3) + smoke (3)
+cargo test                              # integration tests: layering (3) + smoke (8)
 cargo run --example basic               # boot the orchestrator + HTTP bridge
 ```
 
-The example binary listens on `127.0.0.1:3030` until Ctrl-C.
+The example binary listens on `127.0.0.1:3030` until Ctrl-C; set
+`ODYSSEY_ADDR=host:port` to move it. The variable exists for tests:
+the frontend smoke test asks the OS for a free port and passes it
+through, so its assertions always run against the build under test
+rather than whatever else is listening.
 
 ## Builtin contract
 
@@ -353,7 +364,7 @@ that gap is separate work.
 ## Test
 
 `cargo test` runs two integration binaries: `tests/layering.rs` (3
-tests) and `tests/smoke.rs` (6 tests).
+tests) and `tests/smoke.rs` (8 tests).
 
 `tests/layering.rs` parses every `.rs` file with `syn`, walks every
 `UseTree`, and asserts:
@@ -371,12 +382,15 @@ and nested groups — the earlier line-scanner missed all three.
 `tests/smoke.rs` covers the behavioural side: an echo mint + typed
 slot + invoke round-trip, a `streaming_echo` `open` round-trip that
 collects every chunk, the sync-invoke-on-a-streaming-cap
-`KindMismatch` rejection, and two agent tests — one resolving the
-agent's manifests end to end and asserting the binding row and mint
-order they produce, one driving `AgentCore` directly to pin the
-three reachability outcomes (unreachable, revoked, unbound).
+`KindMismatch` rejection, a self-requiring manifest resolving to
+`ResolveError::SelfRequirement` (and a mutual pair still resolving to
+`Cycle`), `agent_describe` refusing an unknown field, and two agent
+tests — one resolving the agent's manifests end to end and asserting
+the binding row and mint order they produce, one driving `AgentCore`
+directly to pin the three reachability outcomes (unreachable,
+revoked, unbound).
 
-The sixth test, `frontend_script_binds_to_the_live_api`, is the only
+The eighth test, `frontend_script_binds_to_the_live_api`, is the only
 one that spans both halves: it spawns the example binary, loads the
 real page script from `examples/frontend/index.html` into a small DOM
 shim (`tests/frontend.mjs`), drives it, and asserts the resulting
@@ -387,8 +401,13 @@ exists because `curl` and reading the HTML each prove only one side:
 neither catches a field renamed on one side while the other keeps
 looking for the old name, which renders as a dash rather than an
 error. The shim cannot catch layout or CSS breakage, only
-data-binding breakage. The test needs `node` and port 3030, and
-skips itself when `node` is absent.
+data-binding breakage.
+
+It runs the child on a port it asks the OS for, and reaps the child
+before asserting. Both are deliberate: with a fixed port the test
+either fights whatever holds it, or connects to that server and
+passes while judging the wrong build — which is what happened before
+the port became a parameter. It skips itself when `node` is absent.
 
 These invariants catch accidental layer crossings during future
 refactors.
