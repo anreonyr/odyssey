@@ -22,6 +22,7 @@ use odyssey::core::contract::builtin::BuiltinManifest;
 use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
+use odyssey::personality::composition::resolve::ResolvedBinding;
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
 use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
 use serde_json::{Value, json};
@@ -94,7 +95,8 @@ pub struct DatabaseBuiltin;
 
 impl BuiltinManifest for DatabaseBuiltin {
     fn manifest(&self) -> PluginManifest {
-        ManifestBuilder::new("database", "database", "database")
+        ManifestBuilder::new("database")
+            .expose("database", "database")
             .host("dispatcher")
             .timeout_ms(5000)
             .build()
@@ -109,6 +111,7 @@ impl DatabaseBuiltin {
         decl: &CapabilityDecl,
         kind: CapKind,
         budget: CapabilityBudget,
+        _bindings: &[ResolvedBinding],
     ) -> SlotId {
         factory.mint(
             kind,
@@ -127,8 +130,8 @@ impl DatabaseBuiltin {
     pub fn register() -> (PluginManifest, MintFn, RuinFn) {
         (
             DatabaseBuiltin.manifest(),
-            |factory, plugin, decl, kind, budget| {
-                DatabaseBuiltin.mint(factory, plugin, decl, kind, budget)
+            |factory, plugin, decl, kind, budget, bindings| {
+                DatabaseBuiltin.mint(factory, plugin, decl, kind, budget, bindings)
             },
             default_ruin,
         )

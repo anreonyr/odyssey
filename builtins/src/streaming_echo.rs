@@ -39,6 +39,7 @@ use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::core::meta::chunk::CapabilityChunk;
+use odyssey::personality::composition::resolve::ResolvedBinding;
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
 use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
 use serde_json::{Value, json};
@@ -102,9 +103,9 @@ pub struct StreamingEchoBuiltin;
 
 impl BuiltinManifest for StreamingEchoBuiltin {
     fn manifest(&self) -> PluginManifest {
-        ManifestBuilder::new("streaming_echo", "streaming_echo", "streaming_echo")
+        ManifestBuilder::new("streaming_echo")
+            .expose_streaming("streaming_echo", "streaming_echo")
             .host("dispatcher")
-            .kind(CapKind::Stream)
             .timeout_ms(5000)
             .build()
     }
@@ -122,6 +123,7 @@ impl StreamingEchoBuiltin {
         decl: &CapabilityDecl,
         kind: CapKind,
         budget: CapabilityBudget,
+        _bindings: &[ResolvedBinding],
     ) -> SlotId {
         factory.mint(kind, decl, plugin, budget, Arc::new(StreamingEchoResource))
     }
@@ -133,8 +135,8 @@ impl StreamingEchoBuiltin {
     pub fn register() -> (PluginManifest, MintFn, RuinFn) {
         (
             StreamingEchoBuiltin.manifest(),
-            |factory, plugin, decl, kind, budget| {
-                StreamingEchoBuiltin.mint(factory, plugin, decl, kind, budget)
+            |factory, plugin, decl, kind, budget, bindings| {
+                StreamingEchoBuiltin.mint(factory, plugin, decl, kind, budget, bindings)
             },
             default_ruin,
         )

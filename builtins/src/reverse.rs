@@ -17,6 +17,7 @@ use odyssey::core::contract::builtin::BuiltinManifest;
 use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
+use odyssey::personality::composition::resolve::ResolvedBinding;
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
 use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
 use serde_json::{Value, json};
@@ -42,7 +43,8 @@ pub struct ReverseBuiltin;
 
 impl BuiltinManifest for ReverseBuiltin {
     fn manifest(&self) -> PluginManifest {
-        ManifestBuilder::new("reverse", "reverse", "reverse")
+        ManifestBuilder::new("reverse")
+            .expose("reverse", "reverse")
             .host("dispatcher")
             .timeout_ms(5000)
             .build()
@@ -57,6 +59,7 @@ impl ReverseBuiltin {
         decl: &CapabilityDecl,
         kind: CapKind,
         budget: CapabilityBudget,
+        _bindings: &[ResolvedBinding],
     ) -> SlotId {
         factory.mint(kind, decl, plugin, budget, Arc::new(ReverseResource))
     }
@@ -67,8 +70,8 @@ impl ReverseBuiltin {
     pub fn register() -> (PluginManifest, MintFn, RuinFn) {
         (
             ReverseBuiltin.manifest(),
-            |factory, plugin, decl, kind, budget| {
-                ReverseBuiltin.mint(factory, plugin, decl, kind, budget)
+            |factory, plugin, decl, kind, budget, bindings| {
+                ReverseBuiltin.mint(factory, plugin, decl, kind, budget, bindings)
             },
             default_ruin,
         )

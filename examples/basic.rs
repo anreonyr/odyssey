@@ -15,9 +15,15 @@
 //! orchestrator's `run` doesn't change. Every `RuinFn` is
 //! the default (just `cspace.revoke_tree` per slot) — no
 //! builtin ships a custom teardown yet.
+//!
+//! The two agent entries come last on purpose. The agent's
+//! manifests declare `requires` for the four capability
+//! builtins, so the resolver emits a binding row for it and
+//! mints it after its providers; listing it last keeps the
+//! example's order match the mint order it produces.
 
 use odyssey::personality::lifecycle::run::run;
-use odyssey_builtins::{database, echo, reverse, streaming_echo};
+use odyssey_builtins::{agent, database, echo, reverse, streaming_echo};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -26,6 +32,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         reverse::ReverseBuiltin::register(),
         database::DatabaseBuiltin::register(),
         streaming_echo::StreamingEchoBuiltin::register(),
+        agent::AgentListBuiltin::register(),
+        agent::AgentDescribeBuiltin::register(),
     ];
     run(&plugins).await
 }

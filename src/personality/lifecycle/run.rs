@@ -37,7 +37,7 @@ use crate::core::clock::clock::SystemClock;
 use crate::core::identity::ids::{PluginId, SlotId};
 use crate::core::identity::kind::CapKind;
 use crate::core::manifest::manifest::{CapabilityDecl, PluginManifest};
-use crate::personality::composition::resolve::{ResolvedPlan, resolve};
+use crate::personality::composition::resolve::{ResolvedBinding, ResolvedPlan, resolve};
 use crate::personality::lifecycle::lifecycle_event::{LifecycleEvent, LifecycleEventBus};
 use crate::personality::lifecycle::mint::CapabilityFactory;
 use crate::personality::lifecycle::serve::spawn_http_bridge;
@@ -49,12 +49,24 @@ use crate::personality::lifecycle::serve::spawn_http_bridge;
 /// `fn register() -> (PluginManifest, MintFn, RuinFn)` helper.
 /// The orchestrator dispatches by `plugin_id.name.as_str()`
 /// against a registry of these.
+///
+/// `bindings` is the *minting plugin's own* row of
+/// `ResolvedPlan::bindings` — the capabilities its `requires`
+/// resolved to, as `(handle, provider, capability)` triples. It
+/// is empty for a plugin that declares no dependencies. A
+/// builtin that has no use for its binding table ignores it;
+/// the agent builtin is the one that keeps it, and that is the
+/// only way the table reaches a running plugin. Injection
+/// happens here rather than at call time because minting walks
+/// `plan.mint_order`, so a consumer is always minted after the
+/// providers it binds to.
 pub type MintFn = fn(
     factory: &CapabilityFactory,
     plugin: &PluginId,
     decl: &CapabilityDecl,
     kind: CapKind,
     budget: CapabilityBudget,
+    bindings: &[ResolvedBinding],
 ) -> SlotId;
 
 /// Per-plugin teardown hook. Called by the orchestrator *before*
@@ -183,10 +195,15 @@ async fn mint_from_registry(
     let mut minted: HashMap<PluginId, Vec<SlotId>> = HashMap::new();
     for plugin_id in &plan.mint_order {
         let entry = &by_name[plugin_id.name.as_str()];
+        let bindings: &[ResolvedBinding] = plan
+            .bindings
+            .get(plugin_id)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
         let mut plugin_slots = Vec::with_capacity(entry.manifest.exposes.len());
         for decl in &entry.manifest.exposes {
             let budget = CapabilityBudget::new(entry.manifest.resources.timeout_ms.unwrap_or(5000));
-            let slot_id = (entry.mint_fn)(factory, plugin_id, decl, decl.kind, budget);
+            let slot_id = (entry.mint_fn)(factory, plugin_id, decl, decl.kind, budget, bindings);
             plugin_slots.push(slot_id);
         }
         minted.insert(plugin_id.clone(), plugin_slots);

@@ -164,7 +164,7 @@ pub struct ResourceHints {
 ///
 /// Replaces the toml parser + the 50-line struct-literal each
 /// plugin used to write. Each runtime plugin's `manifest.rs`
-/// becomes ~7 lines of fluent builder calls. Defaults fill in
+/// becomes a few lines of fluent builder calls. Defaults fill in
 /// the convention:
 ///
 /// | Field          | Default               |
@@ -173,6 +173,7 @@ pub struct ResourceHints {
 /// | `in_type`      | `"any"`               |
 /// | `out_type`     | `"any"`               |
 /// | `kind`         | `CapKind::Sync`       |
+/// | `exposes`      | `[]`                  |
 /// | `requires`     | `[]`                  |
 /// | `host`         | `[]`                  |
 /// | `timeout_ms`   | `None` → host default |
@@ -184,41 +185,34 @@ pub struct ResourceHints {
 /// typed contract vocabulary, add it back at the same time the
 /// reader is added.
 ///
-/// Phase 9: the previous `.streaming(bool)` setter is gone —
-/// `CapabilityDecl.streaming` is now `CapabilityDecl.kind`
-/// (`CapKind`). Builders declare the kind directly via
-/// `.kind(CapKind::Stream)` for streaming caps; the default
-/// stays `CapKind::Sync`.
+/// The builder used to hold one capability's fields flat
+/// (`cap_name`, `cap_contract`, `cap_kind`, ...) and `build`
+/// wrapped a single `CapabilityDecl` in a one-element `vec!`.
+/// `exposes` is a `Vec` and the agent plugin exposes two
+/// capabilities, so the fields move to `expose` /
+/// `expose_streaming`, which append to the list. The
+/// singular `.in_type` / `.out_type` / `.kind` setters go with
+/// them: they could only ever configure one cap, and
+/// `CapabilityDecl` still defaults both type names to `"any"`.
 pub struct ManifestBuilder {
     name: String,
     version: String,
-    cap_name: String,
-    cap_contract: String,
-    cap_in_type: String,
-    cap_out_type: String,
-    cap_kind: CapKind,
+    exposes: Vec<CapabilityDecl>,
     requires: Vec<CapabilityRequirement>,
     host: Vec<HostServiceRef>,
     timeout_ms: Option<u32>,
 }
 
 impl ManifestBuilder {
-    /// Start a manifest for a plugin named `plugin_name`,
-    /// exposing one capability whose name and contract are
-    /// `cap_name` and `cap_contract`.
-    pub fn new(
-        plugin_name: impl Into<String>,
-        cap_name: impl Into<String>,
-        cap_contract: impl Into<String>,
-    ) -> Self {
+    /// Start a manifest for a plugin named `plugin_name`. The
+    /// plugin's capabilities are appended with [`Self::expose`] /
+    /// [`Self::expose_streaming`]; a manifest with none is a legal
+    /// but useless plugin, so `build` does not reject it.
+    pub fn new(plugin_name: impl Into<String>) -> Self {
         Self {
             name: plugin_name.into(),
             version: "0.1.0".into(),
-            cap_name: cap_name.into(),
-            cap_contract: cap_contract.into(),
-            cap_in_type: "any".into(),
-            cap_out_type: "any".into(),
-            cap_kind: CapKind::Sync,
+            exposes: Vec::new(),
             requires: Vec::new(),
             host: Vec::new(),
             timeout_ms: None,
@@ -231,21 +225,43 @@ impl ManifestBuilder {
         self
     }
 
-    /// Override the capability's input type (default `"any"`).
-    pub fn in_type(mut self, t: impl Into<String>) -> Self {
-        self.cap_in_type = t.into();
+    /// Append a sync capability. `contract_name` is what another
+    /// plugin's `requires` matches against, so it is required
+    /// here even though `CapabilityDecl::contract_name` allows an
+    /// empty string for caps that publish nothing.
+    ///
+    /// `in_type` / `out_type` stay `"any"`: the manifest carries no
+    /// type vocabulary beyond that, and every builtin today
+    /// declares `"any"`. A cap that needs a real type name gets a
+    /// setter at the same time a reader for it exists.
+    pub fn expose(mut self, name: impl Into<String>, contract_name: impl Into<String>) -> Self {
+        self.exposes.push(CapabilityDecl {
+            name: name.into(),
+            in_type: "any".into(),
+            out_type: "any".into(),
+            kind: CapKind::Sync,
+            contract_name: contract_name.into(),
+        });
         self
     }
 
-    /// Override the capability's output type (default `"any"`).
-    pub fn out_type(mut self, t: impl Into<String>) -> Self {
-        self.cap_out_type = t.into();
-        self
-    }
-
-    /// Set the capability's runtime kind (default `CapKind::Sync`).
-    pub fn kind(mut self, k: CapKind) -> Self {
-        self.cap_kind = k;
+    /// Append a streaming capability. Separate from [`Self::expose`]
+    /// because the kind is the whole difference and `CapKind` has
+    /// exactly two variants: a `kind` parameter would let a caller
+    /// pass `Sync` to a method named `expose` and read as though
+    /// they had asked for a stream.
+    pub fn expose_streaming(
+        mut self,
+        name: impl Into<String>,
+        contract_name: impl Into<String>,
+    ) -> Self {
+        self.exposes.push(CapabilityDecl {
+            name: name.into(),
+            in_type: "any".into(),
+            out_type: "any".into(),
+            kind: CapKind::Stream,
+            contract_name: contract_name.into(),
+        });
         self
     }
 
@@ -281,11 +297,7 @@ impl ManifestBuilder {
         let ManifestBuilder {
             name,
             version,
-            cap_name,
-            cap_contract,
-            cap_in_type,
-            cap_out_type,
-            cap_kind,
+            exposes,
             requires,
             host,
             timeout_ms,
@@ -293,13 +305,7 @@ impl ManifestBuilder {
         PluginManifest {
             plugin: PluginId { name, version },
             isolate: IsolationMode::InProc,
-            exposes: vec![CapabilityDecl {
-                name: cap_name,
-                in_type: cap_in_type,
-                out_type: cap_out_type,
-                kind: cap_kind,
-                contract_name: cap_contract,
-            }],
+            exposes,
             requires,
             host,
             resources: ResourceHints { timeout_ms },

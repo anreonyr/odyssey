@@ -12,6 +12,7 @@ use odyssey::core::contract::builtin::BuiltinManifest;
 use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
+use odyssey::personality::composition::resolve::ResolvedBinding;
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
 use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
 use serde_json::Value;
@@ -32,7 +33,8 @@ pub struct EchoBuiltin;
 
 impl BuiltinManifest for EchoBuiltin {
     fn manifest(&self) -> PluginManifest {
-        ManifestBuilder::new("echo", "echo", "echo")
+        ManifestBuilder::new("echo")
+            .expose("echo", "echo")
             .host("dispatcher")
             .timeout_ms(5000)
             .build()
@@ -48,6 +50,7 @@ impl EchoBuiltin {
         decl: &CapabilityDecl,
         kind: CapKind,
         budget: CapabilityBudget,
+        _bindings: &[ResolvedBinding],
     ) -> SlotId {
         factory.mint(kind, decl, plugin, budget, Arc::new(EchoResource))
     }
@@ -61,8 +64,8 @@ impl EchoBuiltin {
     pub fn register() -> (PluginManifest, MintFn, RuinFn) {
         (
             EchoBuiltin.manifest(),
-            |factory, plugin, decl, kind, budget| {
-                EchoBuiltin.mint(factory, plugin, decl, kind, budget)
+            |factory, plugin, decl, kind, budget, bindings| {
+                EchoBuiltin.mint(factory, plugin, decl, kind, budget, bindings)
             },
             default_ruin,
         )
