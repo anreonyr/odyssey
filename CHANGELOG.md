@@ -6,7 +6,138 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Breaking — Phase 6: Drop legacy `consumes`
+### Breaking — Phase 8: three-layer split (core / capability / personality) + plugins out
+
+Phase 8 is a complete restructure of the codebase. The crate is
+now organised around three strictly-layered modules, with the
+plugin system reduced to a workspace-member `builtins/` crate
+that depends only on `core`.
+
+- **Three-layer dependency direction.** The crate has three
+  top-level modules: `core`, `capability`, `personality`. The
+  direction is
+  ```
+      personality ──▶ capability ──▶ core
+                      │            │
+                      └────────────┘
+  ```
+  `core` is a leaf (no internal deps). `capability` depends on
+  `core`. `personality` depends on `core` and `capability`.
+  A `tests/layering.rs` integration test reads the source and
+  asserts these invariants at every test run.
+
+- **`src/{host,kernel,runtime,plugins}/` deleted.** The legacy
+  Phase 5 three-layer split was retired: the kernel moved to
+  `src/capability/`, the host decomposed into `core/manifest`
+  + `personality/composition` + `personality/lifecycle`, the
+  runtime moved to `personality/lifecycle/{boot, mint, ruin,
+  run, serve}`. Plugins (`src/plugins/`) were deleted in favor of
+  the workspace-member `builtins/` crate.
+
+- **`builtins/` workspace member.** `echo`, `reverse`, and
+  `database` are the three retained built-in capabilities.
+  Each is a concrete type implementing `BuiltinManifest` (the
+  only core trait for builtins — typed mint dispatch happens via
+  inherent methods, not a `Builtin<R>` trait object, because
+  `CapabilityFactory::mint<R>` is generic over `R` and a trait
+  object can't dispatch into a generic call). The
+  `examples/basic.rs` binary wires the three builtins into the
+  orchestrator and serves the HTTP bridge on `127.0.0.1:3030`.
+
+- **`src/main.rs` → `examples/basic.rs`.** The library binary
+  was removed to break a cyclic dependency between the `odyssey`
+  crate and the `odyssey-builtins` workspace member. The example
+  binary is the only consumer of builtins; the library is
+  plugin-free.
+
+- **`Resource` trait moved to `core/contract/resource.rs`.**
+  The kernel-side contract for capability handlers is now in
+  `core` (where `capability` and `personality` can both depend
+  on it without a cycle), not in `capability/`.
+
+- **`BuiltinManifest` trait added in `core/contract/builtin.rs`.**
+  Each builtin implements `BuiltinManifest::manifest() -> PluginManifest`.
+  Typed mint happens via inherent methods on each builtin's
+  concrete struct (e.g. `EchoBuiltin::mint(factory, plugin, decl, kind, budget)`).
+
+- **`CapabilityFactory` simplified.** The redundant
+  `metas: Arc<Mutex<Vec<CapabilityMeta>>>` snapshot field is gone
+  (it drifted out of sync with the cspace after revoke). The
+  dead `snapshots()` / `clock()` accessors are gone. The
+  factory's only role is `mint()` + `space()` accessor.
+
+- **`GraphEvent` split into `CapabilityEvent` + `LifecycleEvent`.**
+  Kernel-side events (`Minted`, `Derived`, `Revoked`,
+  `RevokeTree`) live in `capability::enforce::space::CapabilityEvent`.
+  Personality-side events (`PluginActivated`,
+  `PluginDeactivated`, `ShutdownStarted`, `ShutdownCompleted`)
+  live in `personality::lifecycle::lifecycle_event::LifecycleEvent`.
+  The kernel has no knowledge of plugins or shutdown; the
+  personality has its own `LifecycleEventBus`.
+
+- **`QuotaSpec` + `QuotaKind` + `QuotaSnapshot` moved to
+  `core::quota`.** These are pure value types. The
+  runtime-state counterparts (`QuotaState`, `CapabilityBudget`)
+  stay in `capability::enforce::quota` because they hold locks
+  and depend on `Clock`.
+
+- **Dead code removed.** `kernel/space/graph.rs` (CapabilityGraph
+  had zero production callers — only tests used it).
+  `host/pipeline.rs` (Pipeline / SyncStage had zero production
+  callers after the Phase 4 agent-driven composition pattern).
+  `RuntimeQuotas::tokens_per_minute` / `bytes_per_minute` quota
+  fields. `manifest.cpu` / `mem_mb` / `io_bps` ResourceHints
+  fields. `CapabilityError::contains()` method (test-only
+  substring predicate). `From<CapabilityError> for cordis::Error`
+  (boundary leak — capability knew about cordis). `PluginManager::drop_*`,
+  `RemovedQuotaFields`, and other Phase 5 dead-code-removal
+  candidates.
+
+- **`echo-cdylib/` workspace member deleted.** README explicitly
+  marked it deferred. Zero production callers; rebuilt on every
+  `cargo build` for no benefit.
+
+- **`tests/` directory deleted.** 50 .rs files, ~3000 LoC. The
+  Phase 8 layering invariant test that replaces them lives at
+  `tests/layering.rs` (~150 LoC).
+
+- **`Cargo.toml` cleanup.** Dropped `loom-tests` feature and
+  the `loom` optional dep. Dropped `wat` + `wasmtime` (only
+  the deleted sandbox plugin used them). Dropped `rand`
+  (only the deleted generator plugin used it). Dropped
+  `frontend/` workspace-root directory (moved to
+  `examples/frontend/`).
+
+- **Removed `manifest.cpu` / `mem_mb` / `io_bps` fields from
+  `ResourceHints`.** Zero readers anywhere in `src/`. Same
+  family as Phase 5 D5 (dead quota fields).
+
+### Removed — Cordis `From` impl boundary leak
+
+The `From<CapabilityError> for cordis::Error` impl previously
+lived in `kernel/error.rs`. This was a boundary leak — the
+kernel had no business knowing about `cordis`. Removed in
+Phase 8; if a future binary wants to surface capability errors
+via cordis, it provides its own glue in the personality layer.
+
+### Removed — CapabilityGraph snapshot view
+
+`kernel/space/graph.rs` (154 LoC) deleted. `CapabilityGraph` was
+the only consumer-test surface for `/api/graph`-style
+introspection. With tests discarded and no HTTP `/api/graph`
+endpoint planned, the entire graph snapshot machinery is
+gone. The `cspace.snapshot_index()` helper that backed it is
+also removed; introspection use cases can re-derive their own
+join on demand.
+
+### Removed — host/pipeline.rs
+
+Linear composition of typed sync stages (`Pipeline`,
+`SyncStage`). 149 LoC. Zero production callers. The Phase 4
+agent-driven composition pattern replaced it for the agent
+plugin; no other consumer existed.
+
+### Phase 6: Drop legacy `consumes`
 
 - **Manifest `[[consumes]]` field removed.** The legacy
   plugin-version-keyed `consumes` block is gone from
