@@ -17,3 +17,7 @@
 *.dylib
 *.dll
 *.wasm
+
+# Per-phase worker / audit reports left in the workspace root
+# during the long phase-8 migration. Not part of the codebase.
+.phase*.md

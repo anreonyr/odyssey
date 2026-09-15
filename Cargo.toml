@@ -14,7 +14,6 @@ keywords = ["kernel", "capability", "sel4", "plugin", "manifest"]
 categories = ["os", "development-tools::plugins"]
 
 [dependencies]
-semver = { version = "1", features = ["serde"] }
 thiserror = "2"
 toml = "0.8"
 tokio = { version = "1.50", features = ["full"] }
