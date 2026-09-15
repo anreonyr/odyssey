@@ -6,8 +6,9 @@ layered modules — `core` (value types + abstract traits), `capability`
 the `AnyCapability` erased view and a workspace-member `builtins/`
 crate that supplies typed capability handlers. No plugins are
 compiled into the library; the example binary at `examples/basic.rs`
-wires the four builtins (echo / reverse / database / streaming_echo)
-into the orchestrator and serves the HTTP bridge on `127.0.0.1:3030`.
+wires the six builtins (echo / reverse / database / streaming_echo /
+agent_list / agent_describe) into the orchestrator and serves the
+HTTP bridge on `127.0.0.1:3030`.
 
 ## Possession model
 
@@ -172,11 +173,12 @@ odyssey/
 │   └── frontend/index.html   # HTTP bridge UI
 ├── tests/
 │   ├── layering.rs           # asserts core ⊥ capability ⊥ personality
-│   └── smoke.rs              # echo builtin mint + typed-slot + invoke round-trip
+│   └── smoke.rs              # builtin round-trips + agent binding-table behaviour
 └── builtins/                 # workspace member
     ├── Cargo.toml
     └── src/
         ├── lib.rs
+        ├── agent.rs
         ├── echo.rs
         ├── reverse.rs
         ├── database.rs
@@ -236,6 +238,7 @@ pub type MintFn = fn(
     decl: &CapabilityDecl,
     kind: CapKind,
     budget: CapabilityBudget,
+    bindings: &[ResolvedBinding],
 ) -> SlotId;
 
 pub type RuinFn = fn(cspace: &CapabilitySpace, slot_ids: &[SlotId]) -> Result<usize, String>;
@@ -244,8 +247,8 @@ impl <Name>Builtin {
     pub fn register() -> (PluginManifest, MintFn, RuinFn) {
         (
             <Name>Builtin.manifest(),
-            |factory, plugin, decl, kind, budget| {
-                <Name>Builtin.mint(factory, plugin, decl, kind, budget)
+            |factory, plugin, decl, kind, budget, bindings| {
+                <Name>Builtin.mint(factory, plugin, decl, kind, budget, bindings)
             },
             default_ruin,
         )
@@ -253,12 +256,22 @@ impl <Name>Builtin {
 }
 ```
 
+`bindings` is the minting plugin's own row of
+`ResolvedPlan::bindings` — the capabilities its `requires`
+resolved to. It is empty for a plugin that declares none, which
+is every builtin except the agent. The orchestrator injects it
+at mint time because minting walks `plan.mint_order`, so a
+consumer is always minted after the providers it binds to.
+`RuinFn` returns the number of slots it revoked: the hook owns
+the revoke, so the orchestrator reports its count instead of
+revoking a second time to derive one.
+
 The example binary at `examples/basic.rs` builds the registry from
 those helpers:
 
 ```rust
 use odyssey::personality::lifecycle::run::run;
-use odyssey_builtins::{database, echo, reverse, streaming_echo};
+use odyssey_builtins::{agent, database, echo, reverse, streaming_echo};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -267,21 +280,62 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         reverse::ReverseBuiltin::register(),
         database::DatabaseBuiltin::register(),
         streaming_echo::StreamingEchoBuiltin::register(),
+        agent::AgentListBuiltin::register(),
+        agent::AgentDescribeBuiltin::register(),
     ];
     run(&plugins).await
 }
 ```
 
-`run` boots the kernel, collects manifests from the four
-builtins, resolves the dependency graph, mints each capability
-into the cspace via the registry's typed `MintFn`, brings up
-the HTTP bridge, waits for Ctrl-C, and tears down in reverse
-mint order.
+`run` boots the kernel, collects manifests from the six
+builtins, resolves the dependency graph — the agent's `requires`
+edges are the only ones, so it is ordered after its four
+providers — mints each capability into the cspace via the
+registry's typed `MintFn`, brings up the HTTP bridge, waits for
+Ctrl-C, and tears down in reverse mint order.
+
+## Agent builtin
+
+`builtins/src/agent.rs` exposes two read-only capabilities over
+the reachable set its `requires` resolved to:
+
+```
+POST /api/invoke  {"capability":"agent_list","input":{}}
+  → {"handles":[{"handle":"echo","live":true}, ...]}
+
+POST /api/invoke  {"capability":"agent_describe","input":{"handle":"echo"}}
+  → {"handle":"echo","live":true,"capability":"echo","contract":"echo",
+     "name":"echo","namespace":"echo","plugin":"echo","kind":"sync",
+     "streaming":false,"in_type":"any","out_type":"any",
+     "timeout_ms":5000,"calls_per_minute":0,
+     "operations":["READ","WRITE","EXECUTE","ADMIN"]}
+```
+
+Two properties hold by construction rather than by convention:
+
+- **The reachable set is the binding table.** Every name the
+  agent resolves comes out of a `ResolvedBinding`. A capability
+  installed in the cspace under a name no `requires` mentioned
+  is unreachable: `describe` answers `agent: unknown handle`
+  for it, because `reach` searches the table before it touches
+  the cspace.
+- **Nothing is snapshotted.** `CapabilityMeta` carries no
+  operation rights — those live on `Capability<R>` behind
+  `AnyCapability::operations()`. So the agent stores
+  declarations and resolves live per call. A capability revoked
+  after mint reports `live: false` with its capability-level
+  fields absent, rather than a stale record claiming it exists.
+
+The agent observes and never invokes. Erased invocation
+(`AnyCapability::invoke_dyn`) does not consult `OperationRights`
+the way the typed `invoke_op` does — the HTTP bridge has the
+same gap — so an agent that dispatched would inherit it. Closing
+that gap is separate work.
 
 ## Test
 
 `cargo test` runs two integration binaries: `tests/layering.rs` (3
-tests) and `tests/smoke.rs` (3 tests).
+tests) and `tests/smoke.rs` (5 tests).
 
 `tests/layering.rs` parses every `.rs` file with `syn`, walks every
 `UseTree`, and asserts:
@@ -298,8 +352,11 @@ and nested groups — the earlier line-scanner missed all three.
 
 `tests/smoke.rs` covers the behavioural side: an echo mint + typed
 slot + invoke round-trip, a `streaming_echo` `open` round-trip that
-collects every chunk, and the sync-invoke-on-a-streaming-cap
-`KindMismatch` rejection.
+collects every chunk, the sync-invoke-on-a-streaming-cap
+`KindMismatch` rejection, and two agent tests — one resolving the
+agent's manifests end to end and asserting the binding row and mint
+order they produce, one driving `AgentCore` directly to pin the
+three reachability outcomes (unreachable, revoked, unbound).
 
 These invariants catch accidental layer crossings during future
 refactors.

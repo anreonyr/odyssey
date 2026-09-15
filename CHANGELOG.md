@@ -6,6 +6,85 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — agent builtin: the resolver's binding table reaches a running plugin
+
+`ResolvedPlan::bindings` had no runtime consumer. It was
+computed at boot, printed by `ResolvedPlan::render`, and
+dropped — and because no builtin declared `requires`, it was
+empty anyway. `builtins/src/agent.rs` is the first consumer:
+a read-only view over a plugin's own reachable capabilities.
+
+- **`MintFn` gains a `bindings` parameter**
+  (`&[ResolvedBinding]`). This is the only way the table
+  reaches a plugin. Injection happens at mint time rather
+  than call time because minting walks `plan.mint_order`, so
+  a consumer is always minted after its providers. The four
+  existing builtins ignore it.
+
+- **`ManifestBuilder` is additive.** `new()` takes only the
+  plugin name; capabilities are appended with
+  `.expose(name, contract)` / `.expose_streaming(name,
+  contract)`. The builder previously held one capability's
+  fields flat and `build` wrapped a single `CapabilityDecl`
+  in a one-element `vec!`, so a two-capability plugin was not
+  expressible. The singular `.in_type` / `.out_type` /
+  `.kind` setters go with the fields.
+
+- **Two capabilities, one use each.** `agent_list` returns
+  every reachable handle with a `live` flag; `agent_describe`
+  returns the `CapabilityMeta` of one handle plus its
+  `operations`. Two `Resource` types, two contracts, no `op`
+  field in the request body.
+
+- **Reachability is a property of the table.** Every name the
+  agent resolves comes out of a `ResolvedBinding`; `reach`
+  searches the table before it touches the cspace, so a
+  capability installed under a name no `requires` mentioned
+  is unreachable. This is what the deleted `RuleAgent` could
+  not do — it dispatched by cspace name, and rebuilding that
+  as a *convention* was the old gap.
+
+- **Nothing is snapshotted.** `CapabilityMeta` carries no
+  operation rights; those live on `Capability<R>` behind
+  `AnyCapability::operations()`. So the agent stores
+  declarations and resolves live per call. A capability
+  revoked after mint reports `live: false` with its
+  capability-level fields absent, which is the P3.5
+  "reachable but cap missing in cspace" state made
+  observable.
+
+- **Scope is read-only by decision.** Erased invocation
+  (`AnyCapability::invoke_dyn`) does not consult
+  `OperationRights` the way `invoke_op` does — `invoke_dyn`
+  forwards to `invoke`, which checks only kind and
+  revocation, and the HTTP bridge's `/api/invoke` has the same
+  gap. An agent that dispatched would inherit it. The agent
+  therefore observes and never invokes; closing that gap is a
+  separate line of work.
+
+- **Boot output changes shape.** `Bindings:` is non-empty for
+  the first time — the two agent plugins each carry four rows.
+
+### Fixed — teardown accounting
+
+The `revoked N slot(s)` line always printed `0`.
+`default_ruin` already revoked every minted slot, and the
+orchestrator then ran a second revoke loop purely to count;
+by then `revoke_tree` found the slot gone. `RuinFn` now owns
+the revoke and returns `Result<usize, String>`, so the
+orchestrator reports a real number and revokes itself only
+when the hook failed or panicked. Observed on a real Ctrl-C
+before the fix: four plugins each reporting `revoked 0
+slot(s)` while the cspace emptied.
+
+`mint_from_registry` also carried two unreachable guards: its
+`by_id` manifest map and its `by_name` dispatch map were both
+derived from the same `plugins` slice, so neither lookup
+could miss, and the `by_name.len() != plugins.len()` check
+could not catch a duplicate because `BTreeMap::collect`
+keeps the last entry. Both maps collapse into one
+`plugin_registry()` that mint and ruin walk by the same key.
+
 ### Added — Phase 11: streaming builtin
 
 The first end-to-end `Resource::open` demo. The streaming
