@@ -17,7 +17,10 @@
 //! - `reverse` — string reverse.
 //! - `database` — key-value store with `get` / `set` / `delete`
 //!   operations.
+//! - `streaming_echo` — emits `count` chunks then `Done`; the
+//!   first end-to-end `Resource::open` demo.
 
 pub mod database;
 pub mod echo;
 pub mod reverse;
+pub mod streaming_echo;

@@ -2,8 +2,10 @@
 name = "odyssey-builtins"
 version = "0.1.0"
 edition = "2024"
-description = "Built-in capability plugins for odyssey (echo, reverse, database)."
+description = "Built-in capability plugins for odyssey (echo, reverse, database, streaming_echo)."
 
 [dependencies]
 odyssey = { path = ".." }
 serde_json = "1"
+tokio = { version = "1.50", features = ["sync"] }
+tokio-stream = "0.1"

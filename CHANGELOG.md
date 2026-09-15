@@ -6,6 +6,33 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Phase 11: streaming builtin
+
+The first end-to-end `Resource::open` demo. The streaming
+infrastructure (`Resource::open` returning
+`mpsc::Receiver<CapabilityChunk>`, `Capability::open`
+typed path, the `/api/stream` SSE bridge) has been in
+place since Phase 8 — `streaming_echo` exercises it for
+the first time.
+
+- **`StreamingEchoBuiltin`** (`builtins/src/streaming_echo.rs`).
+  A streaming capability that emits `count` chunks of
+  `{"text": <input>, "index": i}` then one `Done` chunk.
+  Manifest declares `kind = CapKind::Stream`. The resource
+  is stateless; the producer task is `tokio::spawn`-ed
+  from inside `Resource::open` and observes receiver-drop
+  via the standard mpsc `tx.send().await` close pattern
+  (the same pattern Phase 5 commit `acab1df` documented for
+  `stream-cancel-during-revoke-test`). No `tokio::select!`,
+  no external cancellation signal — the receiver drop is
+  the cancellation signal.
+
+- **Smoke test.** `tests/smoke.rs::streaming_echo_builtin_
+  round_trips_through_typed_open` (`#[tokio::test(flavor =
+  "current_thread")]`, bounded by `tokio::time::timeout(2s)`)
+  opens the streaming slot, collects all chunks, and
+  asserts the count + content shape.
+
 ### Changed — Phase 9 + 9.5 + 10: cleanup
 
 A 19-commit pass (9 Phase 9 + 9 Phase 9.5 + 1 Phase 10) that

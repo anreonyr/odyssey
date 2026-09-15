@@ -1,0 +1,138 @@
+//! Streaming echo builtin — pass-through that emits `count`
+//! chunks then a terminal `Done`.
+//!
+//! Phase 11: the first end-to-end `Resource::open` demo.
+//! The streaming infrastructure (`Resource::open` returning
+//! `mpsc::Receiver<CapabilityChunk>`, `Capability::open` typed
+//! path, the `/api/stream` SSE bridge) has been in place since
+//! Phase 8 — this builtin exercises it for the first time.
+//!
+//! Input shape: `{ "text": "<string>", "count": N }`. The handler
+//! emits `N` `Item` chunks of `{ "text": <input>, "index": i }`
+//! for `i ∈ [0, N)`, then one `CapabilityChunk::Done` chunk.
+//!
+//! The producer task is `tokio::spawn`-ed from inside
+//! `Resource::open`. It owns `tx: mpsc::Sender<CapabilityChunk>`
+//! and a copy of `text` + `count`. Cancellation comes from the
+//! standard mpsc `tx.send().await` returning `Err(SendError(_))`
+//! when the consumer drops the receiver — the same pattern
+//! Phase 5 commit `acab1df` documented for the
+//! `stream-cancel-during-revoke-test`. No `tokio::select!`,
+//! no external cancellation signal — the receiver drop *is*
+//! the cancellation signal.
+
+use std::sync::Arc;
+
+use tokio::sync::mpsc;
+
+use odyssey::capability::enforce::quota::CapabilityBudget;
+use odyssey::core::Resource;
+use odyssey::core::contract::builtin::BuiltinManifest;
+use odyssey::core::identity::ids::{PluginId, SlotId};
+use odyssey::core::identity::kind::CapKind;
+use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
+use odyssey::core::meta::chunk::CapabilityChunk;
+use odyssey::personality::lifecycle::mint::CapabilityFactory;
+use odyssey::personality::lifecycle::run::MintFn;
+use serde_json::{json, Value};
+
+/// Streaming echo resource — `open` emits `count` chunks then
+/// `Done` over an mpsc channel.
+pub struct StreamingEchoResource;
+
+impl Resource for StreamingEchoResource {
+    fn open(
+        &self,
+        input: Value,
+    ) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
+        let text = input
+            .get("text")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| {
+                format!(
+                    "streaming_echo: expected {{\"text\": \"<string>\"}}, got {}",
+                    input
+                )
+            })?
+            .to_string();
+        let count = input
+            .get("count")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| {
+                format!(
+                    "streaming_echo: expected {{\"count\": <u64>}}, got {}",
+                    input
+                )
+            })?;
+
+        let (tx, rx) = mpsc::channel::<CapabilityChunk>(16);
+        tokio::spawn(async move {
+            for i in 0..count {
+                let chunk = CapabilityChunk::Item(json!({
+                    "text": text,
+                    "index": i,
+                }));
+                if tx.send(chunk).await.is_err() {
+                    // Receiver dropped — consumer revoke, SSE
+                    // client disconnect, or cspace revoke_tree.
+                    // Producer exits gracefully; the cspace's
+                    // `revoke_tree` on teardown will close the
+                    // receiver and trip this branch.
+                    return;
+                }
+            }
+            // Best-effort: send Done. If the consumer is already
+            // gone the channel is closed and we exit.
+            let _ = tx.send(CapabilityChunk::Done).await;
+        });
+        Ok(rx)
+    }
+}
+
+/// Concrete streaming echo builtin. Exposes `manifest()` (via
+/// the `BuiltinManifest` trait) and `mint()` (typed concrete
+/// method that calls the generic factory with
+/// `Arc<StreamingEchoResource>`).
+pub struct StreamingEchoBuiltin;
+
+impl BuiltinManifest for StreamingEchoBuiltin {
+    fn manifest(&self) -> PluginManifest {
+        ManifestBuilder::new("streaming_echo", "streaming_echo", "streaming_echo")
+            .host("dispatcher")
+            .kind(CapKind::Stream)
+            .timeout_ms(5000)
+            .build()
+    }
+}
+
+impl StreamingEchoBuiltin {
+    /// Typed mint — calls the factory's generic
+    /// `mint<StreamingEchoResource>`. The kind comes from the
+    /// manifest (`CapKind::Stream`) and the factory stamps it
+    /// on the capability so `Capability::open` accepts the slot.
+    pub fn mint(
+        &self,
+        factory: &CapabilityFactory,
+        plugin: &PluginId,
+        decl: &CapabilityDecl,
+        kind: CapKind,
+        budget: CapabilityBudget,
+    ) -> SlotId {
+        factory.mint(kind, decl, plugin, budget, Arc::new(StreamingEchoResource))
+    }
+
+    /// Phase 10 colocated registration helper. At Phase 11 the
+    /// third tuple element (`RuinFn`) hasn't been introduced
+    /// yet, so the return is the 2-tuple. The Phase 12 commit
+    /// that adds the symmetric `RuinFn` will extend this to a
+    /// 3-tuple; the call site at `examples/basic.rs` updates in
+    /// lockstep.
+    pub fn register() -> (PluginManifest, MintFn) {
+        (
+            StreamingEchoBuiltin.manifest(),
+            |factory, plugin, decl, kind, budget| {
+                StreamingEchoBuiltin.mint(factory, plugin, decl, kind, budget)
+            },
+        )
+    }
+}

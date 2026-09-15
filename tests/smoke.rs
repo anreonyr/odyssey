@@ -43,6 +43,7 @@
 //! `cargo build` if it drifted.
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use odyssey::capability::enforce::quota::CapabilityBudget;
 use odyssey::capability::enforce::space::CapabilitySpace;
@@ -51,8 +52,11 @@ use odyssey::core::clock::clock::SystemClock;
 use odyssey::core::contract::builtin::BuiltinManifest;
 use odyssey::core::identity::ids::PluginId;
 use odyssey::core::identity::kind::CapKind;
+use odyssey::core::meta::chunk::CapabilityChunk;
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
 use odyssey_builtins::echo::{EchoBuiltin, EchoResource};
+use odyssey_builtins::streaming_echo::{StreamingEchoBuiltin, StreamingEchoResource};
+use tokio_stream::StreamExt;
 
 #[test]
 fn echo_builtin_round_trips_through_typed_mint() {
@@ -90,4 +94,78 @@ fn echo_builtin_round_trips_through_typed_mint() {
         output, input,
         "echo builtin must return its input unchanged"
     );
+}
+
+/// Phase 11 streaming smoke test. Exercises the full
+/// `Resource::open` path: mint a streaming cap, call
+/// `Slot::open(...)` to get a `Receiver<CapabilityChunk>`,
+/// collect the chunks, assert shape + count. Bounded by
+/// `tokio::time::timeout` so a hung producer fails the test
+/// rather than hanging CI.
+#[tokio::test(flavor = "current_thread")]
+async fn streaming_echo_builtin_round_trips_through_typed_open() {
+    let cspace = CapabilitySpace::new();
+    let factory = CapabilityFactory::with_clock(cspace.clone(), Arc::new(SystemClock));
+
+    let builtin = StreamingEchoBuiltin;
+    let manifest = builtin.manifest();
+    let decl = &manifest.exposes[0];
+
+    let slot_id = builtin.mint(
+        &factory,
+        &PluginId {
+            name: "streaming_echo".into(),
+            version: "0.1.0".into(),
+        },
+        decl,
+        CapKind::Stream,
+        CapabilityBudget::new(5000),
+    );
+
+    let slot: Slot<StreamingEchoResource> = Slot::new(cspace, slot_id);
+    let rx = slot
+        .open(serde_json::json!({"text": "hi", "count": 3}))
+        .expect("open should succeed");
+
+    // Collect all chunks within a 2-second budget. A hung
+    // producer fails the test instead of hanging the runner.
+    let chunks: Vec<CapabilityChunk> = tokio::time::timeout(
+        Duration::from_secs(2),
+        tokio_stream::wrappers::ReceiverStream::new(rx)
+            .collect::<Vec<_>>(),
+    )
+    .await
+    .expect("streaming_echo producer hung within 2s budget");
+
+    assert_eq!(
+        chunks.len(),
+        4,
+        "expected 3 items + 1 done = 4 chunks, got {}",
+        chunks.len()
+    );
+
+    // Last chunk must be Done.
+    assert!(
+        matches!(chunks.last(), Some(CapabilityChunk::Done)),
+        "last chunk should be Done, got {:?}",
+        chunks.last()
+    );
+
+    // The 3 item chunks carry the right text and indices in
+    // order.
+    for (i, chunk) in chunks.iter().take(3).enumerate() {
+        let CapabilityChunk::Item(value) = chunk else {
+            panic!("expected Item at index {i}, got {chunk:?}");
+        };
+        assert_eq!(
+            value.get("text").and_then(|v| v.as_str()),
+            Some("hi"),
+            "chunk {i} text mismatch"
+        );
+        assert_eq!(
+            value.get("index").and_then(|v| v.as_u64()),
+            Some(i as u64),
+            "chunk {i} index mismatch"
+        );
+    }
 }
