@@ -55,7 +55,7 @@ pub fn meta_from_decl(
         plugin: plugin.clone(),
         in_type: decl.in_type.clone(),
         out_type: decl.out_type.clone(),
-        streaming: decl.streaming,
+        kind: decl.kind,
         timeout_ms: budget.timeout_ms(),
         quota: budget.quota_spec(),
     }

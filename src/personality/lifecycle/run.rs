@@ -126,7 +126,7 @@ async fn mint_three_builtins(
         let Some(m) = by_id.get(plugin_id) else { continue };
         let mut plugin_slots = Vec::with_capacity(m.exposes.len());
         for decl in &m.exposes {
-            let kind = if decl.streaming { CapKind::Stream } else { CapKind::Sync };
+            let kind = decl.kind;
             let budget = CapabilityBudget::new(m.resources.timeout_ms.unwrap_or(5000));
             let slot_id = match plugin_id.name.as_str() {
                 "echo" => echo.mint(factory, plugin_id, decl, kind, budget),

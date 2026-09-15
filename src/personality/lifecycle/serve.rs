@@ -41,6 +41,11 @@ struct AppState {
 struct CapInfo {
     name: String,
     id: String,
+    /// Serialised as the legacy `streaming: bool` field for
+    /// HTTP API back-compat. The runtime meta now carries
+    /// `kind: CapKind`; the bridge flattens it to a bool for
+    /// the JSON payload. (A future `?as_kind=` extension can
+    /// expose the full enum; today no client needs it.)
     streaming: bool,
     timeout_ms: u32,
     in_type: String,
@@ -90,7 +95,7 @@ async fn list_caps(State(state): State<AppState>) -> Json<Vec<CapInfo>> {
             .map(|m: CapabilityMeta| CapInfo {
                 name: m.name.clone(),
                 id: m.id.to_string(),
-                streaming: m.streaming,
+                streaming: m.kind == crate::core::identity::kind::CapKind::Stream,
                 timeout_ms: m.timeout_ms,
                 in_type: m.in_type.clone(),
                 out_type: m.out_type.clone(),

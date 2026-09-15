@@ -27,6 +27,7 @@
 use serde::{Deserialize, Serialize};
 
 pub use crate::core::identity::ids::PluginId;
+use crate::core::identity::kind::CapKind;
 
 // ---------------------------------------------------------------------------
 // Data shapes
@@ -100,7 +101,7 @@ pub enum IsolationMode {
     InProc,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CapabilityDecl {
     pub name: String,
     /// Logical type name for input (declared in manifest). Surfaced
@@ -113,8 +114,16 @@ pub struct CapabilityDecl {
     /// type check.
     #[serde(default)]
     pub out_type: String,
+    /// Runtime kind (sync vs stream). Phase 9 cleanup: replaced
+    /// the previous `streaming: bool` field. The bool could only
+    /// express two states; the `CapKind` enum is the single
+    /// source of truth for kind across the kernel, the runtime
+    /// meta, and the manifest. Serde's `default` keeps the
+    /// manifest TOML shape honest (a missing `kind` parses as
+    /// `Sync`); the legacy `streaming: bool` field is no longer
+    /// recognised.
     #[serde(default)]
-    pub streaming: bool,
+    pub kind: CapKind,
     /// Phase 3 P3.1 — the contract name this capability publishes.
     /// Other plugins declare a matching `contract` in their
     /// `[[requires]]` block to be bound to this capability at boot.
@@ -174,6 +183,12 @@ pub struct ResourceHints {
 /// write-only metadata. If a future cap needs to advertise a
 /// typed contract vocabulary, add it back at the same time the
 /// reader is added.
+///
+/// Phase 9: the previous `.streaming(bool)` setter is gone —
+/// `CapabilityDecl.streaming` is now `CapabilityDecl.kind`
+/// (`CapKind`). Builders declare the kind directly via
+/// `.kind(CapKind::Stream)` for streaming caps; the default
+/// stays `CapKind::Sync`.
 pub struct ManifestBuilder {
     name: String,
     version: String,
@@ -181,7 +196,7 @@ pub struct ManifestBuilder {
     cap_contract: String,
     cap_in_type: String,
     cap_out_type: String,
-    cap_streaming: bool,
+    cap_kind: CapKind,
     requires: Vec<CapabilityRequirement>,
     host: Vec<HostServiceRef>,
     timeout_ms: Option<u32>,
@@ -203,7 +218,7 @@ impl ManifestBuilder {
             cap_contract: cap_contract.into(),
             cap_in_type: "any".into(),
             cap_out_type: "any".into(),
-            cap_streaming: false,
+            cap_kind: CapKind::Sync,
             requires: Vec::new(),
             host: Vec::new(),
             timeout_ms: None,
@@ -228,9 +243,9 @@ impl ManifestBuilder {
         self
     }
 
-    /// Mark the capability as streaming (default `false`).
-    pub fn streaming(mut self, s: bool) -> Self {
-        self.cap_streaming = s;
+    /// Set the capability's runtime kind (default `CapKind::Sync`).
+    pub fn kind(mut self, k: CapKind) -> Self {
+        self.cap_kind = k;
         self
     }
 
@@ -274,7 +289,7 @@ impl ManifestBuilder {
             cap_contract,
             cap_in_type,
             cap_out_type,
-            cap_streaming,
+            cap_kind,
             requires,
             host,
             timeout_ms,
@@ -286,7 +301,7 @@ impl ManifestBuilder {
                 name: cap_name,
                 in_type: cap_in_type,
                 out_type: cap_out_type,
-                streaming: cap_streaming,
+                kind: cap_kind,
                 contract_name: cap_contract,
             }],
             requires,

@@ -17,6 +17,7 @@
 
 use crate::core::identity::ids::CapabilityId;
 use crate::core::identity::ids::PluginId;
+use crate::core::identity::kind::CapKind;
 use crate::core::quota::quota::QuotaSpec;
 
 /// Static description of a capability. Carried inside every token;
@@ -44,7 +45,7 @@ pub struct CapabilityMeta {
     pub plugin: PluginId,
     pub in_type: String,
     pub out_type: String,
-    pub streaming: bool,
+    pub kind: CapKind,
     pub timeout_ms: u32,
     pub quota: QuotaSpec,
 }
