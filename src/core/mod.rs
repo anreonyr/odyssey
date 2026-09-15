@@ -10,16 +10,13 @@
 //!
 //! - `identity` — `CapabilityId`, `SlotId`, `PluginId`, `CapKind`.
 //! - `clock` — `Clock` trait + `SystemClock` + `MockClock`.
-//! - `meta` — `CapabilityMeta`, `AuthorityContract`, `Protocol`,
-//!   `CapabilityChunk`.
+//! - `meta` — `CapabilityMeta`, `CapabilityChunk`.
 //! - `rights` — `OperationRights`, `CapabilityRights`,
 //!   `parse_operation`.
 //! - `manifest` — `PluginManifest`, `ManifestBuilder`,
 //!   `CapabilityDecl`, `CapabilityRequirement`, `HostServiceRef`,
-//!   `IsolationMode`, `ResourceHints`, `ManifestError`, TOML
-//!   loader.
-//! - `contract` — abstract traits: `Resource`, `Builtin`,
-//!   `BuiltinFactory`.
+//!   `IsolationMode`, `ResourceHints`.
+//! - `contract` — abstract traits: `Resource`, `BuiltinManifest`.
 
 pub mod clock;
 pub mod contract;
@@ -39,10 +36,10 @@ pub use contract::resource::Resource;
 pub use identity::ids::{CapabilityId, PluginId, SlotId};
 pub use identity::kind::CapKind;
 pub use manifest::manifest::{
-    from_path, from_toml_str, CapabilityDecl, CapabilityRequirement, HostServiceRef,
-    IsolationMode, ManifestBuilder, ManifestError, PluginManifest, ResourceHints,
+    CapabilityDecl, CapabilityRequirement, HostServiceRef, IsolationMode, ManifestBuilder,
+    PluginManifest, ResourceHints,
 };
-pub use meta::meta::{AuthorityContract, CapabilityAction, CapabilityMeta, Protocol};
+pub use meta::meta::CapabilityMeta;
 pub use meta::chunk::CapabilityChunk;
 pub use quota::quota::{QuotaKind, QuotaSnapshot, QuotaSpec};
 pub use rights::rights::{parse_operation, CapabilityRights, OperationRights};

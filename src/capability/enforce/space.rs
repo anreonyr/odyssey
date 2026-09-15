@@ -336,38 +336,6 @@ impl CapabilitySpace {
         self.inner.parents.read().expect("cspace poisoned").clone()
     }
 
-    /// Pair every installed slot with its registered name and
-    /// metadata. Used by the graph snapshot view to assign a
-    /// real `SlotId` to each `GraphNode` (the public API
-    /// exposes `enumerate()` over names, not slots, so the
-    /// graph view needs this join to produce a node-per-slot
-    /// mapping). Internal-only; the HTTP bridge walks it once
-    /// per `snapshot`.
-    pub fn snapshot_index(&self) -> Vec<(SlotId, CapabilityMeta)> {
-        // Canonical lock order: parents → slots → names.
-        let _parents = self.inner.parents.read().expect("cspace poisoned");
-        let slots = self.inner.slots.read().expect("cspace poisoned");
-        let names = self.inner.names.read().expect("cspace poisoned");
-        let mut out: Vec<(SlotId, _)> = Vec::with_capacity(slots.len());
-        for slot_id in slots.keys() {
-            let cap = slots.get(slot_id).unwrap();
-            let meta = cap.cap.meta().clone();
-            let canonical_name = names
-                .iter()
-                .filter(|(_, s)| **s == *slot_id)
-                .map(|(n, _)| n.clone())
-                .min()
-                .unwrap_or_default();
-            let mut m = meta;
-            if !canonical_name.is_empty() {
-                m.name = canonical_name;
-            }
-            out.push((*slot_id, m));
-        }
-        out.sort_by_key(|(s, _)| *s);
-        out
-    }
-
     /// Direct children of `slot` in the parent-pointer tree.
     /// Roots are slots whose parent pointer is not in `parents`;
     /// leaves are slots that have no children of their own.
@@ -649,15 +617,3 @@ pub fn revoke_tree(space: &CapabilitySpace, root: SlotId) -> usize {
     removed
 }
 
-// Suppress unused-import warnings on `CapKind` and `OperationRights` —
-// they are referenced transitively via `Capability::new` callers in
-// the personality layer, but Rust's orphan-check for the merged
-// file flags them as unused inside this module.
-#[allow(unused_imports)]
-use crate::core::identity::kind::CapKind as _CapKind;
-#[allow(unused_imports)]
-use crate::core::rights::rights::OperationRights as _OperationRights;
-#[allow(unused_imports)]
-use crate::core::quota::quota::QuotaKind as _QuotaKind;
-#[allow(unused_imports)]
-use crate::core::meta::chunk::CapabilityChunk as _CapabilityChunk;

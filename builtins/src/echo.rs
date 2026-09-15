@@ -34,7 +34,6 @@ impl BuiltinManifest for EchoBuiltin {
     fn manifest(&self) -> PluginManifest {
         ManifestBuilder::new("echo", "echo", "echo")
             .host("dispatcher")
-            .action("echo", "EXECUTE")
             .timeout_ms(5000)
             .build()
     }

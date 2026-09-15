@@ -33,11 +33,6 @@ pub trait AnyCapability: Any + Send + Sync {
     fn is_streaming(&self) -> bool;
     fn operations(&self) -> OperationRights;
     fn invoke_dyn(&self, input: Value) -> Result<Value, String>;
-    fn invoke_op_dyn(
-        &self,
-        op: OperationRights,
-        input: Value,
-    ) -> Result<Value, String>;
     fn open_dyn(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String>;
     fn as_any(&self) -> &dyn Any;
 
@@ -98,13 +93,6 @@ impl<R: Resource> AnyCapability for Capability<R> {
     }
     fn invoke_dyn(&self, input: Value) -> Result<Value, String> {
         self.invoke(input).map_err(|e| e.to_string())
-    }
-    fn invoke_op_dyn(
-        &self,
-        op: OperationRights,
-        input: Value,
-    ) -> Result<Value, String> {
-        self.invoke_op(op, input).map_err(|e| e.to_string())
     }
     fn invoke_dyn_typed(&self, input: Value) -> Result<Value, CapabilityError> {
         self.invoke(input)

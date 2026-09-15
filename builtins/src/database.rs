@@ -80,9 +80,6 @@ impl BuiltinManifest for DatabaseBuiltin {
     fn manifest(&self) -> PluginManifest {
         ManifestBuilder::new("database", "database", "database")
             .host("dispatcher")
-            .action("get", "READ")
-            .action("set", "WRITE")
-            .action("delete", "WRITE")
             .timeout_ms(5000)
             .build()
     }

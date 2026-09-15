@@ -1,4 +1,4 @@
-//! Plugin manifest — data shape + builder + TOML loader + validate.
+//! Plugin manifest — data shape + builder.
 //!
 //! Phase 8: this file is the merge of the Phase 5 split
 //! (`types.rs` + `builder.rs` + `load.rs` + `mod.rs`) into one
@@ -6,24 +6,27 @@
 //! owned the manifest types; in the new layout the manifest is
 //! a leaf shared value type, and one file is enough.
 //!
-//! Manifests are TOML files (or fluent `ManifestBuilder` chains
-//! in plugin code) describing plugin identity, the exposed
-//! capability surface (including the JSON-Schema contract the
-//! `RuleAgent` and HTTP bridge consult), dependencies on other
-//! plugins' capabilities, host services the plugin needs, and
-//! resource hints.
+//! Phase 9 cleanup: the TOML loader (`from_toml_str`,
+//! `from_path`) and the `validate` method are deleted. The
+//! Phase 5/6/7 era of plugins loading manifests from disk is
+//! over; every runtime plugin (and now every builtin) builds
+//! its manifest in code via `ManifestBuilder`. The `toml` and
+//! `serde::Deserialize` derives stay so a future TOML file
+//! can re-attach if the deferred WASM / cdylib loaders come
+//! back, but the wiring helpers are gone.
+//!
+//! Manifests describe plugin identity, the exposed capability
+//! surface, dependencies on other plugins' capabilities, host
+//! services the plugin needs, and resource hints.
 //!
 //! Today every plugin compiles into the host binary as an in-proc
 //! module (`InProc` isolation). Designs for WASM / cdylib /
 //! subprocess loaders — including the manifest shapes those
 //! loaders must honour — live under `docs/deferred/`.
 
-use std::path::Path;
-
 use serde::{Deserialize, Serialize};
 
 pub use crate::core::identity::ids::PluginId;
-use crate::core::meta::meta::{AuthorityContract, Protocol};
 
 // ---------------------------------------------------------------------------
 // Data shapes
@@ -100,15 +103,15 @@ pub enum IsolationMode {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CapabilityDecl {
     pub name: String,
-    /// Logical type name for input (declared in manifest). Surfaced to the
-    /// HTTP bridge for clients; not yet enforced as a runtime type check.
+    /// Logical type name for input (declared in manifest). Surfaced
+    /// to the HTTP bridge for clients; not yet enforced as a runtime
+    /// type check.
     #[serde(default)]
-    #[allow(dead_code)]
     pub in_type: String,
-    /// Logical type name for output (declared in manifest). Surfaced to the
-    /// HTTP bridge for clients; not yet enforced as a runtime type check.
+    /// Logical type name for output (declared in manifest). Surfaced
+    /// to the HTTP bridge for clients; not yet enforced as a runtime
+    /// type check.
     #[serde(default)]
-    #[allow(dead_code)]
     pub out_type: String,
     #[serde(default)]
     pub streaming: bool,
@@ -121,21 +124,6 @@ pub struct CapabilityDecl {
     /// `"generator"`, `"embedder"`, `"database"`, `"agent"`.
     #[serde(default)]
     pub contract_name: String,
-    /// Phase 3 P3.2 — Authority vocabulary (action →
-    /// `OperationRights` map). The runtime path's only
-    /// authority input; `RuleAgent` reads
-    /// `authority.operation_for(action)` to translate verbs
-    /// to bits. Optional — empty authority means "no
-    /// enumerable action surface".
-    #[serde(default)]
-    pub authority: AuthorityContract,
-    /// Phase 3 P3.2 — Wire-protocol metadata (schemas,
-    /// description, transport, version, media_type). Pure
-    /// metadata; the runtime never validates against it.
-    /// Optional — empty protocol means "no advertised wire
-    /// metadata".
-    #[serde(default)]
-    pub protocol: Protocol,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -152,79 +140,11 @@ pub struct ResourceHints {
     ///
     /// Phase 8 cleanup: `cpu`, `mem_mb`, `io_bps` were serde-
     /// decorated but had zero readers anywhere in `src/`. Same
-    /// family of dead code as Phase 5 D5 (the `tokens_per_minute` /
+    /// family as Phase 5 D5 (the `tokens_per_minute` /
     /// `bytes_per_minute` quota fields). Serde's
     /// `deny_unknown_fields = false` silently drops them on load
     /// so no manifest breaks.
     pub timeout_ms: Option<u32>,
-}
-
-// ---------------------------------------------------------------------------
-// Error type
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, thiserror::Error)]
-pub enum ManifestError {
-    #[error("io: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("parse: {0}")]
-    Parse(#[from] toml::de::Error),
-    #[error("validation: {0}")]
-    Validation(String),
-}
-
-impl PluginManifest {
-    pub fn validate(&self) -> Result<(), ManifestError> {
-        if self.plugin.name.is_empty() {
-            return Err(ManifestError::Validation("plugin.name is empty".into()));
-        }
-        if self.plugin.version.is_empty() {
-            return Err(ManifestError::Validation("plugin.version is empty".into()));
-        }
-        if self.exposes.is_empty() {
-            return Err(ManifestError::Validation(
-                "plugin must expose at least one capability".into(),
-            ));
-        }
-        for cap in &self.exposes {
-            if cap.name.is_empty() {
-                return Err(ManifestError::Validation(
-                    "capability.name is empty".into(),
-                ));
-            }
-        }
-        Ok(())
-    }
-}
-
-// ---------------------------------------------------------------------------
-// TOML loader
-// ---------------------------------------------------------------------------
-
-/// Parse a TOML string into a [`PluginManifest`].
-pub fn from_toml_str(s: &str) -> Result<PluginManifest, ManifestError> {
-    let m: PluginManifest = toml::from_str(s)?;
-    m.validate()?;
-    Ok(m)
-}
-
-/// Load a manifest from a TOML file on disk.
-pub fn from_path(p: impl AsRef<Path>) -> Result<PluginManifest, ManifestError> {
-    let text = std::fs::read_to_string(p)?;
-    from_toml_str(&text)
-}
-
-impl PluginManifest {
-    /// Convenience re-export so existing call sites
-    /// (`PluginManifest::from_toml_str`, `from_path`) keep
-    /// compiling after the loader moves into its own module.
-    pub fn from_toml_str(s: &str) -> Result<Self, ManifestError> {
-        from_toml_str(s)
-    }
-
-    pub fn from_path(p: impl AsRef<Path>) -> Result<Self, ManifestError> {
-        from_path(p)
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -247,6 +167,13 @@ impl PluginManifest {
 /// | `requires`     | `[]`                  |
 /// | `host`         | `[]`                  |
 /// | `timeout_ms`   | `None` → host default |
+///
+/// Phase 9: the previous `.action(name, op)` and `.protocol(p)`
+/// setters are gone — they fed the now-deleted
+/// `AuthorityContract` / `Protocol` fields that were
+/// write-only metadata. If a future cap needs to advertise a
+/// typed contract vocabulary, add it back at the same time the
+/// reader is added.
 pub struct ManifestBuilder {
     name: String,
     version: String,
@@ -258,8 +185,6 @@ pub struct ManifestBuilder {
     requires: Vec<CapabilityRequirement>,
     host: Vec<HostServiceRef>,
     timeout_ms: Option<u32>,
-    actions: Vec<(String, String)>,
-    protocol: Protocol,
 }
 
 impl ManifestBuilder {
@@ -282,8 +207,6 @@ impl ManifestBuilder {
             requires: Vec::new(),
             host: Vec::new(),
             timeout_ms: None,
-            actions: Vec::new(),
-            protocol: Protocol::empty(),
         }
     }
 
@@ -335,46 +258,6 @@ impl ManifestBuilder {
         self
     }
 
-    /// Append a `[[exposes.authority.actions]]` entry — publishes
-    /// the action → `OperationRights` mapping that
-    /// type-agnostic dispatchers (RuleAgent) consult. Call once
-    /// per action. The authority defaults to `empty()` if never
-    /// called.
-    ///
-    /// Empty name or operation are rejected with `assert!`:
-    /// an empty action name is unreachable from any dispatch
-    /// (silent dead row), and an empty operation string is
-    /// unknown to `OperationRights::parse` (dispatch fails with
-    /// a confusing 'not a known operation' error). Fail loud at
-    /// manifest-build time instead.
-    pub fn action(
-        mut self,
-        name: impl Into<String>,
-        operation: impl Into<String>,
-    ) -> Self {
-        let name = name.into();
-        let operation = operation.into();
-        assert!(
-            !name.is_empty(),
-            "ManifestBuilder::action: action name cannot be empty"
-        );
-        assert!(
-            !operation.is_empty(),
-            "ManifestBuilder::action: operation for action {name:?} cannot be empty"
-        );
-        self.actions.push((name, operation));
-        self
-    }
-
-    /// Set the wire-protocol metadata in one call. Phase 3
-    /// P3.2 — the manifest's `protocol` block is pure
-    /// metadata (schemas, description, transport, version,
-    /// media_type); it doesn't affect dispatch.
-    pub fn protocol(mut self, p: Protocol) -> Self {
-        self.protocol = p;
-        self
-    }
-
     /// Set the timeout hint in milliseconds (default `None`,
     /// which lets `CapabilityBudget::new` use the host default).
     pub fn timeout_ms(mut self, ms: u32) -> Self {
@@ -395,13 +278,7 @@ impl ManifestBuilder {
             requires,
             host,
             timeout_ms,
-            actions,
-            protocol,
         } = self;
-        let mut authority = AuthorityContract::empty();
-        for (a, op) in actions {
-            authority = authority.with_action(a, op);
-        }
         PluginManifest {
             plugin: PluginId { name, version },
             isolate: IsolationMode::InProc,
@@ -411,8 +288,6 @@ impl ManifestBuilder {
                 out_type: cap_out_type,
                 streaming: cap_streaming,
                 contract_name: cap_contract,
-                authority,
-                protocol,
             }],
             requires,
             host,

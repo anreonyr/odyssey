@@ -58,8 +58,6 @@ pub fn meta_from_decl(
         streaming: decl.streaming,
         timeout_ms: budget.timeout_ms(),
         quota: budget.quota_spec(),
-        authority: decl.authority.clone(),
-        protocol: decl.protocol.clone(),
     }
 }
 

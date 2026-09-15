@@ -59,27 +59,6 @@ impl Default for CapabilityRights {
 }
 
 impl CapabilityRights {
-    /// Construct an "all authority, default timeout" rights bag — what
-    /// the host uses when minting a root capability.
-    pub fn root(timeout_ms: u32) -> Self {
-        Self {
-            operations: OperationRights::ALL,
-            timeout_ms,
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn with_timeout(mut self, ms: u32) -> Self {
-        self.timeout_ms = ms;
-        self
-    }
-
-    #[allow(dead_code)]
-    pub fn with_operations(mut self, ops: OperationRights) -> Self {
-        self.operations = ops;
-        self
-    }
-
     /// `self ⊇ other` — every bit and every budget ceiling in `other`
     /// is also present in `self`. The CSpace rejects any child whose
     /// rights are *not* a subset of its parent's.

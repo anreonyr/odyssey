@@ -12,7 +12,6 @@ use crate::capability::handle::cap::Capability;
 use crate::core::meta::chunk::CapabilityChunk;
 use crate::capability::error::CapabilityError;
 use crate::core::identity::ids::SlotId;
-use crate::core::identity::kind::CapKind;
 use crate::core::meta::meta::CapabilityMeta;
 use crate::core::contract::resource::Resource;
 use crate::core::rights::rights::{CapabilityRights, OperationRights};
@@ -46,12 +45,6 @@ impl<R: Resource> Slot<R> {
     /// Capability metadata at this slot.
     pub fn meta(&self) -> Option<CapabilityMeta> {
         self.space.slot_meta(self.id)
-    }
-
-    /// Runtime kind of the cap at this slot.
-    #[allow(dead_code)]
-    pub fn kind(&self) -> Option<CapKind> {
-        self.capability().map(|c| c.kind())
     }
 
     /// Direct sync invocation via the slot. Returns typed

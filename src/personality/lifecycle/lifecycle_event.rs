@@ -3,16 +3,24 @@
 //! Phase 8 split: kernel-side events (`Minted`, `Derived`,
 //! `Revoked`, `RevokeTree`) live in `CapabilityEvent` and flow
 //! through the kernel's `CapabilityEventBus`. Personality-side
-//! events (`PluginActivated`, `PluginDeactivated`,
-//! `ShutdownStarted`, `ShutdownCompleted`) live here — the
-//! kernel has no knowledge of plugins or shutdown sequence.
+//! events (`PluginDeactivated`, `ShutdownStarted`,
+//! `ShutdownCompleted`) live here — the kernel has no knowledge
+//! of plugins or shutdown sequence.
+//!
+//! Phase 9 cleanup: `LifecycleEvent::PluginActivated` is
+//! removed (defined but never published; the boot path went
+//! straight from mint to serve without an explicit "activated"
+//! marker). The `subscribe` and `receiver_count` methods on
+//! `LifecycleEventBus` are also gone — the bus is write-only
+//! in the current orchestrator. If a future subscriber wants
+//! to observe lifecycle events, add the reader back at the
+//! same time the subscriber lands.
 
 use crate::core::identity::ids::PluginId;
 
 /// Personality lifecycle observability events.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LifecycleEvent {
-    PluginActivated { plugin: PluginId },
     PluginDeactivated { plugin: PluginId },
     ShutdownStarted,
     ShutdownCompleted { remaining_slots: usize },
@@ -35,16 +43,8 @@ impl LifecycleEventBus {
         Self { tx }
     }
 
-    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<LifecycleEvent> {
-        self.tx.subscribe()
-    }
-
     pub fn publish(&self, ev: LifecycleEvent) -> Result<usize, LifecycleEvent> {
         self.tx.send(ev).map_err(|e| e.0)
-    }
-
-    pub fn receiver_count(&self) -> usize {
-        self.tx.receiver_count()
     }
 }
 

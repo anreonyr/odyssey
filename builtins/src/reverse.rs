@@ -47,7 +47,6 @@ impl BuiltinManifest for ReverseBuiltin {
     fn manifest(&self) -> PluginManifest {
         ManifestBuilder::new("reverse", "reverse", "reverse")
             .host("dispatcher")
-            .action("reverse", "EXECUTE")
             .timeout_ms(5000)
             .build()
     }

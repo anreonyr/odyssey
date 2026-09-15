@@ -13,10 +13,7 @@ pub mod handle;
 pub use enforce::quota::{CapabilityBudget, QuotaState};
 // `QuotaSpec`, `QuotaKind`, `QuotaSnapshot` live in `core::quota`
 // (re-exported from the crate root as `crate::QuotaSpec` etc.).
-pub use enforce::space::{
-    CapabilitySpace, DeriveKind, CapabilityEvent, GraphEventBus, CapabilityEventReceiver, RevokeMode,
-    TryRecvError,
-};
+pub use enforce::space::CapabilitySpace;
 pub use error::CapabilityError;
 pub use handle::cap::{AnyCapability, Capability};
 pub use handle::slot::Slot;
