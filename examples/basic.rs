@@ -7,26 +7,22 @@
 //! the example depends on BOTH. The library itself stays
 //! plugin-free.
 //!
-//! Wires the three concrete builtins (echo / reverse / database)
-//! into the personality orchestrator and serves the HTTP bridge
-//! on `127.0.0.1:3030` until Ctrl-C.
-//!
-//! Phase 9.5: the previous `demo_typed_slot` helper that
-//! demonstrated the typed-slot possession shape moved to
-//! `tests/smoke.rs` as a CI gate. Examples are run manually
-//! (`cargo run --example basic`); CI runs the smoke test.
-
-use std::sync::Arc;
+//! Phase 10: the registry of `(manifest, mint_fn)` pairs is
+//! built here at boot from the colocated `XBuiltin::register()`
+//! helpers in `builtins/src/`. Adding a new builtin means
+//! adding one `XBuiltin::register()` entry here and one
+//! module to `builtins/src/`; the orchestrator's `run`
+//! doesn't change.
 
 use odyssey::personality::lifecycle::run::run;
 use odyssey_builtins::{database, echo, reverse};
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    run(
-        Arc::new(echo::EchoBuiltin),
-        Arc::new(reverse::ReverseBuiltin),
-        Arc::new(database::DatabaseBuiltin),
-    )
-    .await
+    let plugins = vec![
+        echo::EchoBuiltin::register(),
+        reverse::ReverseBuiltin::register(),
+        database::DatabaseBuiltin::register(),
+    ];
+    run(&plugins).await
 }

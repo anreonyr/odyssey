@@ -23,7 +23,7 @@ use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
-use odyssey::personality::lifecycle::run::Mint;
+use odyssey::personality::lifecycle::run::MintFn;
 use serde_json::{json, Value};
 
 type Store = Arc<RwLock<HashMap<String, Value>>>;
@@ -93,8 +93,8 @@ impl DatabaseBuiltin {
         decl: &CapabilityDecl,
         kind: CapKind,
         budget: CapabilityBudget,
-    ) -> Result<SlotId, String> {
-        Ok(factory.mint(
+    ) -> SlotId {
+        factory.mint(
             kind,
             decl,
             plugin,
@@ -102,19 +102,17 @@ impl DatabaseBuiltin {
             Arc::new(DatabaseResource {
                 store: Arc::new(RwLock::new(HashMap::new())),
             }),
-        ))
+        )
     }
-}
 
-impl Mint for DatabaseBuiltin {
-    fn mint(
-        &self,
-        factory: &CapabilityFactory,
-        plugin: &PluginId,
-        decl: &CapabilityDecl,
-        kind: CapKind,
-        budget: CapabilityBudget,
-    ) -> Result<SlotId, String> {
-        DatabaseBuiltin::mint(self, factory, plugin, decl, kind, budget)
+    /// Phase 10: colocated registration helper. See
+    /// `builtins/src/echo.rs::register` for rationale.
+    pub fn register() -> (PluginManifest, MintFn) {
+        (
+            DatabaseBuiltin.manifest(),
+            |factory, plugin, decl, kind, budget| {
+                DatabaseBuiltin.mint(factory, plugin, decl, kind, budget)
+            },
+        )
     }
 }

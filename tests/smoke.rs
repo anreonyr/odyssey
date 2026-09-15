@@ -6,8 +6,9 @@
 //! boot path and could silently drift from it. This test
 //! is a CI gate: any change to the orchestrator's mint
 //! surface (factory signature, `Slot<R>` construction,
-//! builtin's `Mint` trait impl) must keep this round-trip
-//! working, or the test fails at compile / runtime.
+//! builtin's `MintFn` function-pointer shape) must keep
+//! this round-trip working, or the test fails at compile /
+//! runtime.
 //!
 //! The check covers every integration point of the typed
 //! mint path:
@@ -16,9 +17,11 @@
 //! - `CapabilityFactory::with_clock(cspace, clock)` —
 //!   factory setup
 //! - `BuiltinManifest::manifest()` — manifest retrieval
-//! - `Mint::mint(factory, plugin, decl, kind, budget)` —
-//!   the trait surface Phase 9 consolidated from the three
-//!   per-plugin marker traits
+//! - `EchoBuiltin::mint(factory, plugin, decl, kind, budget)`
+//!   — the inherent typed mint method (Phase 10: the `Mint`
+//!   trait surface is gone; builtins call `factory.mint(...)`
+//!   directly via a non-capturing closure registered in
+//!   the orchestrator's `(PluginManifest, MintFn)` registry)
 //! - `Slot::new(cspace, slot_id)` — typed-slot construction
 //! - `Slot::invoke(input)` — sync dispatch returning
 //!   `Result<Value, CapabilityError>`
@@ -32,11 +35,12 @@
 //!
 //! Only `EchoBuiltin` is smoke-tested. The orchestrator
 //! dispatches all three builtins (`echo` / `reverse` /
-//! `database`) through the same `Mint::mint` trait method,
-//! so an echo round-trip exercises the trait surface; a
-//! per-builtin mint path is a thin wrapper around
-//! `factory.mint(...)` and would fail `cargo build` if it
-//! drifted.
+//! `database`) through the same `MintFn` shape (each
+//! builtin's `register()` returns a non-capturing closure
+//! of the same signature), so an echo round-trip exercises
+//! the registry path; a per-builtin mint path is a thin
+//! wrapper around `factory.mint(...)` and would fail
+//! `cargo build` if it drifted.
 
 use std::sync::Arc;
 
@@ -48,7 +52,6 @@ use odyssey::core::contract::builtin::BuiltinManifest;
 use odyssey::core::identity::ids::PluginId;
 use odyssey::core::identity::kind::CapKind;
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
-use odyssey::personality::lifecycle::run::Mint;
 use odyssey_builtins::echo::{EchoBuiltin, EchoResource};
 
 #[test]
@@ -60,27 +63,22 @@ fn echo_builtin_round_trips_through_typed_mint() {
     let manifest = builtin.manifest();
     let decl = &manifest.exposes[0];
 
-    // Dispatch `mint` through the `Mint` trait object so this
-    // test exercises the trait surface Phase 9 consolidated
-    // (the three per-plugin marker traits folded into one
-    // `Mint` trait in commit `514e5c9`). Calling `builtin.
-    // mint(...)` directly would resolve to the inherent
-    // method on `EchoBuiltin` and the trait import would be
-    // unused — same call shape, but it would silently skip
-    // the trait dispatch the orchestrator actually relies on.
-    let mint_ref: &dyn Mint = &builtin;
-    let slot_id = mint_ref
-        .mint(
-            &factory,
-            &PluginId {
-                name: "echo".into(),
-                version: "0.1.0".into(),
-            },
-            decl,
-            CapKind::Sync,
-            CapabilityBudget::new(5000),
-        )
-        .expect("mint should succeed");
+    // Phase 10: call the inherent `mint` method directly.
+    // The trait object dispatch (`&dyn Mint`) was deleted
+    // along with the `Mint` trait; the registry holds a
+    // non-capturing closure of the same shape, so calling
+    // the inherent method exercises the exact code path
+    // the orchestrator's `MintFn` does.
+    let slot_id = builtin.mint(
+        &factory,
+        &PluginId {
+            name: "echo".into(),
+            version: "0.1.0".into(),
+        },
+        decl,
+        CapKind::Sync,
+        CapabilityBudget::new(5000),
+    );
 
     let slot: Slot<EchoResource> = Slot::new(cspace, slot_id);
     let input = serde_json::json!({"hello": "world"});

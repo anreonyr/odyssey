@@ -6,7 +6,34 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Changed — Phase 9 + 9.5: cleanup
+### Changed — Phase 9 + 9.5 + 10: cleanup
+
+A 19-commit pass (9 Phase 9 + 9 Phase 9.5 + 1 Phase 10) that
+prunes dead code, unifies the runtime on the typed `CapKind`
+enum, retires the cordis / TOML / AuthorityContract /
+Protocol dependencies, tightens the layering invariant test,
+and replaces the `Mint` trait with a function-pointer
+registry.
+Phase 9.5 is the 9-commit review-driven follow-up that
+closed gaps the Phase 9 commits left behind (a latent
+walker false positive in the syn-based layering test,
+orphan `thiserror`/`toml` deps, one more real
+dead-code item in the resolver, and a brittle positive
+shape-matching test that two consecutive fixes couldn't
+fully stabilise — replaced by a behavioural smoke
+test).
+Phase 10 is a single-commit completion of the Phase 9
+`Mint` consolidation. Phase 9 replaced three per-plugin
+marker traits with one `Mint` trait, but each builtin's
+`impl Mint for XBuiltin` was a one-line forward to the
+inherent `pub fn mint(...)` — pure dispatch boilerplate
+that existed only so the orchestrator could hold a
+`&dyn Mint` view. Phase 10 deletes the trait entirely and
+dispatches through a `pub type MintFn = fn(...) -> SlotId`
+registry keyed by plugin name; builtins expose a
+colocated `fn register() -> (PluginManifest, MintFn)`
+helper so adding a new builtin registers both halves
+together.
 
 A 17-commit pass (9 Phase 9 + 8 Phase 9.5) that prunes dead
 code, unifies the runtime on the typed `CapKind` enum,

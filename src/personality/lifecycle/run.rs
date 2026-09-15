@@ -1,25 +1,21 @@
 //! Personality / lifecycle / run — the top-level orchestrator.
 //!
-//! Phase 8 design: takes the three concrete builtins as separate
-//! parameters and dispatches by plugin name. The trait-object
-//! `Arc<dyn Builtin>` design hit a wall — the kernel's
-//! `CapabilityFactory::mint<R>` is generic over `R`, and a trait
-//! object can't dispatch into a generic call. For three
-//! builtins the explicit dispatch is clearer than the erased
-//! alternative (which would require kernel changes).
+//! Phase 8 design: dispatches by plugin name through a
+//! per-builtin typed mint path. The trait-object `Arc<dyn
+//! Builtin>` design hit a wall — the kernel's
+//! `CapabilityFactory::mint<R>` is generic over `R`, and a
+//! trait object can't dispatch into a generic call.
 //!
-//! Adding a fourth builtin means adding a fourth parameter and
-//! a fourth match arm. That's the cost we pay for keeping the
-//! typed `Capability<R>` invariant in the kernel.
-//!
-//! Phase 9 cleanup: the three per-plugin marker traits
-//! (`EchoMint` / `ReverseMint` / `DatabaseMint`) collapsed into
-//! a single `Mint` trait. Each builtin implements `Mint` to
-//! expose its typed `mint(factory, plugin, decl, kind, budget)`
-//! method. The orchestrator dispatches by plugin name through a
-//! `&dyn Mint` view, so a fourth builtin needs only a fourth
-//! `impl Mint for <Name>Builtin` block — no orchestrator
-//! changes required for the trait shape.
+//! Phase 10 cleanup: the `Mint` trait that Phase 9 introduced
+//! for per-plugin dispatch was pure forwarding boilerplate
+//! (each builtin's `impl Mint for XBuiltin` was a one-line
+//! forward to the inherent `pub fn mint(...)`). Replaced with
+//! a `MintFn` function-pointer registry keyed by plugin name:
+//! the example builds a `&[(PluginManifest, MintFn)]` list at
+//! boot, and the orchestrator dispatches by `mint_registry
+//! .get(plugin_id.name.as_str())`. Builtins expose a colocated
+//! `fn register() -> (PluginManifest, MintFn)` helper so a
+//! new builtin can't forget either half.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -27,7 +23,6 @@ use std::sync::Arc;
 use crate::capability::enforce::quota::CapabilityBudget;
 use crate::capability::enforce::space::CapabilitySpace;
 use crate::core::clock::clock::SystemClock;
-use crate::core::contract::builtin::BuiltinManifest;
 use crate::core::identity::ids::{PluginId, SlotId};
 use crate::core::identity::kind::CapKind;
 use crate::core::manifest::manifest::{CapabilityDecl, PluginManifest};
@@ -37,46 +32,28 @@ use crate::personality::lifecycle::mint::CapabilityFactory;
 use crate::personality::lifecycle::ruin::ruin_runtime_plugins;
 use crate::personality::lifecycle::serve::spawn_http_bridge;
 
-/// Trait every builtin implements that exposes its typed mint
-/// method. Replaces the previous three per-plugin marker traits.
-///
-/// Builtins already implement `BuiltinManifest` (which returns
-/// the plugin's `PluginManifest`); `Mint` is the second and
-/// final trait a builtin must implement. Splitting it into a
-/// dedicated trait (rather than adding `mint` to
-/// `BuiltinManifest`) keeps `BuiltinManifest` free of the
-/// generic `R` parameter that would force every manifest
-/// reader to thread the resource type through.
-pub trait Mint {
-    fn mint(
-        &self,
-        factory: &CapabilityFactory,
-        plugin: &PluginId,
-        decl: &CapabilityDecl,
-        kind: CapKind,
-        budget: CapabilityBudget,
-    ) -> Result<SlotId, String>;
-}
+/// Typed mint entry point — the kernel's
+/// `CapabilityFactory::mint<R>` is generic over `R` so this is
+/// a free function pointer (not a trait object). Each builtin
+/// exposes a non-capturing closure of this shape via its
+/// `fn register() -> (PluginManifest, MintFn)` helper. The
+/// orchestrator dispatches by `plugin_id.name.as_str()`
+/// against a registry of these.
+pub type MintFn = fn(
+    factory: &CapabilityFactory,
+    plugin: &PluginId,
+    decl: &CapabilityDecl,
+    kind: CapKind,
+    budget: CapabilityBudget,
+) -> SlotId;
 
-/// Top-level entry point. Boots the kernel, collects manifests
-/// from the three concrete builtins, resolves, mints, serves
-/// HTTP, and tears down on Ctrl-C.
-pub async fn run<B1, B2, B3>(
-    echo: Arc<B1>,
-    reverse: Arc<B2>,
-    database: Arc<B3>,
-) -> Result<(), Box<dyn std::error::Error>>
-where
-    B1: BuiltinManifest + Mint + 'static,
-    B2: BuiltinManifest + Mint + 'static,
-    B3: BuiltinManifest + Mint + 'static,
-{
-    // 1. Setup — load manifests from the three builtins.
-    let manifests: Vec<PluginManifest> = vec![
-        echo.manifest(),
-        reverse.manifest(),
-        database.manifest(),
-    ];
+/// Top-level entry point. Boots the kernel, resolves the
+/// provided `(manifest, mint_fn)` pairs, mints each capability
+/// via the matching `mint_fn`, serves HTTP, and tears down on
+/// Ctrl-C.
+pub async fn run(plugins: &[(PluginManifest, MintFn)]) -> Result<(), Box<dyn std::error::Error>> {
+    // 1. Setup — split manifests from mint fns for the resolver.
+    let manifests: Vec<PluginManifest> = plugins.iter().map(|(m, _)| m.clone()).collect();
     println!("[boot] loaded {} builtin(s)", manifests.len());
 
     let cspace: CapabilitySpace = CapabilitySpace::new();
@@ -87,8 +64,8 @@ where
     println!("\n[resolver]\n{}", plan.render());
 
     // 3. Mint in resolved order — dispatch by plugin name through
-    // a `&dyn Mint` view of each builtin.
-    let minted = mint_three_builtins(&factory, &plan, &manifests, echo.as_ref(), reverse.as_ref(), database.as_ref()).await?;
+    // the registry.
+    let minted = mint_from_registry(&factory, &plan, &manifests, plugins).await?;
 
     // 4. Serve.
     let server_handle =
@@ -107,13 +84,11 @@ where
     Ok(())
 }
 
-async fn mint_three_builtins(
+async fn mint_from_registry(
     factory: &CapabilityFactory,
     plan: &ResolvedPlan,
     manifests: &[PluginManifest],
-    echo: &dyn Mint,
-    reverse: &dyn Mint,
-    database: &dyn Mint,
+    plugins: &[(PluginManifest, MintFn)],
 ) -> Result<HashMap<PluginId, Vec<SlotId>>, Box<dyn std::error::Error>> {
     use std::collections::BTreeMap;
     let by_id: BTreeMap<PluginId, &PluginManifest> = manifests
@@ -121,23 +96,27 @@ async fn mint_three_builtins(
         .map(|m| (m.plugin.clone(), m))
         .collect();
 
+    // Index the registry by plugin name for O(log n) lookup
+    // against `plan.mint_order`.
+    let by_name: BTreeMap<&str, MintFn> = plugins
+        .iter()
+        .map(|(m, mint_fn)| (m.plugin.name.as_str(), *mint_fn))
+        .collect();
+
     let mut minted: HashMap<PluginId, Vec<SlotId>> = HashMap::new();
     for plugin_id in &plan.mint_order {
         let Some(m) = by_id.get(plugin_id) else { continue };
+        let Some(&mint_fn) = by_name.get(plugin_id.name.as_str()) else {
+            let msg = format!(
+                "no mint fn registered for plugin {:?}; add it to the plugins list",
+                plugin_id.name
+            );
+            return Err(Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, msg)));
+        };
         let mut plugin_slots = Vec::with_capacity(m.exposes.len());
         for decl in &m.exposes {
-            let kind = decl.kind;
             let budget = CapabilityBudget::new(m.resources.timeout_ms.unwrap_or(5000));
-            let slot_id = match plugin_id.name.as_str() {
-                "echo" => echo.mint(factory, plugin_id, decl, kind, budget),
-                "reverse" => reverse.mint(factory, plugin_id, decl, kind, budget),
-                "database" => database.mint(factory, plugin_id, decl, kind, budget),
-                other => {
-                    let msg = format!("unknown builtin {other:?}; add it to mint_three_builtins");
-                    return Err(Box::new(std::io::Error::new(std::io::ErrorKind::NotFound, msg)));
-                }
-            }
-            .map_err(|e| format!("mint {}::{}: {e}", plugin_id.name, decl.name))?;
+            let slot_id = mint_fn(factory, plugin_id, decl, decl.kind, budget);
             plugin_slots.push(slot_id);
         }
         minted.insert(plugin_id.clone(), plugin_slots);

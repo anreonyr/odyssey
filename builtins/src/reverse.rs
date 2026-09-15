@@ -18,7 +18,7 @@ use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
-use odyssey::personality::lifecycle::run::Mint;
+use odyssey::personality::lifecycle::run::MintFn;
 use serde_json::{json, Value};
 
 /// Reverse resource — `invoke` reverses the `text` field of its
@@ -60,21 +60,18 @@ impl ReverseBuiltin {
         decl: &CapabilityDecl,
         kind: CapKind,
         budget: CapabilityBudget,
-    ) -> Result<SlotId, String> {
-        Ok(factory.mint(kind, decl, plugin, budget, Arc::new(ReverseResource)))
+    ) -> SlotId {
+        factory.mint(kind, decl, plugin, budget, Arc::new(ReverseResource))
+    }
+
+    /// Phase 10: colocated registration helper. See
+    /// `builtins/src/echo.rs::register` for rationale.
+    pub fn register() -> (PluginManifest, MintFn) {
+        (
+            ReverseBuiltin.manifest(),
+            |factory, plugin, decl, kind, budget| {
+                ReverseBuiltin.mint(factory, plugin, decl, kind, budget)
+            },
+        )
     }
 }
-
-impl Mint for ReverseBuiltin {
-    fn mint(
-        &self,
-        factory: &CapabilityFactory,
-        plugin: &PluginId,
-        decl: &CapabilityDecl,
-        kind: CapKind,
-        budget: CapabilityBudget,
-    ) -> Result<SlotId, String> {
-        ReverseBuiltin::mint(self, factory, plugin, decl, kind, budget)
-    }
-}
-

@@ -33,9 +33,13 @@
 //! performs an actual mint + typed-slot + invoke round-trip
 //! against `EchoBuiltin`. That test would fail at compile
 //! time if the import path broke, and at runtime if any of
-//! `Mint::mint` / `CapabilityFactory::with_clock` /
-//! `Slot::new` / `Slot::invoke` broke — same contract, real
-//! behaviour instead of text shape.
+//! `CapabilityFactory::with_clock` / `Slot::new` /
+//! `Slot::invoke` broke — same contract, real
+//! behaviour instead of text shape. Phase 10: the `Mint`
+//! trait surface was deleted; the smoke test now calls
+//! `EchoBuiltin::mint(...)` directly (the inherent typed
+//! method, what the orchestrator's `MintFn` registry
+//! closure dispatches into).
 
 use std::fs;
 use std::path::{Path, PathBuf};
