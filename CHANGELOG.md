@@ -65,6 +65,60 @@ a read-only view over a plugin's own reachable capabilities.
 - **Boot output changes shape.** `Bindings:` is non-empty for
   the first time — the two agent plugins each carry four rows.
 
+### Added — the frontend shows the agent, and the agent shows rights
+
+`examples/frontend/index.html` gains an agent panel and stops
+treating the capability list as flat.
+
+- **The reachable set is a table.** One `agent_describe` per
+  reachable handle renders handle, name, kind, operations and
+  timeout. Every handle is resolved in one pass at load, so
+  the whole table appears without a click per row.
+
+- **`operations` is on the page for the first time.** This is
+  the reason the column exists: `CapabilityMeta` carries no
+  rights, so `/api/caps` structurally cannot report them, and
+  `AnyCapability::operations()` is only reachable through the
+  agent. The capability list alone could never show them.
+
+- **Unreachable capabilities are marked rather than hidden.**
+  The list is `/api/caps` minus `agent_list`; what is missing
+  is drawn dimmed and named underneath. The two agent
+  capabilities are themselves unreachable — nothing declares
+  them in a `requires`, and they reach neither themselves nor
+  each other — so the page demonstrates the read-only boundary
+  on its own fixtures. That subtraction is by capability
+  name, which is exact here because each provider names its
+  capability after its contract.
+
+- **The page degrades rather than breaks without the agent.**
+  Capability list and both invoke panels keep working; the
+  agent panel says it is unavailable instead of showing an
+  empty table.
+
+- **The script is now covered by a test.**
+  `tests/smoke.rs::frontend_script_binds_to_the_live_api`
+  spawns the example binary, loads the real page script into
+  a DOM shim (`tests/frontend.mjs`) and asserts the element
+  tree: the operations column renders four rights, exactly
+  two chips are dimmed, a revoked row keeps its kind marker
+  and dashes its absent fields. Reading the HTML and `curl`ing
+  the endpoints each prove one side only; a field renamed on
+  one side renders as a dash rather than an error, which is
+  the failure this catches.
+
+- **Rows are built as DOM, not HTML strings.** Handles come
+  from manifests; quoting one into an `onclick` attribute
+  would be a parse error waiting for an apostrophe.
+
+- **A revoked row keeps the kind it had.** `describe` on a
+  revoked capability answers with only
+  `handle`/`live`/`capability`/`contract`, so `kind` is absent
+  exactly when the row is dead. The row therefore takes its
+  stream marker from `/api/caps` rather than from the describe
+  payload, which would have drawn a dead stream capability as
+  sync.
+
 ### Fixed — teardown accounting
 
 The `revoked N slot(s)` line always printed `0`.

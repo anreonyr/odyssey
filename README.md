@@ -114,7 +114,25 @@ POST /api/stream  →  open a streaming capability by name (SSE)
 ```
 
 The HTML UI is at `examples/frontend/index.html`; `serve.rs` embeds
-it via `include_str!`.
+it via `include_str!`. It has four panels: the registered
+capabilities, the agent's reachable handles as a table, a
+single-value invoke, and a streaming invoke.
+
+The first two are wired to each other. `/api/caps` supplies the
+capability list; `agent_list` supplies which of them the agent can
+reach, drawn dimmed when the answer is none. The agent table is one
+`agent_describe` per reachable handle, which is what puts the
+`operations` column on the page: `CapabilityMeta` carries no
+rights, so `/api/caps` structurally cannot report them —
+`AnyCapability::operations()` can, and only through the agent. The
+two agent capabilities themselves appear dimmed, because nothing
+declares them in a `requires` and they reach neither themselves nor
+each other.
+
+If the agent is not mounted the page degrades rather than breaks:
+the capability panel and both invoke panels keep working, and the
+agent panel says so instead of showing an empty table. That path is
+covered by the test described under Test below.
 
 `POST /api/stream` takes `{"capability": "<name>", "input": <json>}`
 and answers with an SSE stream of `chunk` events followed by one
@@ -335,7 +353,7 @@ that gap is separate work.
 ## Test
 
 `cargo test` runs two integration binaries: `tests/layering.rs` (3
-tests) and `tests/smoke.rs` (5 tests).
+tests) and `tests/smoke.rs` (6 tests).
 
 `tests/layering.rs` parses every `.rs` file with `syn`, walks every
 `UseTree`, and asserts:
@@ -357,6 +375,20 @@ collects every chunk, the sync-invoke-on-a-streaming-cap
 agent's manifests end to end and asserting the binding row and mint
 order they produce, one driving `AgentCore` directly to pin the
 three reachability outcomes (unreachable, revoked, unbound).
+
+The sixth test, `frontend_script_binds_to_the_live_api`, is the only
+one that spans both halves: it spawns the example binary, loads the
+real page script from `examples/frontend/index.html` into a small DOM
+shim (`tests/frontend.mjs`), drives it, and asserts the resulting
+element tree — that the operations column renders four rights, that
+exactly the two agent capabilities are dimmed as unreachable, that a
+revoked row keeps its kind marker and dashes its absent fields. It
+exists because `curl` and reading the HTML each prove only one side:
+neither catches a field renamed on one side while the other keeps
+looking for the old name, which renders as a dash rather than an
+error. The shim cannot catch layout or CSS breakage, only
+data-binding breakage. The test needs `node` and port 3030, and
+skips itself when `node` is absent.
 
 These invariants catch accidental layer crossings during future
 refactors.
