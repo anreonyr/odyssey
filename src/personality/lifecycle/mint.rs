@@ -119,8 +119,7 @@ impl CapabilityFactory {
 
     /// Mint a typed token wrapping the resource, allocate a slot, install.
     /// Returns the freshly minted `SlotId` so the caller can construct a
-    /// typed `Slot<R>` and pass it to the cordis activator (which then
-    /// does `ctx.require(slot_key)` to retrieve it).
+    /// typed `Slot<R>` reference to it.
     ///
     /// The factory's `clock` is threaded into the capability so `invoke`
     /// / `invoke_op` can record elapsed wall-clock without calling

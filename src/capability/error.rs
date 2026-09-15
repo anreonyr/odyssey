@@ -8,7 +8,13 @@
 //! Phase 8 cleanup: dropped the `contains()` substring helper
 //! (test-only) and the `From<CapabilityError> for cordis::Error`
 //! impl — the latter was a boundary leak (capability knew about
-//! cordis). The cordis glue moves to `personality/glue/cordis_error.rs`.
+//! cordis).
+//!
+//! Phase 9 cleanup: cordis-rust itself is gone from the
+//! dependency tree, so no `personality/glue/cordis_error.rs`
+//! exists either. If a future binary wants to surface capability
+//! errors through some external framework, the glue belongs in
+//! that binary, not here.
 
 use std::fmt;
 

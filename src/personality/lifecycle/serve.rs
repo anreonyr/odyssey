@@ -113,9 +113,16 @@ async fn invoke(
         }));
     }
 
-    match cap.invoke_dyn(req.input) {
+    // `invoke_dyn_typed` returns the typed `CapabilityError`
+    // (Phase 5 M4 invariant). The HTTP bridge renders it as a
+    // string for the client; clients that care about the typed
+    // variant (e.g. for pattern matching) can opt in via a
+    // future `?as_error_variant=` extension to the response
+    // shape. Today every typed variant renders to a useful
+    // string, so this is the more informative default.
+    match cap.invoke_dyn_typed(req.input) {
         Ok(value) => Ok(Json(InvokeResp { capability: req.capability, value })),
-        Err(e) => Err(Json(ErrorResp { error: e })),
+        Err(e) => Err(Json(ErrorResp { error: e.to_string() })),
     }
 }
 
