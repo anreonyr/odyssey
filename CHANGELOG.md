@@ -6,6 +6,119 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed — Phase 9: cleanup
+
+A 10-commit pass that prunes dead code, unifies the runtime
+on the typed `CapKind` enum, retires the cordis / TOML /
+AuthorityContract / Protocol dependencies, and tightens
+the layering invariant test.
+
+- **`streaming: bool` → `kind: CapKind`** across
+  `CapabilityMeta`, `CapabilityDecl`, and `ManifestBuilder`.
+  The bool could only express sync-vs-stream; the enum is
+  the single source of truth that already lived on
+  `Capability<R>`. The HTTP bridge still surfaces
+  `streaming: bool` for back-compat; computed from `kind`.
+  `CapKind` gains `Serialize`/`Deserialize` (snake_case)
+  and a derived `Default` (Sync).
+
+- **Three marker traits → single `Mint` trait.** The
+  previous `EchoMint` / `ReverseMint` / `DatabaseMint`
+  one-method marker traits were pure indirection — each
+  builtin just forwarded to its inherent `mint(...)`.
+  Collapsed into one `personality::lifecycle::run::Mint`
+  trait. The orchestrator's `run()` dispatches by plugin
+  name through a `&dyn Mint` view.
+
+- **`KernelFactory` + `new_kernel` deleted.** The facade
+  wrapped a `CapabilitySpace` and a `Clock`; `run()` created
+  it, extracted the cspace, and immediately discarded the
+  kernel. Replaced with `CapabilitySpace::new()` +
+  `CapabilityFactory::with_clock(cspace, clock)`. The empty
+  `src/capability/init.rs` and `src/capability/init/`
+  directory are gone.
+
+- **Cordis seam removed.** `cordis-rust` dep + the
+  `cordis::Context::new` / two `ctx.provide` /
+  `ctx.stop().await` calls in `run()` are gone. The
+  orchestrator no longer threads a plugin bus; builtins
+  receive their typed slots via direct function arguments.
+
+- **Write-only metadata deleted.** `Protocol` struct +
+  six `with_*` builders, `AuthorityContract` +
+  `CapabilityAction` + `operation_for` + `with_action`,
+  the TOML loader (`from_toml_str` / `from_path` /
+  `validate`), `ManifestError`. `CapabilityMeta` loses
+  `protocol` + `authority`. `CapabilityDecl` loses the
+  same two fields. Builtins no longer call `.action(...)`
+  or `.protocol(...)` on the builder. The `toml` +
+  `thiserror` deps were removed when the loader and its
+  error type were deleted.
+
+- **Scattered dead code deleted.**
+  `AnyCapability::invoke_op_dyn`; `Slot::kind()`;
+  `CapabilityRights::root` / `with_timeout` /
+  `with_operations`; `cspace.snapshot_index()`;
+  four `#[allow(unused_imports)] use … as _Name` anchors
+  in `space.rs`; `LifecycleEvent::PluginActivated`;
+  `LifecycleEventBus::subscribe` and `receiver_count`;
+  `ContractEntry::manifest` field (with its
+  `#[allow(dead_code)]`) + the `by_plugin: BTreeMap` that
+  was built, returned, then dropped with `let _ = …`.
+  Dead re-exports cleaned from `src/core/mod.rs` and
+  `src/capability/mod.rs`.
+
+- **`Cargo.toml` slimmed.** Dropped `cordis-rust`,
+  `semver`, `thiserror`, `toml`. `syn = "2"` added as a
+  dev-dep for the layered test.
+
+- **Layering test rewritten with `syn`.** The previous
+  line-scanner missed group imports (`use
+  crate::{capability, personality};`) and silently skipped
+  the `builtins/` workspace member. The new test parses
+  every `.rs` file with `syn::parse_file`, walks every
+  `UseTree`, and flags any path segment that names a
+  forbidden layer. Group imports, multi-line uses, aliased
+  imports, and nested groups are all handled correctly.
+  The scanner now covers `builtins/src/`. New positive
+  sanity check pins the only personality symbol a builtin
+  needs (`personality::lifecycle::mint::CapabilityFactory`).
+
+- **HTTP bridge switched `invoke_dyn` → `invoke_dyn_typed`.**
+  The previous bridge regressed Phase 5 M4 by returning
+  `Result<Value, String>` and discarding the typed
+  `CapabilityError`. Now the typed variant flows through;
+  `e.to_string()` still renders a useful message for
+  clients, and any caller that cares about pattern-matching
+  on `Revoked(SlotId)` / `SlotEmpty(SlotId)` has the typed
+  variant at the boundary.
+
+- **`examples/basic.rs` enriched.** New `demo_typed_slot`
+  helper boots a private cspace + factory, mints an echo
+  slot via the builtin's inherent `mint`, constructs a
+  typed `Slot<EchoResource>`, invokes it with a JSON
+  input, and prints the result — the orchestrator's
+  production path discards the slot reference after
+  mint, so this is the only example that demonstrates
+  typed-slot possession.
+
+- **`examples/frontend/index.html` UI updated.** Streaming
+  input placeholder was `value="stream_echo"` (a Phase 5
+  plugin name deleted in Phase 8). Now `value="echo"`.
+
+- **Clippy hygiene.** `cargo clippy --workspace --examples
+  --all-targets -- -D warnings` is clean (was 6 warnings
+  before). Five `#[allow(clippy::module_inception)]`
+  attributes on the strict-hierarchy `mod.rs` files
+  (`core/clock`, `core/manifest`, `core/meta`, `core/quota`,
+  `core/rights`) — each carries a comment explaining the
+  deliberate convention. One `..Default::default()` removal
+  in `manifest.rs::build()`.
+
+- **Workspace cleanup.** Six `.phase*.md` worker / audit
+  reports removed from git tracking and added to
+  `.gitignore` so future reports stay untracked.
+
 ### Breaking — Phase 8: three-layer split (core / capability / personality) + plugins out
 
 Phase 8 is a complete restructure of the codebase. The crate is
@@ -117,8 +230,15 @@ that depends only on `core`.
 The `From<CapabilityError> for cordis::Error` impl previously
 lived in `kernel/error.rs`. This was a boundary leak — the
 kernel had no business knowing about `cordis`. Removed in
-Phase 8; if a future binary wants to surface capability errors
-via cordis, it provides its own glue in the personality layer.
+Phase 8.
+
+Phase 9 cleanup: `cordis-rust` itself is gone from the
+dependency tree (see the Phase 9 entry above). The
+forward-looking sentence "if a future binary wants to
+surface capability errors via cordis, it provides its
+own glue in the personality layer" is now moot — no
+`personality/glue/cordis_error.rs` was ever added, and
+cordis is no longer present at all.
 
 ### Removed — CapabilityGraph snapshot view
 
