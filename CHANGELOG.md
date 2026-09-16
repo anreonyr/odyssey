@@ -6,6 +6,42 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — agent frontend (React) replaces the inline-script UI
+
+The example binary now serves a Vite + React + TypeScript app
+from `examples/frontend/`. It surfaces the agent runtime
+the old 372-line `index.html` could not reach: session
+lifecycle (start / resume with Tick, ToolResult, or UserReply /
+cancel with optional checkpoint / load), per-capability
+describe drawers backed by `tool_descriptor`, and a memory
+inspector over `agent_memory_recall` / `agent_memory_record`.
+
+- **`serve.rs` reads `dist/` from disk.** The library stays
+  UI-free — no `include_str!`, no embed-time binding. The
+  `index()` route serves `dist/index.html`; `/assets/*path`
+  serves the hashed bundle Vite emits.
+- **No new Rust dependencies.** React is an example-binary
+  artifact, not a library concern.
+- **Smoke test migrates to jsdom.** The old DOM-shim
+  (`tests/frontend.mjs`) and the inline-script HTML it drove
+  are gone. The new test (`examples/frontend/test/
+  frontend.test.mjs`) loads the **built** bundle into jsdom,
+  asserts every plugin / capability row renders, the four
+  reachable handles surface all four rights, caps outside the
+  binding row are marked, and the agent panel's Run / Timeline
+  / Memory controls are present.
+- **`pnpm --dir examples/frontend build` is a precondition
+  for `cargo run --example basic` and for the frontend smoke
+  test.** `dist/` is `.gitignore`d.
+
+### Fixed — `agent_runtime` actually exposes 8 caps, not 7
+
+A pre-existing comment in `tests/smoke.rs` (`"Mint the
+agent_runtime's seven caps"`) was stale: the manifest's
+`.expose()` chain is eight calls long, the eighth being
+`agent_load` for session checkpoint restore. The comment now
+matches the code; no behaviour change.
+
 ### Added — agent builtin: the resolver's binding table reaches a running plugin
 
 `ResolvedPlan::bindings` had no runtime consumer. It was

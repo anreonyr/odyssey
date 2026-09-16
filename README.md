@@ -6,8 +6,9 @@ layered modules — `core` (value types + abstract traits), `capability`
 the `AnyCapability` erased view and a workspace-member `builtins/`
 crate that supplies typed capability handlers. No plugins are
 compiled into the library; the example binary at `examples/basic.rs`
-wires the six builtins (echo / reverse / database / streaming_echo /
-agent_list / agent_describe) into the orchestrator and serves the
+wires eleven builtins (echo / reverse / database / streaming_echo /
+agent_list / agent_describe / tool_descriptor / profile_inspector /
+llm / memory / agent_runtime) into the orchestrator and serves the
 HTTP bridge on `127.0.0.1:3030`.
 
 ## Possession model
@@ -113,10 +114,14 @@ POST /api/invoke  →  invoke a sync capability by name
 POST /api/stream  →  open a streaming capability by name (SSE)
 ```
 
-The HTML UI is at `examples/frontend/index.html`; `serve.rs` embeds
-it via `include_str!`. It has four panels: the registered
-capabilities, the agent's reachable handles as a table, a
-single-value invoke, and a streaming invoke.
+The agent frontend is a Vite + React build at
+`examples/frontend/`; `serve.rs` reads the resulting
+`dist/index.html` from disk at request time. The library stays
+UI-free (no `include_str!`, no embed-time binding). The frontend
+covers the registered capabilities grouped by plugin and the
+agent's session lifecycle: start a session, drive it step by
+step with Tick / ToolResult / UserReply / Stream, inspect and
+edit the kernel's memory.
 
 The first two are wired to each other. `/api/caps` supplies the
 capability list; `agent_list` supplies which of them the agent can
@@ -195,19 +200,24 @@ odyssey/
 │           └── serve.rs             # axum router + spawn_http_bridge
 ├── examples/
 │   ├── basic.rs              # wires builtins → personality orchestrator
-│   └── frontend/index.html   # HTTP bridge UI
+│   └── frontend/            # Vite + React + TS — agent UI
 ├── tests/
 │   ├── layering.rs           # asserts core ⊥ capability ⊥ personality
-│   └── smoke.rs              # builtin round-trips + agent binding-table behaviour
+│   └── smoke.rs              # builtin round-trips + agent binding-table behaviour + frontend data-binding
 └── builtins/                 # workspace member
     ├── Cargo.toml
     └── src/
         ├── lib.rs
-        ├── agent.rs
+        ├── agent.rs              # read-only observers (list, describe)
+        ├── agent_runtime.rs      # AI agent runtime (start/resume/cancel/plan/stream/...)
         ├── echo.rs
         ├── reverse.rs
         ├── database.rs
-        └── streaming_echo.rs
+        ├── streaming_echo.rs
+        ├── llm.rs                # LLM provider plugin (mock for MVP)
+        ├── memory.rs             # in-process memory backend
+        ├── tool_descriptor.rs    # reads a cap's `tool_schema`
+        └── profile_inspector.rs  # reads a cap's full CapabilityMeta
 ```
 
 ## Build
@@ -215,8 +225,17 @@ odyssey/
 ```sh
 cargo build --workspace                  # library + builtins
 cargo build --workspace --examples       # library + builtins + examples/basic.rs
-cargo test                              # integration tests: layering (3) + smoke (8)
+cargo test                              # integration tests: layering (3) + smoke (27)
 cargo run --example basic               # boot the orchestrator + HTTP bridge
+
+# The agent frontend lives in `examples/frontend/` and is a
+# Vite + React build. `cargo run --example basic` reads the
+# resulting `dist/index.html` from disk, so the React bundle is a
+# precondition for the example — not for `cargo build`, but for
+# any `cargo run --example basic` or `cargo test` that needs the
+# page rendered.
+pnpm --dir examples/frontend install
+pnpm --dir examples/frontend build
 ```
 
 The example binary listens on `127.0.0.1:3030` until Ctrl-C; set
@@ -390,18 +409,20 @@ the binding row and mint order they produce, one driving `AgentCore`
 directly to pin the three reachability outcomes (unreachable,
 revoked, unbound).
 
-The eighth test, `frontend_script_binds_to_the_live_api`, is the only
-one that spans both halves: it spawns the example binary, loads the
-real page script from `examples/frontend/index.html` into a small DOM
-shim (`tests/frontend.mjs`), drives it, and asserts the resulting
-element tree — that the operations column renders four rights, that
-exactly the two agent capabilities are dimmed as unreachable, that a
-revoked row keeps its kind marker and dashes its absent fields. It
-exists because `curl` and reading the HTML each prove only one side:
-neither catches a field renamed on one side while the other keeps
-looking for the old name, which renders as a dash rather than an
-error. The shim cannot catch layout or CSS breakage, only
-data-binding breakage.
+The frontend test, `frontend_script_binds_to_the_live_api`, is the
+only one that spans both halves: it spawns the example binary,
+loads the **built** React bundle from
+`examples/frontend/dist/index.html` into jsdom via
+`examples/frontend/test/frontend.test.mjs`, drives it, and
+asserts the rendered DOM — that every plugin / capability row
+renders, that the four reachable handles surface all four rights,
+that caps outside the agent's binding row are marked, that the
+agent section's Run / Timeline / Memory panels are present. It
+exists because `curl` and reading the HTML each prove only one
+side: neither catches a field renamed on one side while the other
+keeps looking for the old name, which renders as a missing column
+rather than an error. jsdom cannot catch layout or CSS breakage,
+only data-binding breakage.
 
 It runs the child on a port it asks the OS for, and reaps the child
 before asserting. Both are deliberate: with a fixed port the test
