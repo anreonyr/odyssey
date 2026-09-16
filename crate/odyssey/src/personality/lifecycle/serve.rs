@@ -70,8 +70,6 @@ struct CapInfo {
     /// expose the full enum; today no client needs it.)
     streaming: bool,
     timeout_ms: u32,
-    in_type: String,
-    out_type: String,
 }
 
 #[derive(Deserialize)]
@@ -187,8 +185,6 @@ async fn list_caps(State(state): State<AppState>) -> Json<Vec<CapInfo>> {
                 id: m.id.to_string(),
                 streaming: m.kind == CapKind::Stream,
                 timeout_ms: m.timeout_ms,
-                in_type: m.in_type.clone(),
-                out_type: m.out_type.clone(),
             })
             .collect(),
     )

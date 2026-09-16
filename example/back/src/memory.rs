@@ -503,7 +503,6 @@ impl BuiltinManifest for MemoryBuiltin {
         ManifestBuilder::new("memory")
             .expose(NAME_QUERY, CONTRACT_QUERY)
             .expose(NAME_INSERT, CONTRACT_INSERT)
-            .host("dispatcher")
             .timeout_ms(5000)
             .build()
     }

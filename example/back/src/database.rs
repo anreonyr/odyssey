@@ -162,7 +162,6 @@ impl BuiltinManifest for DatabaseBuiltin {
         });
         ManifestBuilder::new("database")
             .expose_with_schema("database", "database", tool_schema)
-            .host("dispatcher")
             .timeout_ms(5000)
             .build()
     }

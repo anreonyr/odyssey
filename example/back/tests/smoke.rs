@@ -349,8 +349,6 @@ fn agent_reaches_only_its_bindings_and_reports_revocation() {
     let factory = CapabilityFactory::with_clock(cspace.clone(), Arc::new(SystemClock));
     let plain_decl = CapabilityDecl {
         name: "plain".into(),
-        in_type: "any".into(),
-        out_type: "any".into(),
         kind: CapKind::Sync,
         contract_name: "plain".into(),
         tool_schema: None,
@@ -500,8 +498,6 @@ fn agent_describe_refuses_unknown_fields() {
     let factory = CapabilityFactory::with_clock(cspace.clone(), Arc::new(SystemClock));
     let decl = CapabilityDecl {
         name: "echo".into(),
-        in_type: "any".into(),
-        out_type: "any".into(),
         kind: CapKind::Sync,
         contract_name: "echo".into(),
         tool_schema: None,

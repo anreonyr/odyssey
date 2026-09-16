@@ -230,7 +230,7 @@ async fn mint_from_registry(
             .unwrap_or(&[]);
         let mut plugin_slots = Vec::with_capacity(entry.manifest.exposes.len());
         for decl in &entry.manifest.exposes {
-            let budget = CapabilityBudget::new(entry.manifest.resources.timeout_ms.unwrap_or(5000));
+            let budget = CapabilityBudget::new(entry.manifest.timeout_ms.unwrap_or(5000));
             let slot_id = (entry.mint_fn)(factory, plugin_id, decl, decl.kind, budget, bindings);
             plugin_slots.push(slot_id);
         }

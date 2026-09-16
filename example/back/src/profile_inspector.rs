@@ -92,8 +92,6 @@ impl ProfileInspectorResource {
                 "namespace": meta.namespace,
                 "contract_name": meta.contract_name,
                 "plugin": { "name": meta.plugin.name, "version": meta.plugin.version },
-                "in_type": meta.in_type,
-                "out_type": meta.out_type,
                 "kind": kind_name,
                 "timeout_ms": meta.timeout_ms,
                 "quota": {
@@ -146,7 +144,6 @@ impl BuiltinManifest for ProfileInspectorBuiltin {
     fn manifest(&self) -> PluginManifest {
         ManifestBuilder::new("profile_inspector")
             .expose(NAME, CONTRACT)
-            .host("dispatcher")
             .timeout_ms(5000)
             .build()
     }

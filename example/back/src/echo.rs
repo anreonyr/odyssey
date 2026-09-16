@@ -55,7 +55,6 @@ impl BuiltinManifest for EchoBuiltin {
         });
         ManifestBuilder::new("echo")
             .expose_with_schema("echo", "echo", tool_schema)
-            .host("dispatcher")
             .timeout_ms(5000)
             .build()
     }

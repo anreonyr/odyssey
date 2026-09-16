@@ -141,7 +141,6 @@ impl BuiltinManifest for StreamingEchoBuiltin {
         });
         ManifestBuilder::new("streaming_echo")
             .expose_streaming_with_schema("streaming_echo", "streaming_echo", tool_schema)
-            .host("dispatcher")
             .timeout_ms(5000)
             .build()
     }

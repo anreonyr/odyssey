@@ -166,7 +166,6 @@ impl BuiltinManifest for ToolDescriptorBuiltin {
     fn manifest(&self) -> PluginManifest {
         ManifestBuilder::new("tool_descriptor")
             .expose(NAME, CONTRACT)
-            .host("dispatcher")
             .timeout_ms(5000)
             .build()
     }

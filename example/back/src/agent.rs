@@ -179,8 +179,6 @@ impl AgentCore {
             "plugin": meta.plugin.name.as_str(),
             "kind": kind_name(meta.kind),
             "streaming": meta.kind == CapKind::Stream,
-            "in_type": meta.in_type,
-            "out_type": meta.out_type,
             "timeout_ms": meta.timeout_ms,
             "calls_per_minute": meta.quota.calls_per_minute,
             "operations": operation_names(cap.operations()),
@@ -292,7 +290,6 @@ impl BuiltinManifest for AgentListBuiltin {
             .requires("reverse", "reverse")
             .requires("database", "database")
             .requires("streaming_echo", "streaming_echo")
-            .host("dispatcher")
             .timeout_ms(5000)
             .build()
     }
@@ -337,7 +334,6 @@ impl BuiltinManifest for AgentDescribeBuiltin {
             .requires("reverse", "reverse")
             .requires("database", "database")
             .requires("streaming_echo", "streaming_echo")
-            .host("dispatcher")
             .timeout_ms(5000)
             .build()
     }

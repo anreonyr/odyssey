@@ -53,8 +53,6 @@ pub fn meta_from_decl(
         // when matching `requires[*].contract`.
         contract_name: decl.contract_name.clone(),
         plugin: plugin.clone(),
-        in_type: decl.in_type.clone(),
-        out_type: decl.out_type.clone(),
         kind: decl.kind,
         timeout_ms: budget.timeout_ms(),
         quota: budget.quota_spec(),

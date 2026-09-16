@@ -45,8 +45,6 @@ pub struct CapabilityMeta {
     /// capability injection).
     pub contract_name: String,
     pub plugin: PluginId,
-    pub in_type: String,
-    pub out_type: String,
     pub kind: CapKind,
     pub timeout_ms: u32,
     pub quota: QuotaSpec,

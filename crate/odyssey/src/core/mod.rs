@@ -14,8 +14,7 @@
 //! - `rights` — `OperationRights`, `CapabilityRights`,
 //!   `parse_operation`.
 //! - `manifest` — `PluginManifest`, `ManifestBuilder`,
-//!   `CapabilityDecl`, `CapabilityRequirement`, `HostServiceRef`,
-//!   `IsolationMode`, `ResourceHints`.
+//!   `CapabilityDecl`, `CapabilityRequirement`.
 //! - `contract` — abstract traits: `Resource`, `BuiltinManifest`.
 
 pub mod clock;
@@ -36,8 +35,7 @@ pub use contract::resource::Resource;
 pub use identity::ids::{CapabilityId, PluginId, SlotId};
 pub use identity::kind::CapKind;
 pub use manifest::manifest::{
-    CapabilityDecl, CapabilityRequirement, HostServiceRef, IsolationMode, ManifestBuilder,
-    PluginManifest, ResourceHints,
+    CapabilityDecl, CapabilityRequirement, ManifestBuilder, PluginManifest,
 };
 pub use meta::chunk::CapabilityChunk;
 pub use meta::meta::CapabilityMeta;

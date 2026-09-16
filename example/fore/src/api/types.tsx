@@ -21,8 +21,6 @@ export interface CapInfo {
   streaming: boolean;
   /** Per-call wall-clock budget, ms. */
   timeout_ms: number;
-  in_type: string;
-  out_type: string;
 }
 
 // ---------- agent_list / agent_describe (read-only observers) ----------
@@ -47,8 +45,6 @@ export interface AgentHandleDescribeLive {
   plugin: string;
   kind: "sync" | "stream";
   streaming: boolean;
-  in_type: string;
-  out_type: string;
   timeout_ms: number;
   calls_per_minute: number;
   operations: Array<"READ" | "WRITE" | "EXECUTE" | "ADMIN">;

@@ -6,6 +6,81 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed — Phase 12: manifest field subtraction cascade
+
+A single-commit cleanup that prunes write-only and
+dead-via-builder fields from `PluginManifest`, deletes
+their supporting types, and cascades the deletion through
+every reader. The shape of `PluginManifest` collapses from
+6 fields to 4; the manifest builder loses one setter;
+three supporting types are gone entirely; `CapabilityDecl`
+loses its `in_type` / `out_type` fields; the same two
+fields disappear from `CapabilityMeta`. The `/api/caps`
+and `agent_describe` JSON wire contracts drop their
+`in_type` / `out_type` keys to match. 21 files modified
+across 5 layers, plus the module-doc, field/enum/struct
+doc, defaults-table, historical-narrative, and `expose`-method-doc
+scrub inside `manifest.rs`, 1 new `CHANGELOG.md` entry,
+1 `README.md` line update.
+
+- **`PluginManifest.host` / `HostServiceRef` deleted.**
+  11 `.host("dispatcher")` call sites in `example/back/src/`
+  (across 9 builtin files; `agent.rs` carries two of
+  the eleven) drop the trailing `.host("dispatcher")` call.
+  Zero readers anywhere in `crate/odyssey/src` or
+  `example/back/src`.
+- **`PluginManifest.isolate` / `IsolationMode` deleted.**
+  The builder hardcoded `IsolationMode::InProc`. The Wasm /
+  Subprocess loaders under `docs/deferred/` will re-attach
+  to a new enum when they ship.
+- **`ResourceHints` flattened to a flat `timeout_ms:
+  Option<u32>` field on `PluginManifest`.** Phase 8's
+  slim commit already shrank `ResourceHints` to its single
+  field; this finishes the job. The one reader (the
+  orchestrator's per-call budget lookup) renames one token.
+- **`CapabilityDecl.in_type` / `out_type` deleted.**
+  Dead-via-builder — every `expose*` builder method set
+  them to the constant `"any"`.
+- **`CapabilityMeta.in_type` / `out_type` deleted.** Mirror
+  of `CapabilityDecl`.
+- **`ManifestBuilder.host()` setter deleted.** The
+  builder struct's `host: Vec<HostServiceRef>` field
+  drops along with it.
+- **`core::mod.rs` re-export block slimmed.** Drops
+  `HostServiceRef`, `IsolationMode`, `ResourceHints`
+  (three tokens). Stale `pub use` would fail
+  `cargo build -p odyssey`.
+- **HTTP bridge `CapInfo` and frontend `CapInfo` /
+  `AgentHandleDescribeLive` interfaces drop
+  `in_type` / `out_type`.** Hand-written TS types are
+  the missing-fields regression net — without them a
+  Rust-side removal would silently leave an unused
+  `cap.in_type` reference in JSX.
+- **`CapDetail.tsx` `<Meta>` rows for `in_type` /
+  `out_type` deleted.** `pages/Invoke.tsx`, `pages/Caps.tsx`,
+  `hooks/useCaps.tsx`, `api/client.tsx` import `CapInfo` but
+  never read the dropped fields.
+- **`profile_inspector.rs` and `agent.rs` JSON
+  envelopes drop `in_type` / `out_type`.**
+- **`smoke.rs` literals updated.** Two `CapabilityDecl`
+  struct literals in `agent_core_describes_handles`
+  and `agent_describe_refuses_unknown_fields` drop the
+  `in_type` / `out_type` lines.
+- **JSON example in the README updated.** The
+  embedded `agent_describe` response drops
+  `"in_type":"any","out_type":"any",`.
+- **Doc-comment scrub inside `manifest.rs`.**
+  Module doc drops the `host services` and `InProc
+  isolation` clauses; the `ManifestBuilder` defaults
+  table drops the `in_type` / `out_type` / `host` rows;
+  the historical-narrative paragraph about the
+  singular setters deletes. No new prose is added
+  (per "only clean up dead references").
+
+`cargo build -p odyssey && cargo test -p odyssey &&
+cargo test -p back` is the verification gate. No
+Cargo dependencies become orphans.
+
 ### Added — oxlint + oxfmt replace the absence of a linter/formatter in `example/fore/`
 
 The React frontend had no linter or formatter — the only

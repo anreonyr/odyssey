@@ -1092,7 +1092,6 @@ impl BuiltinManifest for LlmBuiltin {
         ManifestBuilder::new("llm")
             .expose(NAME_COMPLETE, CONTRACT_COMPLETE)
             .expose(NAME_EMBED, CONTRACT_EMBED)
-            .host("dispatcher")
             .timeout_ms(30000)
             .build()
     }

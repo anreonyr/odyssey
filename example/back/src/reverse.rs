@@ -68,7 +68,6 @@ impl BuiltinManifest for ReverseBuiltin {
         });
         ManifestBuilder::new("reverse")
             .expose_with_schema("reverse", "reverse", tool_schema)
-            .host("dispatcher")
             .timeout_ms(5000)
             .build()
     }

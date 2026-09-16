@@ -353,7 +353,7 @@ POST /api/invoke  {"capability":"agent_list","input":{}}
 POST /api/invoke  {"capability":"agent_describe","input":{"handle":"echo"}}
   → {"handle":"echo","live":true,"capability":"echo","contract":"echo",
      "name":"echo","namespace":"echo","plugin":"echo","kind":"sync",
-     "streaming":false,"in_type":"any","out_type":"any",
+     "streaming":false,
      "timeout_ms":5000,"calls_per_minute":0,
      "operations":["READ","WRITE","EXECUTE","ADMIN"]}
 ```

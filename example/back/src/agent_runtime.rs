@@ -1545,7 +1545,6 @@ impl BuiltinManifest for AgentRuntimeBuiltin {
             .requires(REACHES[1].0, REACHES[1].1)
             .requires(REACHES[2].0, REACHES[2].1)
             .requires(REACHES[3].0, REACHES[3].1)
-            .host("dispatcher")
             .timeout_ms(30000)
             .build()
     }

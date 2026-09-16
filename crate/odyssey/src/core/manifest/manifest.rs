@@ -16,13 +16,7 @@
 //! back, but the wiring helpers are gone.
 //!
 //! Manifests describe plugin identity, the exposed capability
-//! surface, dependencies on other plugins' capabilities, host
-//! services the plugin needs, and resource hints.
-//!
-//! Today every plugin compiles into the host binary as an in-proc
-//! module (`InProc` isolation). Designs for WASM / cdylib /
-//! subprocess loaders — including the manifest shapes those
-//! loaders must honour — live under `docs/deferred/`.
+//! surface, and dependencies on other plugins' capabilities.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -37,10 +31,6 @@ use crate::core::identity::kind::CapKind;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PluginManifest {
     pub plugin: PluginId,
-    /// Always `InProc` today. The variants for Wasm / Subprocess
-    /// live in `docs/deferred/`; when those loaders ship they'll
-    /// be added back here as additional variants.
-    pub isolate: IsolationMode,
     #[serde(default)]
     pub exposes: Vec<CapabilityDecl>,
     /// Phase 3 P3.1 — capability-keyed dependencies. The resolver
@@ -51,10 +41,11 @@ pub struct PluginManifest {
     /// root provider (or has no capability dependencies).
     #[serde(default)]
     pub requires: Vec<CapabilityRequirement>,
+    /// Per-call wall-clock budget in milliseconds. Default `None`
+    /// lets the orchestrator's `CapabilityBudget::new(5000)` use
+    /// the host default.
     #[serde(default)]
-    pub host: Vec<HostServiceRef>,
-    #[serde(default)]
-    pub resources: ResourceHints,
+    pub timeout_ms: Option<u32>,
 }
 
 /// Phase 3 P3.1 — a capability-keyed dependency.
@@ -86,35 +77,9 @@ pub struct CapabilityRequirement {
     pub contract: String,
 }
 
-/// Isolation mode for a plugin. The runtime currently supports
-/// only `InProc` — the plugin's `handler.rs` is compiled into
-/// the host binary and the factory mints a typed
-/// `Capability<MyResource>` directly. Designs for WASM (cdylib
-/// or wasmtime) and subprocess transports are tracked under
-/// `docs/deferred/` and will mint into this enum when they ship.
-///
-/// TOML shape: `[isolate] kind = "in_proc"`. Tagged-enum so adding
-/// new variants later is a non-breaking change to existing
-/// manifests.
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
-pub enum IsolationMode {
-    InProc,
-}
-
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CapabilityDecl {
     pub name: String,
-    /// Logical type name for input (declared in manifest). Surfaced
-    /// to the HTTP bridge for clients; not yet enforced as a runtime
-    /// type check.
-    #[serde(default)]
-    pub in_type: String,
-    /// Logical type name for output (declared in manifest). Surfaced
-    /// to the HTTP bridge for clients; not yet enforced as a runtime
-    /// type check.
-    #[serde(default)]
-    pub out_type: String,
     /// Runtime kind (sync vs stream). Phase 9 cleanup: replaced
     /// the previous `streaming: bool` field. The bool could only
     /// express two states; the `CapKind` enum is the single
@@ -145,27 +110,6 @@ pub struct CapabilityDecl {
     pub tool_schema: Option<Value>,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct HostServiceRef {
-    pub service: String,
-    #[serde(default)]
-    pub scope: Option<String>,
-}
-
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
-pub struct ResourceHints {
-    /// Per-call wall-clock budget in milliseconds. The only field
-    /// the kernel actually uses.
-    ///
-    /// Phase 8 cleanup: `cpu`, `mem_mb`, `io_bps` were serde-
-    /// decorated but had zero readers anywhere in `src/`. Same
-    /// family as Phase 5 D5 (the `tokens_per_minute` /
-    /// `bytes_per_minute` quota fields). Serde's
-    /// `deny_unknown_fields = false` silently drops them on load
-    /// so no manifest breaks.
-    pub timeout_ms: Option<u32>,
-}
-
 // ---------------------------------------------------------------------------
 // Fluent builder
 // ---------------------------------------------------------------------------
@@ -180,12 +124,9 @@ pub struct ResourceHints {
 /// | Field          | Default               |
 /// |----------------|-----------------------|
 /// | `version`      | `"0.1.0"`             |
-/// | `in_type`      | `"any"`               |
-/// | `out_type`     | `"any"`               |
 /// | `kind`         | `CapKind::Sync`       |
 /// | `exposes`      | `[]`                  |
 /// | `requires`     | `[]`                  |
-/// | `host`         | `[]`                  |
 /// | `timeout_ms`   | `None` → host default |
 ///
 /// Phase 9: the previous `.action(name, op)` and `.protocol(p)`
@@ -194,22 +135,11 @@ pub struct ResourceHints {
 /// write-only metadata. If a future cap needs to advertise a
 /// typed contract vocabulary, add it back at the same time the
 /// reader is added.
-///
-/// The builder used to hold one capability's fields flat
-/// (`cap_name`, `cap_contract`, `cap_kind`, ...) and `build`
-/// wrapped a single `CapabilityDecl` in a one-element `vec!`.
-/// `exposes` is a `Vec` and the agent plugin exposes two
-/// capabilities, so the fields move to `expose` /
-/// `expose_streaming`, which append to the list. The
-/// singular `.in_type` / `.out_type` / `.kind` setters go with
-/// them: they could only ever configure one cap, and
-/// `CapabilityDecl` still defaults both type names to `"any"`.
 pub struct ManifestBuilder {
     name: String,
     version: String,
     exposes: Vec<CapabilityDecl>,
     requires: Vec<CapabilityRequirement>,
-    host: Vec<HostServiceRef>,
     timeout_ms: Option<u32>,
 }
 
@@ -224,7 +154,6 @@ impl ManifestBuilder {
             version: "0.1.0".into(),
             exposes: Vec::new(),
             requires: Vec::new(),
-            host: Vec::new(),
             timeout_ms: None,
         }
     }
@@ -239,16 +168,9 @@ impl ManifestBuilder {
     /// plugin's `requires` matches against, so it is required
     /// here even though `CapabilityDecl::contract_name` allows an
     /// empty string for caps that publish nothing.
-    ///
-    /// `in_type` / `out_type` stay `"any"`: the manifest carries no
-    /// type vocabulary beyond that, and every builtin today
-    /// declares `"any"`. A cap that needs a real type name gets a
-    /// setter at the same time a reader for it exists.
     pub fn expose(mut self, name: impl Into<String>, contract_name: impl Into<String>) -> Self {
         self.exposes.push(CapabilityDecl {
             name: name.into(),
-            in_type: "any".into(),
-            out_type: "any".into(),
             kind: CapKind::Sync,
             contract_name: contract_name.into(),
             tool_schema: None,
@@ -268,8 +190,6 @@ impl ManifestBuilder {
     ) -> Self {
         self.exposes.push(CapabilityDecl {
             name: name.into(),
-            in_type: "any".into(),
-            out_type: "any".into(),
             kind: CapKind::Sync,
             contract_name: contract_name.into(),
             tool_schema: Some(tool_schema),
@@ -289,8 +209,6 @@ impl ManifestBuilder {
     ) -> Self {
         self.exposes.push(CapabilityDecl {
             name: name.into(),
-            in_type: "any".into(),
-            out_type: "any".into(),
             kind: CapKind::Stream,
             contract_name: contract_name.into(),
             tool_schema: None,
@@ -311,8 +229,6 @@ impl ManifestBuilder {
     ) -> Self {
         self.exposes.push(CapabilityDecl {
             name: name.into(),
-            in_type: "any".into(),
-            out_type: "any".into(),
             kind: CapKind::Stream,
             contract_name: contract_name.into(),
             tool_schema: Some(tool_schema),
@@ -326,16 +242,6 @@ impl ManifestBuilder {
         self.requires.push(CapabilityRequirement {
             name: handle.into(),
             contract: contract.into(),
-        });
-        self
-    }
-
-    /// Append a `[[host]]` entry. May be called multiple times
-    /// to declare multiple host services.
-    pub fn host(mut self, service: impl Into<String>) -> Self {
-        self.host.push(HostServiceRef {
-            service: service.into(),
-            scope: None,
         });
         self
     }
@@ -354,16 +260,13 @@ impl ManifestBuilder {
             version,
             exposes,
             requires,
-            host,
             timeout_ms,
         } = self;
         PluginManifest {
             plugin: PluginId { name, version },
-            isolate: IsolationMode::InProc,
             exposes,
             requires,
-            host,
-            resources: ResourceHints { timeout_ms },
+            timeout_ms,
         }
     }
 }
