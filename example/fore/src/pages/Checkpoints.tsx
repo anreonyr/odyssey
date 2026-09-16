@@ -6,14 +6,14 @@
 // `cancel` cap; this page is just a viewer over
 // `GET /api/checkpoints`.
 
-import { Link, useNavigate } from "react-router-dom";
 import { FolderOpen, Loader2, AlertCircle, ArrowRight } from "lucide-react";
-import { useCheckpoints } from "../hooks/useCheckpoints";
+import { Link, useNavigate } from "react-router-dom";
+
 import { agent } from "../api/client";
-import { useAgentSession } from "../hooks/useAgentSession";
+import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { Badge } from "../components/ui/badge";
+import { useCheckpoints } from "../hooks/useCheckpoints";
 
 function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
@@ -27,13 +27,11 @@ function formatTime(epochSeconds: number): string {
 
 export function Checkpoints() {
   const { checkpoints, loading, error } = useCheckpoints();
-  const sessionStore = useAgentSession();
   const navigate = useNavigate();
 
   async function load(path: string) {
     try {
       const r = await agent.load({ path });
-      sessionStore.cancel; // touch to keep the linter happy about hooks ordering
       navigate(`/agent/${r.session_id}`);
     } catch (e) {
       // Surface as session-store error so the user sees it on the
@@ -51,17 +49,17 @@ export function Checkpoints() {
         </CardHeader>
         <CardContent className="p-0">
           {loading ? (
-            <div className="flex items-center gap-2 p-4 text-xs text-muted-foreground">
+            <div className="text-muted-foreground flex items-center gap-2 p-4 text-xs">
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
               loading…
             </div>
           ) : error ? (
-            <div className="flex items-center gap-2 p-4 text-xs text-destructive">
+            <div className="text-destructive flex items-center gap-2 p-4 text-xs">
               <AlertCircle className="h-3.5 w-3.5" />
               {error}
             </div>
           ) : checkpoints.length === 0 ? (
-            <p className="p-4 text-xs text-muted-foreground">
+            <p className="text-muted-foreground p-4 text-xs">
               no checkpoints yet — cancel a session with a path to save one.
             </p>
           ) : (
@@ -69,17 +67,17 @@ export function Checkpoints() {
               {checkpoints.map((c) => (
                 <li
                   key={c.path}
-                  className="flex items-center gap-3 border-b border-border/50 px-4 py-2.5 last:border-b-0 hover:bg-accent/50"
+                  className="border-border/50 hover:bg-accent/50 flex items-center gap-3 border-b px-4 py-2.5 last:border-b-0"
                 >
-                  <FolderOpen className="h-3.5 w-3.5 text-muted-foreground" />
+                  <FolderOpen className="text-muted-foreground h-3.5 w-3.5" />
                   <div className="min-w-0 flex-1">
                     <code className="block truncate font-mono text-xs">{c.path}</code>
-                    <div className="mt-0.5 flex items-center gap-2 text-[10px] text-muted-foreground">
+                    <div className="text-muted-foreground mt-0.5 flex items-center gap-2 text-[10px]">
                       <span className="font-mono">{formatTime(c.saved_at)}</span>
                       <Badge variant="muted">{formatBytes(c.size)}</Badge>
                       <Link
                         to={`/agent/${c.session_id}`}
-                        className="font-mono hover:text-foreground"
+                        className="hover:text-foreground font-mono"
                       >
                         session {c.session_id.slice(0, 12)}…
                       </Link>

@@ -42,10 +42,7 @@ class BridgeError extends Error {
   }
 }
 
-async function post<TReq, TRes>(
-  path: string,
-  body: TReq,
-): Promise<TRes> {
+async function post<TReq, TRes>(path: string, body: TReq): Promise<TRes> {
   const r = await fetch(path, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -66,7 +63,11 @@ async function post<TReq, TRes>(
     const err = (parsed as InvokeError).error ?? `${path}: ${r.status}`;
     throw new BridgeError({ error: err });
   }
-  return JSON.parse(text) as TRes;
+  try {
+    return JSON.parse(text) as TRes;
+  } catch {
+    throw new Error(`${path}: response was not valid JSON`);
+  }
 }
 
 export const client = {
@@ -89,9 +90,7 @@ export const client = {
 
   invoke<TRes = unknown>(capability: string, input: unknown): Promise<TRes> {
     const body: InvokeRequest = { capability, input };
-    return post<InvokeRequest, InvokeResponse>("/api/invoke", body).then(
-      (r) => r.value as TRes,
-    );
+    return post<InvokeRequest, InvokeResponse>("/api/invoke", body).then((r) => r.value as TRes);
   },
 
   /**

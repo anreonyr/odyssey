@@ -3,16 +3,17 @@
 // SSE handler. The streaming result is the headline
 // affordance here — the rest is a simple JSON request shape.
 
-import { useState } from "react";
 import { Play, Loader2 } from "lucide-react";
+import { useState } from "react";
+
 import { client } from "../api/client";
+import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
-import { Textarea } from "../components/ui/textarea";
-import { Badge } from "../components/ui/badge";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
 import { ScrollArea } from "../components/ui/scroll-area";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
+import { Textarea } from "../components/ui/textarea";
 
 export function Playground() {
   const [prompt, setPrompt] = useState("");
@@ -51,13 +52,17 @@ export function Playground() {
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
           <CardTitle className="text-xs">Prompt</CardTitle>
           <Button size="sm" variant="success" onClick={run} disabled={running || !prompt.trim()}>
-            {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+            {running ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Play className="h-3.5 w-3.5" />
+            )}
             run
           </Button>
         </CardHeader>
         <CardContent className="space-y-3">
           <div>
-            <label className="mb-1 block text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+            <label className="text-muted-foreground mb-1 block font-mono text-[10px] uppercase tracking-wider">
               system (optional)
             </label>
             <Input
@@ -67,7 +72,7 @@ export function Playground() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+            <label className="text-muted-foreground mb-1 block font-mono text-[10px] uppercase tracking-wider">
               user prompt
             </label>
             <Textarea
@@ -92,11 +97,11 @@ export function Playground() {
             </TabsList>
             <TabsContent value="text">
               {error ? (
-                <pre className="rounded-md border border-destructive/40 bg-destructive/10 p-3 font-mono text-xs text-destructive">
+                <pre className="border-destructive/40 bg-destructive/10 text-destructive rounded-md border p-3 font-mono text-xs">
                   {error}
                 </pre>
               ) : (
-                <ScrollArea className="max-h-[480px] rounded-md border border-border bg-muted/20">
+                <ScrollArea className="border-border bg-muted/20 max-h-[480px] rounded-md border">
                   <pre className="p-3 font-mono text-xs leading-relaxed">
                     {completion || <span className="text-muted-foreground">(empty)</span>}
                   </pre>
@@ -104,16 +109,20 @@ export function Playground() {
               )}
             </TabsContent>
             <TabsContent value="raw">
-              <ScrollArea className="max-h-[480px] rounded-md border border-border bg-muted/20">
+              <ScrollArea className="border-border bg-muted/20 max-h-[480px] rounded-md border">
                 <pre className="p-3 font-mono text-xs">
-                  {rawJson || <span className="text-muted-foreground">(run to see the request envelope)</span>}
+                  {rawJson || (
+                    <span className="text-muted-foreground">(run to see the request envelope)</span>
+                  )}
                 </pre>
               </ScrollArea>
             </TabsContent>
           </Tabs>
           {rawJson && (
-            <p className="mt-2 font-mono text-[10px] text-muted-foreground">
-              <Badge variant="muted" className="mr-1">llm_complete</Badge>
+            <p className="text-muted-foreground mt-2 font-mono text-[10px]">
+              <Badge variant="muted" className="mr-1">
+                llm_complete
+              </Badge>
               sent via <code className="text-foreground">/api/invoke</code>
             </p>
           )}

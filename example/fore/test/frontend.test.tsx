@@ -4,7 +4,7 @@
 // purpose (catches field renames between API and UI), but jsdom
 // is a real DOM instead of a hand-rolled data model.
 //
-// Driven by `tests/smoke.rs::frontend_script_binds_to_the_live_api`
+// Driven by `example/back/tests/smoke.rs::frontend_script_binds_to_the_live_api`
 // which spawns the example binary on a free port and passes
 // `ODYSSEY_URL` and `ODYSSEY_PAGE` (the built dist/index.html)
 // through the environment.
@@ -18,8 +18,9 @@
 // Skip when `node` is unavailable — the assertion needs a JS
 // engine. Failing silently is worse than not running.
 
+import { readFileSync, statSync, type Stats } from "node:fs";
+
 import { JSDOM, ResourceLoader, VirtualConsole } from "jsdom";
-import { readFileSync, statSync } from "node:fs";
 
 const BASE = process.env.ODYSSEY_URL;
 const PAGE = process.env.ODYSSEY_PAGE;
@@ -29,13 +30,11 @@ if (!BASE || !PAGE) {
 }
 
 if (!safeStat(PAGE)) {
-  console.error(
-    `frontend dist not built. Run \`pnpm --dir examples/frontend build\` first. (${PAGE})`,
-  );
+  console.error(`frontend dist not built. Run \`pnpm --dir example/fore build\` first. (${PAGE})`);
   process.exit(2);
 }
 
-function safeStat(p) {
+function safeStat(p: string): Stats | null {
   try {
     return statSync(p);
   } catch {
@@ -51,7 +50,7 @@ vc.on("warn", (...args) => console.warn("[jsdom warn]", ...args));
 vc.on("jsdomError", (e) => console.error("[jsdomError]", e));
 
 class DistLoader extends ResourceLoader {
-  fetch(url, options) {
+  override fetch(url: string, options: unknown): Promise<Buffer> | null {
     const u = new URL(url);
     if (u.origin === new URL(BASE).origin && u.pathname.startsWith("/assets/")) {
       const local = PAGE.replace(/index\.html$/, "") + u.pathname.replace(/^\//, "");
@@ -78,7 +77,7 @@ const dom = new JSDOM(html, {
 Object.defineProperty(dom.window, "fetch", {
   configurable: true,
   writable: true,
-  value: (url, init) => {
+  value: (url: string | URL, init?: RequestInit): Promise<Response> => {
     const absolute = typeof url === "string" && url.startsWith("/") ? BASE + url : url;
     return globalThis.fetch(absolute, init);
   },
@@ -90,16 +89,14 @@ Object.defineProperty(dom.window, "fetch", {
 await new Promise((resolve) => setTimeout(resolve, 3000));
 
 const doc = dom.window.document;
-const failures = [];
-const check = (ok, message) => {
+const failures: string[] = [];
+const check = (ok: boolean, message: string): void => {
   if (!ok) failures.push(message);
 };
 
 // ---------- Sidebar: nav links exist (every route is reachable) ----------
 
-const navLinks = Array.from(doc.querySelectorAll("aside nav a")).map((a) =>
-  a.getAttribute("href"),
-);
+const navLinks = Array.from(doc.querySelectorAll("aside nav a")).map((a) => a.getAttribute("href"));
 for (const expected of ["/", "/caps", "/agent", "/invoke", "/playground", "/checkpoints"]) {
   check(navLinks.includes(expected), `sidebar missing nav link to ${expected}`);
 }
@@ -131,18 +128,43 @@ if (capsLink) {
 
 const pluginCards = doc.querySelectorAll("[data-plugin]");
 const pluginNames = new Set(Array.from(pluginCards).map((c) => c.dataset.plugin));
-for (const p of ["echo", "reverse", "database", "streaming_echo", "agent_list", "agent_describe", "tool_descriptor", "profile_inspector", "llm", "memory", "agent_runtime"]) {
+for (const p of [
+  "echo",
+  "reverse",
+  "database",
+  "streaming_echo",
+  "agent_list",
+  "agent_describe",
+  "tool_descriptor",
+  "profile_inspector",
+  "llm",
+  "memory",
+  "agent_runtime",
+]) {
   check(pluginNames.has(p), `missing plugin card: ${p}`);
 }
 
 const expectedCaps = [
-  "echo", "reverse", "database", "streaming_echo",
-  "agent_list", "agent_describe",
-  "tool_describe", "profile_inspect",
-  "llm_complete", "llm_embed",
-  "memory_query", "memory_insert",
-  "agent_start", "agent_resume", "agent_cancel", "agent_plan", "agent_stream",
-  "agent_load", "agent_memory_recall", "agent_memory_record",
+  "echo",
+  "reverse",
+  "database",
+  "streaming_echo",
+  "agent_list",
+  "agent_describe",
+  "tool_describe",
+  "profile_inspect",
+  "llm_complete",
+  "llm_embed",
+  "memory_query",
+  "memory_insert",
+  "agent_start",
+  "agent_resume",
+  "agent_cancel",
+  "agent_plan",
+  "agent_stream",
+  "agent_load",
+  "agent_memory_recall",
+  "agent_memory_record",
 ];
 const capRows = doc.querySelectorAll("[data-cap-row]");
 const renderedCaps = new Set(Array.from(capRows).map((r) => r.dataset.capRow));
@@ -157,9 +179,14 @@ for (const handle of ["echo", "reverse", "database", "streaming_echo"]) {
   const row = doc.querySelector(`[data-cap-row="${handle}"]`);
   if (!row) continue;
   const ops = row.querySelectorAll("span");
-  const opsText = Array.from(ops).map((s) => s.textContent || "").join(",");
+  const opsText = Array.from(ops)
+    .map((s) => s.textContent || "")
+    .join(",");
   check(
-    opsText.includes("READ") && opsText.includes("WRITE") && opsText.includes("EXECUTE") && opsText.includes("ADMIN"),
+    opsText.includes("READ") &&
+      opsText.includes("WRITE") &&
+      opsText.includes("EXECUTE") &&
+      opsText.includes("ADMIN"),
     `operations column for ${handle} should list all four rights, got: ${opsText}`,
   );
 }
@@ -168,12 +195,22 @@ for (const handle of ["echo", "reverse", "database", "streaming_echo"]) {
 // binding row holds the four tool caps; everything else in the
 // cspace is "not in binding row".
 const expectedUnreachable = [
-  "agent_list", "agent_describe",
-  "tool_describe", "profile_inspect",
-  "agent_start", "agent_resume", "agent_cancel", "agent_plan", "agent_stream",
-  "agent_load", "agent_memory_recall", "agent_memory_record",
-  "llm_complete", "llm_embed",
-  "memory_query", "memory_insert",
+  "agent_list",
+  "agent_describe",
+  "tool_describe",
+  "profile_inspect",
+  "agent_start",
+  "agent_resume",
+  "agent_cancel",
+  "agent_plan",
+  "agent_stream",
+  "agent_load",
+  "agent_memory_recall",
+  "agent_memory_record",
+  "llm_complete",
+  "llm_embed",
+  "memory_query",
+  "memory_insert",
 ];
 for (const c of expectedUnreachable) {
   const row = doc.querySelector(`[data-cap-row="${c}"]`);
@@ -199,7 +236,7 @@ if (agentLink) {
 const goal = doc.querySelector('[data-input="goal"]');
 check(!!goal, "Agent: goal textarea missing");
 
-const toolCheckboxes = doc.querySelectorAll('[data-tool-checkbox]');
+const toolCheckboxes = doc.querySelectorAll("[data-tool-checkbox]");
 check(
   toolCheckboxes.length === 4,
   `Agent: expected 4 tool checkboxes (the agent's binding row), got ${toolCheckboxes.length}`,

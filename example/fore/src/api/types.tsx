@@ -235,12 +235,7 @@ export type AgentOutcome = { ok: true; value: unknown } | { ok: false; error: st
 
 export type FinalReason = "Goal" | "MaxSteps" | "ToolFailure";
 
-export type SessionStatus =
-  | "Running"
-  | "AwaitingObservation"
-  | "Done"
-  | "Failed"
-  | "Cancelled";
+export type SessionStatus = "Running" | "AwaitingObservation" | "Done" | "Failed" | "Cancelled";
 
 export interface AgentResumePayload {
   /** The current step. */

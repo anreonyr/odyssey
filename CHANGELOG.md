@@ -6,6 +6,150 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — oxlint + oxfmt replace the absence of a linter/formatter in `example/fore/`
+
+The React frontend had no linter or formatter — the only
+gate was `tsc --noEmit` inside `pnpm build`, and nothing
+reformatted on save or in CI. The migration adds both as
+first-class tooling, wired through `./scripts/fore.sh` and
+`package.json`.
+
+- **`oxlint@^1.83.0` + `oxfmt@^0.68.0`** added to
+  `example/fore/package.json` `devDependencies`. Both are
+  the Rust-native oxc tools; the registration format
+  follows the docs' getting-started recipe.
+- **`.oxlintrc.json`** enables `correctness` at error
+  severity and opts into the `react`, `react-perf`,
+  `import`, `vitest`, `node`, and `jsx-a11y` plugin
+  bundles (the built-in defaults `eslint`, `typescript`,
+  `unicorn`, `oxc` are also listed explicitly because
+  setting `plugins` overwrites the default set). `dist`,
+  `node_modules`, and `pnpm-lock.yaml` are ignored at
+  config level. Two rules are downgraded to `warn`
+  pending follow-up UI work:
+  `react/set-state-in-effect` (3 sites in
+  `hooks/useCheckpoints.ts` and `pages/Invoke.tsx`) and
+  `jsx-a11y/label-has-associated-control` (8 sites in
+  `pages/{Playground,Invoke,CapDetail,Agent}.tsx` —
+  labels need `htmlFor`/`id` pairs or control wrapping).
+- **`.oxfmtrc.json`** matches Prettier defaults
+  (`printWidth: 100`, `tabWidth: 2`, `semi: true`,
+  `singleQuote: false`, `trailingComma: "all"`,
+  `arrowParens: "always"`, `endOfLine: "lf"`) and adds
+  `sortImports` with the project's group order plus
+  `sortTailwindcss` for the `cn` / `cva` / `clsx`
+  function calls the shadcn-style components rely on.
+- **Scripts.** `pnpm lint`, `pnpm lint:fix`,
+  `pnpm format`, `pnpm format:check` join `pnpm build`
+  / `dev` / `preview`. `scripts/fore.sh` gets four
+  matching actions (`lint`, `lint:fix`, `format`,
+  `format:check`).
+- **Existing source brought into compliance.** The 46
+  source / config files were formatted by `oxfmt`;
+  `pnpm lint` exits 0 with the 11 warnings above and 0
+  errors. Two pre-existing defects the migration
+  surfaced were fixed as part of the gate work:
+  `src/api/client.ts:66` now wraps `JSON.parse` in
+  `try`/`catch` (same pattern the error path already
+  used), and `src/hooks/useCaps.ts:54` adds an explicit
+  `return;` to the `.map(async (h) => ...)` callback
+  the rule flagged.
+- **Stale "linter hack" removed.** `src/pages/Checkpoints.tsx`
+  had `sessionStore.cancel;` (comment: "touch to keep the
+  linter happy about hooks ordering") and the matching
+  unused `useAgentSession()` hook call. The hook has no
+  external side effects (pure local `useState`), so the
+  declaration and import are gone.
+
+### Changed — `example/fore/` unifies on `.tsx`; `.js`/`.mjs` files gone
+
+The frontend ended the previous step with two
+non-TypeScript files (`postcss.config.js` and
+`test/frontend.test.mjs`) and a mixed `.ts`/`.tsx`
+tree where every `.ts` was either a config or a
+JSX-free logic file. Standardizing on `.tsx` makes
+the directory uniform and removes both legacy files
+in one pass.
+
+- **All `.ts` files in `example/fore/` renamed to `.tsx`.**
+  `vite.config.ts` → `vite.config.tsx`,
+  `tailwind.config.ts` → `tailwind.config.tsx`,
+  `src/api/{client,types}.ts` → `.tsx`,
+  `src/hooks/use*.ts` → `.tsx` (5 files),
+  `src/lib/utils.ts` → `.tsx`. The renames keep git
+  history intact (`git mv`). Files with no JSX in
+  them still compile correctly under `.tsx` —
+  TypeScript allows JSX-free files under that
+  extension.
+- **`postcss.config.tsx`** is new in place of the old
+  `postcss.config.js`. It carries a `Config` type
+  from `postcss-load-config`. At build time
+  `postcss-load-config` v6 resolves the file via
+  `tsx` (already a peer dep — we don't add
+  `ts-node`). No `tsc --noEmit` regression: the file
+  sits outside `tsconfig.json#include = ["src"]`.
+- **`test/frontend.test.tsx`** replaces
+  `test/frontend.test.mjs`. The body is now properly
+  typed (`BASE: string`, `safeStat(p: string): Stats
+  | null`, `DistLoader extends ResourceLoader`,
+  `dom.window.document` typed as `Document`, the
+  `check` and `failures` closures annotated), and the
+  stale `examples/frontend` reference in the
+  "dist not built" error message is corrected to
+  `example/fore` (the path the layout actually
+  settled on).
+- **`tsx@^4.23.0`** added to `devDependencies` as the
+  dev-time runner for `.tsx` test files. `tsx` is a
+  peer dep of `postcss-load-config` v6 too, so the
+  package was already on the resolver's path.
+- **Driver script updated.** `scripts/fore.sh`'s
+  `test` action now invokes `pnpm exec tsx
+  test/frontend.test.tsx` instead of `node
+  test/frontend.test.mjs`. The Rust driver in
+  `example/back/tests/smoke.rs::
+  frontend_script_binds_to_the_live_api` switches to
+  `pnpm exec tsx` against the new `.tsx` script and
+  updates its doc-comment to match. The `node
+  --version` probe stays — `tsx` itself uses node.
+- **Verification.** `pnpm lint`, `pnpm
+  format:check`, and `pnpm build` all pass after
+  the unification. `cargo test -p odyssey-example-back`
+  reports `27 passed; 0 failed`, including
+  `frontend_script_binds_to_the_live_api` — which
+  surfaced the third piece of fallout from the
+  rename: neither Vite's nor `postcss-load-config`'s
+  default config-file search lists include `.tsx`.
+  Vite 5 looks for `.js / .ts / .mjs / .mts /
+  .cjs / .cts`; `postcss-load-config` v6 looks for
+  the same minus `.mts / .cts`. So after the
+  rename:
+  - `vite.config.tsx` was silently dropped (Vite
+      fell back to defaults, so the
+      `stripModuleScriptType` plugin never
+      registered and `<script type="module">`
+      leaked into the dist HTML).
+  - `postcss.config.tsx` was silently dropped
+      (`postcss-load-config` found nothing, so
+      Tailwind + Autoprefixer never ran and the
+      built bundle had no utility CSS).
+  - Tailwind's own `defaultConfigFiles`
+      likewise omits `.tsx`, so even passing the
+      path explicitly to `tailwindcss('./...')`
+      fails because Tailwind's `require()`-based
+      loader can't parse `.tsx` either.
+  The fix is bundled into the same commit:
+  - `pnpm` scripts pass `--config vite.config.tsx`
+      explicitly to every `vite` invocation
+      (`build`, `dev`, `preview`).
+  - `postcss.config.tsx` is gone. Its two
+      plugins — `tailwindcss()` and `autoprefixer()`
+      — move into `vite.config.tsx` under
+      `css.postcss.plugins`. The Tailwind config
+      is imported from `vite.config.tsx` and
+      passed as an object (not a path) because
+      Tailwind's `require()`-based loader can't
+      read `.tsx`.
+
 ### Added — agent frontend (React) replaces the inline-script UI
 
 The example binary now serves a Vite + React + TypeScript app
@@ -407,11 +551,13 @@ that depends only on `core`.
 - **Three-layer dependency direction.** The crate has three
   top-level modules: `core`, `capability`, `personality`. The
   direction is
+
   ```
       personality ──▶ capability ──▶ core
                       │            │
                       └────────────┘
   ```
+
   `core` is a leaf (no internal deps). `capability` depends on
   `core`. `personality` depends on `core` and `capability`.
   A `tests/layering.rs` integration test reads the source and
@@ -420,7 +566,7 @@ that depends only on `core`.
 - **`src/{host,kernel,runtime,plugins}/` deleted.** The legacy
   Phase 5 three-layer split was retired: the kernel moved to
   `src/capability/`, the host decomposed into `core/manifest`
-  + `personality/composition` + `personality/lifecycle`, the
+  - `personality/composition` + `personality/lifecycle`, the
   runtime moved to `personality/lifecycle/{boot, mint, ruin,
   run, serve}`. Plugins (`src/plugins/`) were deleted in favor of
   the workspace-member `builtins/` crate.
@@ -671,10 +817,10 @@ track). **All seven ship in this release**:
   PluginManifest`. The boot sequence collects these via
   `boot::load_manifests` instead of parsing a `.toml` file.
   This:
-    - gives the compiler the full set of fields to check
+  - gives the compiler the full set of fields to check
       (no more "did you forget `contract_name`?" surprises),
-    - removes the toml parsing step from the runtime path,
-    - lets `cargo doc` and IDE tooling follow plugin
+  - removes the toml parsing step from the runtime path,
+  - lets `cargo doc` and IDE tooling follow plugin
       identity through the codebase.
 - The `*.toml` files for runtime plugins are **deleted**.
   Test_only plugins still carry toml manifests because the
@@ -707,12 +853,14 @@ track). **All seven ship in this release**:
   per-field setters. Each runtime plugin's `manifest.rs`
   is now 4-8 lines of builder calls instead of 30+ lines
   of struct-literal boilerplate:
+
   ```rust
   ManifestBuilder::new("echo", "echo", "echo")
       .host("dispatcher")
       .timeout_ms(5000)
       .build()
   ```
+
   Defaults fill in `version = "0.1.0"`, `in/out_type = "any"`,
   `streaming = false`, empty `requires/consumes/host`,
   `timeout_ms = None` (host default 5000ms at mint time).
@@ -1094,6 +1242,7 @@ data: "received:"
   from tests as `odyssey::plugins::test_only::counter::*` etc.
 - **`src/plugins/echo/` family grouping** — the three
   echo-family plugins are now nested under one parent:
+
   ```
   src/plugins/echo/
   ├── mod.rs        — parent, declares submodules
@@ -1101,6 +1250,7 @@ data: "received:"
   ├── chain/        — was src/plugins/echo_chain/   (sync chained)
   └── echo_stream/  — was src/plugins/stream_echo/  (renamed, streaming passthrough)
   ```
+
   The streaming echo plugin was renamed `stream_echo` →
   `echo_stream` so the whole family shares the `echo_` prefix
   (echo / echo_chain / echo_stream) and is greppable as one
@@ -1128,11 +1278,13 @@ data: "received:"
   catches "added to const but forgot activator".
 - **`echo_chain.toml`** now declares its real dependency via
   `[[requires]]`:
+
   ```toml
   [[requires]]
   name     = "echo"
   contract = "echo"
   ```
+
   Boot log proves the resolver binds it: `echo-chain@0.1.0
   receives: handle=echo contract=echo from=echo@0.1.0
   (cap=echo)`. The legacy `[[consumes]]` block is kept for
@@ -1231,6 +1383,7 @@ is real before building Agent / LLM / Embedder on top of it.
   source`). All 8 pass.
 
 ### Added (earlier, kept here)
+
 - **Possession model**: `CapabilitySpace` (seL4 CSpace analogue) +
   `Slot<R, K>` typed reference + `Capability<R, K>` occupant.
   Plugins hold `Slot<R, K>` references; the host can revoke slot
@@ -1256,6 +1409,7 @@ is real before building Agent / LLM / Embedder on top of it.
   `log` function.
 
 ### Changed
+
 - **Library split**: `src/lib.rs` exposes the shared module tree so
   `bin/odyssey` (full boot + HTTP) and `bin/lab` (Phase 1
   experiments) can share `capability`, `host`, `plugins`, and `lab`.
@@ -1271,6 +1425,7 @@ is real before building Agent / LLM / Embedder on top of it.
   instead of hard-coded 5000.
 
 ### Fixed
+
 - **Bug 1**: `CapabilityService::clone()` was creating a fresh empty
   service on every clone. Fixed by wrapping inner state in `Arc`;
   main, plugins, and the HTTP bridge now share the same registry.
@@ -1289,6 +1444,7 @@ is real before building Agent / LLM / Embedder on top of it.
   through `axum::serve(...).with_graceful_shutdown(...)`.
 
 ### Removed
+
 - `limiter.rs` — global `Limiter` service; superseded by per-token
   `CapabilityBudget`.
 - `loader.rs` / `wasm_loader.rs` — entire file dead after plugin
@@ -1418,7 +1574,7 @@ src/
   variant, not by substring matching on the rendered message.
 - `runtime/` no longer carries the Phase 4 `boot/` submodule;
   the boot path moved into `runtime::lifecycle` + `runtime::activate`
-  + `runtime::mint`.
+  - `runtime::mint`.
 - `plugins/agent/handler.rs` (712 LOC) split into five focused
   files: `handler.rs` (struct + constructors + parse_operation),
   `dispatch.rs` (sync `Resource::invoke` body), `stream.rs`

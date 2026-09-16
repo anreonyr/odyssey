@@ -1,12 +1,16 @@
 {
   "name": "odyssey-frontend",
-  "private": true,
   "version": "0.1.0",
+  "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "dev": "vite --config vite.config.tsx",
+    "build": "tsc --noEmit && vite build --config vite.config.tsx",
+    "preview": "vite preview --config vite.config.tsx",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
@@ -29,8 +33,11 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.6.0",
     "jsdom": "^25.0.1",
+    "oxfmt": "^0.68.0",
+    "oxlint": "^1.83.0",
     "postcss": "^8.5.28",
     "tailwindcss": "^3.4.19",
+    "tsx": "^4.23.0",
     "typescript": "^5.6.3",
     "vite": "^5.4.11"
   }

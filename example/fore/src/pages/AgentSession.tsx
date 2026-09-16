@@ -7,19 +7,21 @@
 // next step to emit; this view just renders the history and
 // the resume form.
 
+import type { Observation } from "../api/types";
+
+import { ArrowLeft, Send, Loader2, X, Save, Brain } from "lucide-react";
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Send, Loader2, X, Save, Brain } from "lucide-react";
-import { useAgentSession } from "../hooks/useAgentSession";
-import type { Observation } from "../api/types";
+
+import { MemoryPanel } from "../components/MemoryPanel";
+import { StepRow } from "../components/StepRow";
+import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { Textarea } from "../components/ui/textarea";
-import { Badge } from "../components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { ScrollArea } from "../components/ui/scroll-area";
-import { StepRow } from "../components/StepRow";
-import { MemoryPanel } from "../components/MemoryPanel";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
+import { Textarea } from "../components/ui/textarea";
+import { useAgentSession } from "../hooks/useAgentSession";
 import { cn } from "../lib/utils";
 
 type ObservationKind = "Tick" | "ToolResult" | "UserReply";
@@ -44,7 +46,7 @@ export function AgentSession() {
           </Link>
         </Button>
         <Card>
-          <CardContent className="p-6 text-sm text-muted-foreground">
+          <CardContent className="text-muted-foreground p-6 text-sm">
             session <code>{id}</code> not in memory.
           </CardContent>
         </Card>
@@ -73,7 +75,7 @@ export function AgentSession() {
               <ArrowLeft className="h-3.5 w-3.5" /> sessions
             </Link>
           </Button>
-          <code className="font-mono text-xs text-muted-foreground">{session.session_id}</code>
+          <code className="text-muted-foreground font-mono text-xs">{session.session_id}</code>
           <Badge variant={statusVariant(session.status)}>{session.status.toLowerCase()}</Badge>
         </div>
         <div className="flex items-center gap-2">
@@ -105,7 +107,9 @@ export function AgentSession() {
               <p className="text-sm">{session.goal}</p>
               <div className="mt-2 flex flex-wrap gap-1">
                 {session.allowed_tools.map((t) => (
-                  <Badge key={t} variant="muted">{t}</Badge>
+                  <Badge key={t} variant="muted">
+                    {t}
+                  </Badge>
                 ))}
               </div>
             </CardContent>
@@ -118,13 +122,13 @@ export function AgentSession() {
             <CardContent className="p-0">
               <ScrollArea className="max-h-[480px]">
                 {history.length === 0 ? (
-                  <p className="p-4 text-xs text-muted-foreground">
+                  <p className="text-muted-foreground p-4 text-xs">
                     no history yet — send the first observation below.
                   </p>
                 ) : (
                   <ol>
                     {history.map((step, idx) => (
-                      <li key={idx} className="border-b border-border/50 px-4 py-2 last:border-b-0">
+                      <li key={idx} className="border-border/50 border-b px-4 py-2 last:border-b-0">
                         <StepRow step={step} />
                       </li>
                     ))}
@@ -168,13 +172,25 @@ export function AgentSession() {
               {obsKind !== "Tick" && (
                 <Textarea
                   rows={3}
-                  placeholder={obsKind === "UserReply" ? "user reply…" : "tool value (JSON or text)"}
+                  placeholder={
+                    obsKind === "UserReply" ? "user reply…" : "tool value (JSON or text)"
+                  }
                   value={obsText}
                   onChange={(e) => setObsText(e.target.value)}
                 />
               )}
-              <Button size="sm" variant="success" onClick={resume} disabled={!canResume} data-action="resume">
-                {sessionStore.busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+              <Button
+                size="sm"
+                variant="success"
+                onClick={resume}
+                disabled={!canResume}
+                data-action="resume"
+              >
+                {sessionStore.busy ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Send className="h-3.5 w-3.5" />
+                )}
                 Send observation
               </Button>
             </CardContent>
@@ -182,7 +198,7 @@ export function AgentSession() {
 
           <Card className="border-warning/40">
             <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-xs text-warning">
+              <CardTitle className="text-warning flex items-center gap-2 text-xs">
                 <Save className="h-3.5 w-3.5" /> Checkpoint
               </CardTitle>
             </CardHeader>

@@ -6,24 +6,17 @@
 // sidebar counts and the cards here stay in sync without
 // any extra fetching.
 
+import { Boxes, Bot, Save, Sparkles, Terminal, Activity, Cpu } from "lucide-react";
 import { Link } from "react-router-dom";
-import {
-  Boxes,
-  Bot,
-  Save,
-  Sparkles,
-  Terminal,
-  Activity,
-  Cpu,
-} from "lucide-react";
-import { useCaps } from "../hooks/useCaps";
-import { useAgentSession } from "../hooks/useAgentSession";
-import { useCheckpoints } from "../hooks/useCheckpoints";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+
+import { MemoryPanel } from "../components/MemoryPanel";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Skeleton } from "../components/ui/skeleton";
-import { MemoryPanel } from "../components/MemoryPanel";
+import { useAgentSession } from "../hooks/useAgentSession";
+import { useCaps } from "../hooks/useCaps";
+import { useCheckpoints } from "../hooks/useCheckpoints";
 import { cn } from "../lib/utils";
 
 export function Overview() {
@@ -39,7 +32,7 @@ export function Overview() {
     <div className="space-y-6">
       {/* Top stats row */}
       <section aria-label="system status">
-        <h2 className="mb-3 text-xs font-mono uppercase tracking-wider text-muted-foreground">
+        <h2 className="text-muted-foreground mb-3 font-mono text-xs uppercase tracking-wider">
           System status
         </h2>
         {!ready ? (
@@ -50,12 +43,7 @@ export function Overview() {
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <Stat
-              icon={Cpu}
-              label="Capabilities mounted"
-              value={caps.length}
-              tone="default"
-            />
+            <Stat icon={Cpu} label="Capabilities mounted" value={caps.length} tone="default" />
             <Stat
               icon={Activity}
               label="Reachable via agent"
@@ -80,7 +68,7 @@ export function Overview() {
 
       {/* Quick links */}
       <section aria-label="quick links">
-        <h2 className="mb-3 text-xs font-mono uppercase tracking-wider text-muted-foreground">
+        <h2 className="text-muted-foreground mb-3 font-mono text-xs uppercase tracking-wider">
           Jump to
         </h2>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -105,7 +93,12 @@ export function Overview() {
             description="Pick up where a cancelled session left off."
             count={checkpoints.length}
           />
-          <QuickCard to="/invoke" icon={Terminal} title="Invoke" description="Raw capability dispatch — pick a cap, send JSON, see the result." />
+          <QuickCard
+            to="/invoke"
+            icon={Terminal}
+            title="Invoke"
+            description="Raw capability dispatch — pick a cap, send JSON, see the result."
+          />
           <QuickCard
             to="/playground"
             icon={Sparkles}
@@ -118,7 +111,7 @@ export function Overview() {
 
       {/* Memory */}
       <section aria-label="memory">
-        <h2 className="mb-3 text-xs font-mono uppercase tracking-wider text-muted-foreground">
+        <h2 className="text-muted-foreground mb-3 font-mono text-xs uppercase tracking-wider">
           Memory
         </h2>
         <Card>
@@ -131,45 +124,41 @@ export function Overview() {
       {/* Agent binding summary */}
       {ready && (
         <section aria-label="agent binding row">
-          <h2 className="mb-3 text-xs font-mono uppercase tracking-wider text-muted-foreground">
+          <h2 className="text-muted-foreground mb-3 font-mono text-xs uppercase tracking-wider">
             Agent binding row
           </h2>
           <Card>
             <CardHeader>
               <CardTitle>What the agent can reach</CardTitle>
               <CardDescription>
-                The four reachable handles — echo, reverse, database, streaming_echo —
-                carry all four rights. Everything else in the cspace is registered but
-                not in the binding row.
+                The four reachable handles — echo, reverse, database, streaming_echo — carry all
+                four rights. Everything else in the cspace is registered but not in the binding row.
               </CardDescription>
             </CardHeader>
             <CardContent>
               {agentError ? (
-                <p className="text-xs text-destructive">
-                  Agent unavailable: {agentError}
-                </p>
+                <p className="text-destructive text-xs">Agent unavailable: {agentError}</p>
               ) : (
                 <ul className="grid grid-cols-1 gap-2 md:grid-cols-2">
                   {Array.from(reachable.values()).map((h) => {
                     const d = describes.get(h.handle);
-                    const ops =
-                      d && d.live ? d.operations : null;
+                    const ops = d && d.live ? d.operations : null;
                     return (
                       <li
                         key={h.handle}
-                        className="flex items-center justify-between rounded-md border border-border bg-card px-3 py-2"
+                        className="border-border bg-card flex items-center justify-between rounded-md border px-3 py-2"
                       >
                         <span className="font-mono text-xs">{h.handle}</span>
                         <div className="flex items-center gap-1">
-                          {ops
-                            ? ops.map((op) => (
-                                <Badge key={op} variant="muted">
-                                  {op}
-                                </Badge>
-                              ))
-                            : (
-                              <Badge variant="destructive">revoked</Badge>
-                            )}
+                          {ops ? (
+                            ops.map((op) => (
+                              <Badge key={op} variant="muted">
+                                {op}
+                              </Badge>
+                            ))
+                          ) : (
+                            <Badge variant="destructive">revoked</Badge>
+                          )}
                         </div>
                       </li>
                     );
@@ -203,7 +192,7 @@ function Stat({ icon: Icon, label, value, tone }: StatProps) {
       <CardContent className="flex items-center gap-3 p-4">
         <Icon className={cn("h-4 w-4 shrink-0", toneClass)} />
         <div className="min-w-0 flex-1">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+          <div className="text-muted-foreground font-mono text-[10px] uppercase tracking-wider">
             {label}
           </div>
           <div className={cn("font-mono text-2xl tabular-nums leading-none", toneClass)}>
@@ -225,10 +214,10 @@ interface QuickCardProps {
 
 function QuickCard({ to, icon: Icon, title, description, count }: QuickCardProps) {
   return (
-    <Card className="group transition-colors hover:border-primary/50">
+    <Card className="hover:border-primary/50 group transition-colors">
       <CardHeader className="flex flex-row items-start justify-between space-y-0">
         <div className="flex items-start gap-3">
-          <Icon className="mt-0.5 h-4 w-4 text-primary" />
+          <Icon className="text-primary mt-0.5 h-4 w-4" />
           <div className="min-w-0">
             <CardTitle>{title}</CardTitle>
             <CardDescription className="mt-1">{description}</CardDescription>

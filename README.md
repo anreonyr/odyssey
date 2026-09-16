@@ -194,15 +194,22 @@ odyssey/                       # root has no Cargo.toml — only scripts and doc
     └── fore/                  # Vite + React + TS — agent UI
         ├── package.json
         ├── pnpm-lock.yaml
+        ├── pnpm-workspace.yaml
+        ├── .oxlintrc.json     # oxlint config — correctness + react/import/vitest/jsx-a11y plugins
+        ├── .oxfmtrc.json      # oxfmt config — Prettier defaults + sortImports + sortTailwindcss
+        ├── tsconfig.json
+        ├── vite.config.tsx    # Vite config; --config vite.config.tsx is passed because Vite 5 doesn't auto-discover .tsx
+        ├── tailwind.config.tsx # Tailwind config (loaded via direct import, not require'd path)
         ├── index.html         # Vite entry — restores after restructure
         ├── src/
-        ├── test/
+        ├── test/frontend.test.tsx  # jsdom smoke test, run via `pnpm exec tsx`
         └── dist/              # gitignored, built on demand
 ```
 
 `crate/` is the only cargo workspace (lib only). `example/back/` is a
 single crate holding both the builtin **lib** (`odyssey_builtin`) and the
 example **bin** (`odyssey-example-back`); the previous `example/` workspace
+
 - `backend/odyssey-builtin/` member + their two `Cargo.toml`s collapsed
 into one. The example imports the lib across workspaces via
 `path = "../../crate/odyssey"`. The root has no `Cargo.toml` and no
@@ -218,6 +225,10 @@ cd example/back  && cargo test            # smoke (27)
 
 ./scripts/back.sh                       # build + run the example binary
 ./scripts/fore.sh build                 # type-check + bundle the React app
+./scripts/fore.sh lint                  # oxlint (read-only)
+./scripts/fore.sh lint:fix              # oxlint --fix
+./scripts/fore.sh format                # oxfmt (write)
+./scripts/fore.sh format:check          # oxfmt --check (CI)
 ./scripts/test.sh                       # all of the above + the jsdom smoke
 
 # Set ODYSSEY_ADDR=host:port to move the bridge (the smoke test
@@ -400,8 +411,8 @@ revoked, unbound).
 The frontend test, `frontend_script_binds_to_the_live_api`, is the
 only one that spans both halves: it spawns the example binary,
 loads the **built** React bundle from
-`examples/frontend/dist/index.html` into jsdom via
-`examples/frontend/test/frontend.test.mjs`, drives it, and
+`example/fore/dist/index.html` into jsdom via
+`example/fore/test/frontend.test.tsx`, drives it, and
 asserts the rendered DOM — that every plugin / capability row
 renders, that the four reachable handles surface all four rights,
 that caps outside the agent's binding row are marked, that the

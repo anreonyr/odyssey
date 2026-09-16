@@ -1,5 +1,9 @@
-import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
+import autoprefixer from "autoprefixer";
+import tailwindcss from "tailwindcss";
+import { defineConfig, type Plugin } from "vite";
+
+import tailwindConfig from "./tailwind.config.tsx";
 
 // Vite config — keeps the dev server simple, lets the Rust bridge
 // own the production routing. `server.proxy` is what makes `pnpm dev`
@@ -13,6 +17,13 @@ import react from "@vitejs/plugin-react";
 // rewrites the emitted HTML to a plain `<script>` tag so jsdom
 // can drive it. Real browsers ignore the type and run it the
 // same way.
+//
+// PostCSS plugins (Tailwind + Autoprefixer) live inline via
+// `css.postcss.plugins` rather than in a `postcss.config.*` file.
+// Vite 5 and postcss-load-config v6 both omit `.tsx` from their
+// default config-file search lists, so a separate `postcss.config.tsx`
+// would never be picked up. Inlining here keeps the file count
+// down and the build self-contained.
 function stripModuleScriptType(): Plugin {
   return {
     name: "strip-module-script-type",
@@ -28,6 +39,18 @@ function stripModuleScriptType(): Plugin {
 
 export default defineConfig({
   plugins: [react(), stripModuleScriptType()],
+  css: {
+    postcss: {
+      // The config object is imported directly rather than
+      // passed as a path string. Tailwind's `require()`-based
+      // config loader can't parse `.tsx`, and its default
+      // search list omits `.tsx` too — so a path argument
+      // either fails to load or falls back to defaults.
+      // Importing from the file at the call site lets Vite's
+      // own tsx-backed loader resolve it once.
+      plugins: [tailwindcss(tailwindConfig), autoprefixer()],
+    },
+  },
   server: {
     port: 5173,
     proxy: {

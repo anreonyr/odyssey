@@ -8,15 +8,17 @@
 // user might want to grab next, and on a developer-facing page
 // both surfaces earn their place.
 
-import { useState } from "react";
-import { Search, Plus, Loader2 } from "lucide-react";
-import { agent } from "../api/client";
 import type { AgentMemoryHit } from "../api/types";
+
+import { Search, Plus, Loader2 } from "lucide-react";
+import { useState } from "react";
+
+import { agent } from "../api/client";
+import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
-import { Badge } from "./ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 
 export function MemoryPanel() {
   return (
@@ -57,22 +59,34 @@ function RecallPanel() {
             onKeyDown={(e) => e.key === "Enter" && recall()}
             data-input="memory-query"
           />
-          <Button size="sm" variant="default" onClick={recall} disabled={running || !query.trim()} data-action="memory-recall">
-            {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+          <Button
+            size="sm"
+            variant="default"
+            onClick={recall}
+            disabled={running || !query.trim()}
+            data-action="memory-recall"
+          >
+            {running ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Search className="h-3.5 w-3.5" />
+            )}
             recall
           </Button>
         </div>
         {hits.length === 0 ? (
-          <p className="text-xs text-muted-foreground">no hits yet.</p>
+          <p className="text-muted-foreground text-xs">no hits yet.</p>
         ) : (
           <ul className="space-y-2">
             {hits.map((h, i) => (
-              <li key={i} className="rounded-md border border-border bg-muted/20 p-2.5">
+              <li key={i} className="border-border bg-muted/20 rounded-md border p-2.5">
                 <p className="font-mono text-xs">{h.content}</p>
-                <div className="mt-1 flex items-center gap-2 text-[10px] text-muted-foreground">
+                <div className="text-muted-foreground mt-1 flex items-center gap-2 text-[10px]">
                   <Badge variant="muted">score {h.score.toFixed(3)}</Badge>
                   {h.tags.map((t) => (
-                    <Badge key={t} variant="outline">{t}</Badge>
+                    <Badge key={t} variant="outline">
+                      {t}
+                    </Badge>
                   ))}
                   <span className="ml-auto font-mono">
                     {new Date(h.created_at * 1000).toISOString().slice(0, 16)}
@@ -99,7 +113,10 @@ function RecordPanel() {
     try {
       const r = await agent.memoryRecord({
         content,
-        tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+        tags: tags
+          .split(",")
+          .map((t) => t.trim())
+          .filter(Boolean),
       });
       setLastId(r.id);
       setContent("");
@@ -127,12 +144,22 @@ function RecordPanel() {
           placeholder="tags (comma-separated)"
           data-input="memory-tags"
         />
-        <Button size="sm" variant="success" onClick={record} disabled={running || !content.trim()} data-action="memory-record">
-          {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+        <Button
+          size="sm"
+          variant="success"
+          onClick={record}
+          disabled={running || !content.trim()}
+          data-action="memory-record"
+        >
+          {running ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Plus className="h-3.5 w-3.5" />
+          )}
           record
         </Button>
         {lastId && (
-          <p className="font-mono text-[10px] text-muted-foreground">
+          <p className="text-muted-foreground font-mono text-[10px]">
             stored · id {lastId.slice(0, 12)}…
           </p>
         )}

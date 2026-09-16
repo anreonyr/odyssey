@@ -8,6 +8,7 @@
 // the `kind` field of each parsed event.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+
 import { client } from "../api/client";
 
 export interface StreamState {
@@ -18,7 +19,12 @@ export interface StreamState {
 }
 
 export function useStream(capability: string, buildInput: () => unknown) {
-  const [state, setState] = useState<StreamState>({ chunks: [], done: false, error: null, busy: false });
+  const [state, setState] = useState<StreamState>({
+    chunks: [],
+    done: false,
+    error: null,
+    busy: false,
+  });
   const abortRef = useRef<AbortController | null>(null);
 
   const start = useCallback(async () => {

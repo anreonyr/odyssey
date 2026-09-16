@@ -567,7 +567,7 @@ fn agent_describe_refuses_unknown_fields() {
 /// against the endpoints, and reading the HTML — and neither catches the
 /// failure that matters here: a field renamed on one side while the
 /// other keeps looking for the old name, which renders as a dash rather
-/// than an error. `../../fore/test/frontend.test.mjs`
+/// than an error. `../../fore/test/frontend.test.tsx`
 /// loads the **built** React bundle into jsdom, drives it against a
 /// server this test spawns, and asserts the rendered DOM.
 ///
@@ -707,19 +707,21 @@ fn frontend_script_binds_to_the_live_api() {
         page.display()
     );
 
-    // The test script lives inside the package so node resolves
-    // `jsdom` from its local node_modules. We invoke node from that
-    // directory so the resolver walks the right tree.
+    // The test script lives inside the package so the resolver walks
+    // its `node_modules` and finds `jsdom`. We invoke `pnpm exec tsx`
+    // from that directory for the same reason — tsx uses node, which
+    // resolves from `cwd` upward.
     let pkg_dir: PathBuf = [env!("CARGO_MANIFEST_DIR"), "../fore"].iter().collect();
-    let test_script = pkg_dir.join("test").join("frontend.test.mjs");
+    let test_script = pkg_dir.join("test").join("frontend.test.tsx");
 
-    let out = Command::new("node")
+    let out = Command::new("pnpm")
+        .args(["exec", "tsx"])
         .arg(&test_script)
         .current_dir(&pkg_dir)
         .env("ODYSSEY_URL", format!("http://{addr}"))
         .env("ODYSSEY_PAGE", &page)
         .output()
-        .expect("node should run the frontend test script");
+        .expect("tsx should run the frontend test script");
 
     assert!(
         out.status.success(),

@@ -6,19 +6,21 @@
 // The full timeline lives on the dedicated session route so it has room
 // to breathe; this page is the launchpad.
 
+import type { SessionStatus } from "../api/types";
+import type { SessionEntry } from "../hooks/useAgentSession";
+
+import { ArrowRight, Play, Loader2, X, Save, FolderOpen } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { ArrowRight, Play, Loader2, X, Save, FolderOpen } from "lucide-react";
-import { useCaps } from "../hooks/useCaps";
-import { useAgentSession } from "../hooks/useAgentSession";
-import type { SessionEntry } from "../hooks/useAgentSession";
-import type { SessionStatus } from "../api/types";
+
+import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
-import { Textarea } from "../components/ui/textarea";
-import { Badge } from "../components/ui/badge";
 import { Separator } from "../components/ui/separator";
+import { Textarea } from "../components/ui/textarea";
+import { useAgentSession } from "../hooks/useAgentSession";
+import { useCaps } from "../hooks/useCaps";
 import { cn } from "../lib/utils";
 
 export function Agent() {
@@ -94,7 +96,7 @@ export function Agent() {
           )}
           <CardContent className="p-0">
             {sessions.length === 0 ? (
-              <p className="px-4 pb-4 text-xs text-muted-foreground">
+              <p className="text-muted-foreground px-4 pb-4 text-xs">
                 no sessions yet — start one above.
               </p>
             ) : (
@@ -106,16 +108,16 @@ export function Agent() {
                       data-session-id={s.session_id}
                       onClick={() => setSelectedId(s.session_id)}
                       className={cn(
-                        "flex w-full items-center gap-2 border-b border-border/50 px-4 py-2.5 text-left text-xs transition-colors last:border-b-0 hover:bg-accent/50",
+                        "border-border/50 hover:bg-accent/50 flex w-full items-center gap-2 border-b px-4 py-2.5 text-left text-xs transition-colors last:border-b-0",
                         selectedId === s.session_id && "bg-accent",
                       )}
                     >
                       <StatusPill status={s.status} />
-                      <code className="font-mono text-[10px] text-muted-foreground">
+                      <code className="text-muted-foreground font-mono text-[10px]">
                         {s.session_id.slice(0, 12)}…
                       </code>
                       <span className="flex-1 truncate">{s.goal}</span>
-                      <span className="font-mono text-[10px] tabular-nums text-muted-foreground">
+                      <span className="text-muted-foreground font-mono text-[10px] tabular-nums">
                         {s.history_len}
                       </span>
                     </button>
@@ -129,9 +131,7 @@ export function Agent() {
         {sessionStore.error && (
           <Card className="border-destructive/40">
             <CardContent className="p-4">
-              <pre className="font-mono text-xs text-destructive">
-                {sessionStore.error}
-              </pre>
+              <pre className="text-destructive font-mono text-xs">{sessionStore.error}</pre>
             </CardContent>
           </Card>
         )}
@@ -153,9 +153,9 @@ export function Agent() {
         </CardHeader>
         <CardContent>
           {!selected ? (
-            <p className="text-xs text-muted-foreground">
-              select a session on the left to see its goal, tools, and history
-              length — or jump straight into the timeline.
+            <p className="text-muted-foreground text-xs">
+              select a session on the left to see its goal, tools, and history length — or jump
+              straight into the timeline.
             </p>
           ) : (
             <SessionSummary
@@ -173,7 +173,7 @@ export function Agent() {
         <div className="lg:col-span-2">
           <Card className="border-warning/40">
             <CardContent className="flex items-center gap-2 p-4">
-              <Save className="h-3.5 w-3.5 text-warning" />
+              <Save className="text-warning h-3.5 w-3.5" />
               <span className="text-xs">checkpoint path</span>
               <Input
                 value={ckptPath}
@@ -207,7 +207,10 @@ export function Agent() {
 }
 
 function StatusPill({ status }: { status: SessionStatus }) {
-  const map: Record<SessionStatus, { variant: "success" | "warning" | "muted" | "destructive" | "default"; label: string }> = {
+  const map: Record<
+    SessionStatus,
+    { variant: "success" | "warning" | "muted" | "destructive" | "default"; label: string }
+  > = {
     Running: { variant: "success", label: "running" },
     AwaitingObservation: { variant: "warning", label: "awaiting" },
     Done: { variant: "muted", label: "done" },
@@ -250,7 +253,7 @@ function StartForm({
       className="space-y-3"
     >
       <div>
-        <label className="mb-1 block text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+        <label className="text-muted-foreground mb-1 block font-mono text-[10px] uppercase tracking-wider">
           goal
         </label>
         <Textarea
@@ -262,7 +265,7 @@ function StartForm({
         />
       </div>
       <div>
-        <label className="mb-1 block text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+        <label className="text-muted-foreground mb-1 block font-mono text-[10px] uppercase tracking-wider">
           tools ({tools.size}/{reachable.length})
         </label>
         <div className="flex flex-wrap gap-1.5">
@@ -333,10 +336,22 @@ function SessionSummary({
       {session.checkpoint_path && <Meta label="checkpoint" value={session.checkpoint_path} />}
       <Separator />
       <div className="flex items-center gap-2">
-        <Button size="sm" variant="destructive" disabled={busy || session.status === "Cancelled"} onClick={onCancel} data-action="cancel">
+        <Button
+          size="sm"
+          variant="destructive"
+          disabled={busy || session.status === "Cancelled"}
+          onClick={onCancel}
+          data-action="cancel"
+        >
           <X className="h-3.5 w-3.5" /> cancel
         </Button>
-        <Button size="sm" variant="outline" disabled={busy || session.status === "Cancelled"} onClick={onCancelCheckpoint} data-action="cancel-checkpoint">
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={busy || session.status === "Cancelled"}
+          onClick={onCancelCheckpoint}
+          data-action="cancel-checkpoint"
+        >
           <Save className="h-3.5 w-3.5" /> cancel &amp; checkpoint
         </Button>
       </div>
@@ -347,7 +362,7 @@ function SessionSummary({
 function Meta({ label, value, block }: { label: string; value: React.ReactNode; block?: boolean }) {
   return (
     <div className={cn("flex gap-3", block ? "flex-col" : "items-baseline justify-between")}>
-      <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+      <span className="text-muted-foreground font-mono text-[10px] uppercase tracking-wider">
         {label}
       </span>
       <div className={block ? "" : "text-right"}>{value}</div>

@@ -10,14 +10,15 @@
 // (sidebar stays mounted → its state survives navigation).
 
 import { Outlet } from "react-router-dom";
-import { Sidebar } from "./Sidebar";
-import { Header } from "./Header";
+
 import { TooltipProvider } from "../ui/tooltip";
+import { Header } from "./Header";
+import { Sidebar } from "./Sidebar";
 
 export function AppShell() {
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
+      <div className="bg-background text-foreground flex h-screen w-full overflow-hidden">
         <Sidebar />
         <div className="flex flex-1 flex-col overflow-hidden">
           <Header />

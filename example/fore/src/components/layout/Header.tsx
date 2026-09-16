@@ -8,6 +8,7 @@
 // derive a friendly name from `useLocation`.
 
 import { useLocation } from "react-router-dom";
+
 import { useCaps } from "../../hooks/useCaps";
 import { Badge } from "../ui/badge";
 
@@ -35,9 +36,9 @@ export function Header() {
   const title = titleFor(pathname);
 
   return (
-    <header className="flex h-12 shrink-0 items-center gap-3 border-b border-border bg-card/40 px-8">
+    <header className="border-border bg-card/40 flex h-12 shrink-0 items-center gap-3 border-b px-8">
       <h1 className="text-sm font-semibold tracking-tight">{title}</h1>
-      <span className="text-xs text-muted-foreground">/ odyssey agent frontend</span>
+      <span className="text-muted-foreground text-xs">/ odyssey agent frontend</span>
 
       <div className="ml-auto flex items-center gap-2">
         <Badge variant="muted">

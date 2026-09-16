@@ -7,15 +7,17 @@
 // describe result from the agent still overrides the lookup so
 // reachability wins over the heuristic.
 
+import type { CapInfo } from "../api/types";
+
+import { Search, Filter } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { Search, Filter } from "lucide-react";
-import type { CapInfo } from "../api/types";
-import { useCaps } from "../hooks/useCaps";
-import { Card, CardContent, CardHeader } from "../components/ui/card";
-import { Input } from "../components/ui/input";
+
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
+import { Card, CardContent, CardHeader } from "../components/ui/card";
+import { Input } from "../components/ui/input";
+import { useCaps } from "../hooks/useCaps";
 import { cn } from "../lib/utils";
 
 const CAP_TO_PLUGIN: Record<string, string> = {
@@ -81,8 +83,8 @@ export function Caps() {
     <div className="space-y-4">
       {/* Filter bar */}
       <div className="flex items-center gap-2">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <div className="relative max-w-md flex-1">
+          <Search className="text-muted-foreground absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
           <Input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
@@ -103,15 +105,15 @@ export function Caps() {
       </div>
 
       {!ready ? (
-        <p className="text-xs text-muted-foreground">loading capabilities…</p>
+        <p className="text-muted-foreground text-xs">loading capabilities…</p>
       ) : filteredGroups.length === 0 ? (
-        <p className="text-xs text-muted-foreground">no capabilities match the filter.</p>
+        <p className="text-muted-foreground text-xs">no capabilities match the filter.</p>
       ) : (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
           {filteredGroups.map(([plugin, group]) => (
             <Card key={plugin} data-plugin={plugin}>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 border-b border-border bg-muted/30 py-2">
-                <span className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">
+              <CardHeader className="border-border bg-muted/30 flex flex-row items-center justify-between space-y-0 border-b py-2">
+                <span className="text-muted-foreground font-mono text-[11px] uppercase tracking-wider">
                   {plugin}
                 </span>
                 <Badge variant="muted">{group.length}</Badge>
@@ -127,7 +129,7 @@ export function Caps() {
                       to={`/caps/${encodeURIComponent(cap.name)}`}
                       data-cap-row={cap.name}
                       className={cn(
-                        "flex flex-col gap-1.5 border-b border-border/50 px-3 py-2 transition-colors last:border-b-0 hover:bg-accent/50",
+                        "border-border/50 hover:bg-accent/50 flex flex-col gap-1.5 border-b px-3 py-2 transition-colors last:border-b-0",
                         !reachable_ && "opacity-60",
                       )}
                     >
@@ -137,12 +139,12 @@ export function Caps() {
                           {cap.streaming ? "stream" : "sync"}
                         </Badge>
                         <code
-                          className="min-w-0 flex-1 truncate font-mono text-xs text-foreground"
+                          className="text-foreground min-w-0 flex-1 truncate font-mono text-xs"
                           title={cap.name}
                         >
                           {cap.name}
                         </code>
-                        <span className="shrink-0 font-mono text-[10px] text-muted-foreground tabular-nums">
+                        <span className="text-muted-foreground shrink-0 font-mono text-[10px] tabular-nums">
                           {cap.timeout_ms}ms
                         </span>
                       </div>

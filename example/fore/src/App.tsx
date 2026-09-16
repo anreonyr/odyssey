@@ -8,15 +8,16 @@
 // from them rather than re-fetching.
 
 import { Route, Routes } from "react-router-dom";
+
 import { AppShell } from "./components/layout/AppShell";
-import { Overview } from "./pages/Overview";
-import { Caps } from "./pages/Caps";
-import { CapDetail } from "./pages/CapDetail";
 import { Agent } from "./pages/Agent";
 import { AgentSession } from "./pages/AgentSession";
-import { Invoke } from "./pages/Invoke";
-import { Playground } from "./pages/Playground";
+import { CapDetail } from "./pages/CapDetail";
+import { Caps } from "./pages/Caps";
 import { Checkpoints } from "./pages/Checkpoints";
+import { Invoke } from "./pages/Invoke";
+import { Overview } from "./pages/Overview";
+import { Playground } from "./pages/Playground";
 
 export function App() {
   return (

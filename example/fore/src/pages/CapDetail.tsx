@@ -6,17 +6,18 @@
 // Shows cap meta (from `/api/caps`), reachability + rights
 // (from the agent's `describe`), and a live invoke form.
 
+import { ArrowLeft, Play, Copy } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Play, Copy } from "lucide-react";
-import { useCaps } from "../hooks/useCaps";
+
 import { client, BridgeError } from "../api/client";
-import { Button } from "../components/ui/button";
-import { Badge } from "../components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { Separator } from "../components/ui/separator";
 import { JsonEditor } from "../components/JsonEditor";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { ScrollArea } from "../components/ui/scroll-area";
+import { Separator } from "../components/ui/separator";
+import { useCaps } from "../hooks/useCaps";
 import { cn } from "../lib/utils";
 
 export function CapDetail() {
@@ -31,7 +32,7 @@ export function CapDetail() {
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
 
-  if (!ready) return <p className="text-xs text-muted-foreground">loading…</p>;
+  if (!ready) return <p className="text-muted-foreground text-xs">loading…</p>;
 
   if (!cap) {
     return (
@@ -42,7 +43,7 @@ export function CapDetail() {
           </Link>
         </Button>
         <Card>
-          <CardContent className="p-6 text-sm text-muted-foreground">
+          <CardContent className="text-muted-foreground p-6 text-sm">
             capability <code>{name}</code> not found.
           </CardContent>
         </Card>
@@ -87,7 +88,7 @@ export function CapDetail() {
           </Link>
         </Button>
         <span className="text-muted-foreground">/</span>
-        <code className="font-mono text-foreground">{cap.name}</code>
+        <code className="text-foreground font-mono">{cap.name}</code>
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-[320px,1fr]">
@@ -96,10 +97,7 @@ export function CapDetail() {
           <Card>
             <CardHeader>
               <div className="flex items-start justify-between gap-2">
-                <CardTitle
-                  className="min-w-0 flex-1 truncate font-mono"
-                  title={cap.name}
-                >
+                <CardTitle className="min-w-0 flex-1 truncate font-mono" title={cap.name}>
                   {cap.name}
                 </CardTitle>
                 <Badge variant={cap.streaming ? "stream" : "muted"} className="shrink-0">
@@ -130,9 +128,7 @@ export function CapDetail() {
                 <Badge variant="outline">not in binding row</Badge>
               ) : (
                 <>
-                  <p className="text-muted-foreground">
-                    in agent's binding row
-                  </p>
+                  <p className="text-muted-foreground">in agent's binding row</p>
                   {ops ? (
                     <div className="flex flex-wrap gap-1">
                       {ops.map((op) => (
@@ -170,7 +166,7 @@ export function CapDetail() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div>
-              <label className="mb-1 block text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+              <label className="text-muted-foreground mb-1 block font-mono text-[10px] uppercase tracking-wider">
                 input (JSON)
               </label>
               <JsonEditor value={input} onChange={setInput} rows={8} />
@@ -179,22 +175,20 @@ export function CapDetail() {
             <Separator />
 
             <div>
-              <label className="mb-1 block text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+              <label className="text-muted-foreground mb-1 block font-mono text-[10px] uppercase tracking-wider">
                 result
               </label>
               {error ? (
-                <pre className="rounded-md border border-destructive/40 bg-destructive/10 p-3 font-mono text-xs text-destructive">
+                <pre className="border-destructive/40 bg-destructive/10 text-destructive rounded-md border p-3 font-mono text-xs">
                   {error}
                 </pre>
               ) : output == null ? (
-                <p className="font-mono text-xs text-muted-foreground">
+                <p className="text-muted-foreground font-mono text-xs">
                   {running ? "running…" : "(no result yet)"}
                 </p>
               ) : (
-                <ScrollArea className="max-h-[400px] rounded-md border border-border bg-muted/20">
-                  <pre className="p-3 font-mono text-xs">
-                    {JSON.stringify(output, null, 2)}
-                  </pre>
+                <ScrollArea className="border-border bg-muted/20 max-h-[400px] rounded-md border">
+                  <pre className="p-3 font-mono text-xs">{JSON.stringify(output, null, 2)}</pre>
                 </ScrollArea>
               )}
             </div>
@@ -219,13 +213,13 @@ export function CapDetail() {
 function Meta({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <span className="shrink-0 text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+      <span className="text-muted-foreground shrink-0 font-mono text-[10px] uppercase tracking-wider">
         {label}
       </span>
       <span
         className={cn(
           "min-w-0 truncate text-right",
-          mono ? "font-mono text-foreground" : "text-foreground",
+          mono ? "text-foreground font-mono" : "text-foreground",
         )}
         title={value}
       >

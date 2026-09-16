@@ -8,8 +8,6 @@
 // the "list says yes, kernel says no" mismatch a refresh exposes.
 // Sessions disappear on reload — same on both sides.
 
-import { useCallback, useState } from "react";
-import { agent } from "../api/client";
 import type {
   AgentCancelInput,
   AgentHistoryEntry,
@@ -18,6 +16,10 @@ import type {
   Observation,
   SessionSummary,
 } from "../api/types";
+
+import { useCallback, useState } from "react";
+
+import { agent } from "../api/client";
 
 export interface SessionEntry extends SessionSummary {
   /** Full local history (each step). Updated after every resume. */
@@ -37,27 +39,30 @@ export function useAgentSession() {
     });
   }, []);
 
-  const start = useCallback(async (input: AgentStartInput) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await agent.start(input);
-      upsert({
-        session_id: r.session_id,
-        goal: input.goal,
-        status: "AwaitingObservation",
-        history_len: 0,
-        allowed_tools: input.allowed_tools ?? [],
-        history: [],
-      });
-      return r.session_id;
-    } catch (e) {
-      setError((e as Error).message);
-      throw e;
-    } finally {
-      setBusy(false);
-    }
-  }, [upsert]);
+  const start = useCallback(
+    async (input: AgentStartInput) => {
+      setBusy(true);
+      setError(null);
+      try {
+        const r = await agent.start(input);
+        upsert({
+          session_id: r.session_id,
+          goal: input.goal,
+          status: "AwaitingObservation",
+          history_len: 0,
+          allowed_tools: input.allowed_tools ?? [],
+          history: [],
+        });
+        return r.session_id;
+      } catch (e) {
+        setError((e as Error).message);
+        throw e;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [upsert],
+  );
 
   const resume = useCallback(async (session_id: string, observation: Observation) => {
     setBusy(true);
@@ -113,30 +118,33 @@ export function useAgentSession() {
     }
   }, []);
 
-  const load = useCallback(async (path: string) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await agent.load({ path });
-      upsert({
-        session_id: r.session_id,
-        // Goal + allowed_tools are not in the load response —
-        // they come back via the first resume's history. Until
-        // then we show "(loaded from file)".
-        goal: "(loaded from file)",
-        status: "AwaitingObservation",
-        history_len: 0,
-        allowed_tools: [],
-        history: [],
-      });
-      return r.session_id;
-    } catch (e) {
-      setError((e as Error).message);
-      throw e;
-    } finally {
-      setBusy(false);
-    }
-  }, [upsert]);
+  const load = useCallback(
+    async (path: string) => {
+      setBusy(true);
+      setError(null);
+      try {
+        const r = await agent.load({ path });
+        upsert({
+          session_id: r.session_id,
+          // Goal + allowed_tools are not in the load response —
+          // they come back via the first resume's history. Until
+          // then we show "(loaded from file)".
+          goal: "(loaded from file)",
+          status: "AwaitingObservation",
+          history_len: 0,
+          allowed_tools: [],
+          history: [],
+        });
+        return r.session_id;
+      } catch (e) {
+        setError((e as Error).message);
+        throw e;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [upsert],
+  );
 
   const remove = useCallback((session_id: string) => {
     setSessions((m) => {

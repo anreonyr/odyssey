@@ -8,10 +8,11 @@
 // green tick, and the parent reads the raw string (the parent
 // decides whether to throw on parse error before invoking).
 
-import { useMemo } from "react";
 import { Check, AlertTriangle } from "lucide-react";
-import { Textarea } from "./ui/textarea";
+import { useMemo } from "react";
+
 import { cn } from "../lib/utils";
+import { Textarea } from "./ui/textarea";
 
 interface JsonEditorProps {
   value: string;
@@ -47,14 +48,14 @@ export function JsonEditor({ value, onChange, rows = 6, placeholder, className }
           <span className="text-muted-foreground">empty (will send {"{}"})</span>
         ) : state.valid ? (
           <>
-            <Check className="h-3 w-3 text-success" />
+            <Check className="text-success h-3 w-3" />
             <span className="text-success">valid JSON</span>
           </>
         ) : (
           <>
-            <AlertTriangle className="h-3 w-3 text-warning" />
+            <AlertTriangle className="text-warning h-3 w-3" />
             <span className="text-warning">invalid JSON</span>
-            <span className="truncate text-muted-foreground">— {state.error}</span>
+            <span className="text-muted-foreground truncate">— {state.error}</span>
           </>
         )}
       </div>

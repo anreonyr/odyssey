@@ -6,9 +6,11 @@
 //
 // The shape mirrors the Rust bridge's CheckpointInfo record.
 
-import { useCallback, useEffect, useState } from "react";
-import { client } from "../api/client";
 import type { CheckpointInfo } from "../api/types";
+
+import { useCallback, useEffect, useState } from "react";
+
+import { client } from "../api/client";
 
 export interface CheckpointsSnapshot {
   checkpoints: CheckpointInfo[];

@@ -5,18 +5,11 @@
 // hooks the pages use, so the sidebar's badges always reflect
 // the same source of truth as the page content.
 
+import { LayoutDashboard, Boxes, Bot, Terminal, Sparkles, Save, CircleDot } from "lucide-react";
 import { NavLink } from "react-router-dom";
-import {
-  LayoutDashboard,
-  Boxes,
-  Bot,
-  Terminal,
-  Sparkles,
-  Save,
-  CircleDot,
-} from "lucide-react";
-import { useCaps } from "../../hooks/useCaps";
+
 import { useAgentSession } from "../../hooks/useAgentSession";
+import { useCaps } from "../../hooks/useCaps";
 import { useCheckpoints } from "../../hooks/useCheckpoints";
 import { cn } from "../../lib/utils";
 
@@ -53,13 +46,11 @@ export function Sidebar() {
   ];
 
   return (
-    <aside className="flex h-screen w-56 shrink-0 flex-col border-r border-border bg-card">
-      <div className="flex h-12 items-center gap-2 border-b border-border px-4">
-        <CircleDot className="h-3.5 w-3.5 text-success" />
-        <span className="font-mono text-sm font-semibold tracking-tight">
-          odyssey
-        </span>
-        <span className="ml-auto font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+    <aside className="border-border bg-card flex h-screen w-56 shrink-0 flex-col border-r">
+      <div className="border-border flex h-12 items-center gap-2 border-b px-4">
+        <CircleDot className="text-success h-3.5 w-3.5" />
+        <span className="font-mono text-sm font-semibold tracking-tight">odyssey</span>
+        <span className="text-muted-foreground ml-auto font-mono text-[10px] uppercase tracking-wider">
           v0.1
         </span>
       </div>
@@ -82,12 +73,12 @@ export function Sidebar() {
             {({ isActive }) => (
               <>
                 {isActive && (
-                  <span className="absolute ml-[-12px] h-4 w-0.5 rounded-r bg-primary" />
+                  <span className="bg-primary absolute ml-[-12px] h-4 w-0.5 rounded-r" />
                 )}
                 <item.icon className="h-3.5 w-3.5 shrink-0" />
                 <span className="min-w-0 flex-1 truncate">{item.label}</span>
                 {item.badge && item.badge() != null && (
-                  <span className="shrink-0 font-mono text-[10px] tabular-nums text-muted-foreground">
+                  <span className="text-muted-foreground shrink-0 font-mono text-[10px] tabular-nums">
                     {item.badge()}
                   </span>
                 )}
@@ -97,7 +88,7 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="border-t border-border p-3 font-mono text-[10px] leading-relaxed text-muted-foreground">
+      <div className="border-border text-muted-foreground border-t p-3 font-mono text-[10px] leading-relaxed">
         <div className="flex items-center justify-between">
           <span>mounted</span>
           <span className="text-foreground tabular-nums">{caps.length}</span>

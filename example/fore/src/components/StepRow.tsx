@@ -4,8 +4,9 @@
 // keeps the timeline scannable.
 
 import type { AgentHistoryEntry } from "../api/types";
-import { Badge } from "./ui/badge";
+
 import { cn } from "../lib/utils";
+import { Badge } from "./ui/badge";
 
 const KIND_STYLES: Record<AgentHistoryEntry["kind"], { bar: string; label: string }> = {
   llm_text: { bar: "bg-primary/60", label: "llm" },
@@ -21,10 +22,7 @@ export function StepRow({ step }: { step: AgentHistoryEntry }) {
 
   return (
     <div className="flex items-start gap-3">
-      <span
-        aria-hidden
-        className={cn("mt-1 h-3 w-0.5 shrink-0 rounded-r", style.bar)}
-      />
+      <span aria-hidden className={cn("mt-1 h-3 w-0.5 shrink-0 rounded-r", style.bar)} />
       <div className="min-w-0 flex-1">
         <div className="mb-0.5 flex items-center gap-1.5">
           <Badge variant="muted" className="text-[9px]">
@@ -41,14 +39,14 @@ function Body({ step }: { step: AgentHistoryEntry }) {
   switch (step.kind) {
     case "llm_text":
       return (
-        <pre className="overflow-x-auto rounded-md border border-border bg-muted/20 p-2 font-mono text-xs leading-relaxed">
+        <pre className="border-border bg-muted/20 overflow-x-auto rounded-md border p-2 font-mono text-xs leading-relaxed">
           {step.text}
         </pre>
       );
     case "llm_final":
     case "final":
       return (
-        <pre className="overflow-x-auto rounded-md border border-border bg-muted/20 p-2 font-mono text-xs">
+        <pre className="border-border bg-muted/20 overflow-x-auto rounded-md border p-2 font-mono text-xs">
           {typeof step.value === "string" ? step.value : JSON.stringify(step, null, 2)}
         </pre>
       );
@@ -56,8 +54,8 @@ function Body({ step }: { step: AgentHistoryEntry }) {
     case "tool_call":
       return (
         <div className="flex items-center gap-2 text-xs">
-          <code className="font-mono text-foreground">{step.tool}</code>
-          <pre className="flex-1 overflow-x-auto rounded-md border border-border bg-muted/20 p-2 font-mono text-[11px]">
+          <code className="text-foreground font-mono">{step.tool}</code>
+          <pre className="border-border bg-muted/20 flex-1 overflow-x-auto rounded-md border p-2 font-mono text-[11px]">
             {JSON.stringify(step.args, null, 2)}
           </pre>
         </div>
@@ -65,13 +63,13 @@ function Body({ step }: { step: AgentHistoryEntry }) {
     case "tool_result":
       return (
         <div className="flex items-center gap-2 text-xs">
-          <code className="font-mono text-foreground">{step.tool}</code>
+          <code className="text-foreground font-mono">{step.tool}</code>
           {step.outcome.ok ? (
             <Badge variant="success">ok</Badge>
           ) : (
             <Badge variant="destructive">error</Badge>
           )}
-          <pre className="flex-1 overflow-x-auto rounded-md border border-border bg-muted/20 p-2 font-mono text-[11px]">
+          <pre className="border-border bg-muted/20 flex-1 overflow-x-auto rounded-md border p-2 font-mono text-[11px]">
             {JSON.stringify(step.outcome, null, 2)}
           </pre>
         </div>
