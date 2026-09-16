@@ -217,7 +217,7 @@ function QuickCard({ to, icon: Icon, title, description, count }: QuickCardProps
     <Card className="hover:border-primary/50 group transition-colors">
       <CardHeader className="flex flex-row items-start justify-between space-y-0">
         <div className="flex items-start gap-3">
-          <Icon className="text-primary mt-0.5 h-4 w-4" />
+          <Icon className="text-primary mt-1 h-4 w-4" />
           <div className="min-w-0">
             <CardTitle>{title}</CardTitle>
             <CardDescription className="mt-1">{description}</CardDescription>

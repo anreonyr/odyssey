@@ -126,9 +126,9 @@ export function AgentSession() {
                     no history yet — send the first observation below.
                   </p>
                 ) : (
-                  <ol>
+                  <ol className="divide-border/50 divide-y">
                     {history.map((step, idx) => (
-                      <li key={idx} className="border-border/50 border-b px-4 py-2 last:border-b-0">
+                      <li key={idx} className="px-4 py-2">
                         <StepRow step={step} />
                       </li>
                     ))}

@@ -43,7 +43,7 @@ export function JsonEditor({ value, onChange, rows = 6, placeholder, className }
         className="leading-relaxed"
         data-input="json-editor"
       />
-      <div className="flex items-center gap-1.5 font-mono text-[10px]">
+      <div className="flex items-center gap-2 font-mono text-[10px]">
         {state.empty ? (
           <span className="text-muted-foreground">empty (will send {"{}"})</span>
         ) : state.valid ? (

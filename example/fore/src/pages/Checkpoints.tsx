@@ -63,12 +63,9 @@ export function Checkpoints() {
               no checkpoints yet — cancel a session with a path to save one.
             </p>
           ) : (
-            <ul>
+            <ul className="divide-border/50 divide-y">
               {checkpoints.map((c) => (
-                <li
-                  key={c.path}
-                  className="border-border/50 hover:bg-accent/50 flex items-center gap-3 border-b px-4 py-2.5 last:border-b-0"
-                >
+                <li key={c.path} className="hover:bg-accent/50 flex items-center gap-3 px-4 py-3">
                   <FolderOpen className="text-muted-foreground h-3.5 w-3.5" />
                   <div className="min-w-0 flex-1">
                     <code className="block truncate font-mono text-xs">{c.path}</code>

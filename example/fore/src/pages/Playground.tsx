@@ -62,7 +62,7 @@ export function Playground() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div>
-            <label className="text-muted-foreground mb-1 block font-mono text-[10px] uppercase tracking-wider">
+            <label className="text-muted-foreground mb-2 block font-mono text-[10px] uppercase tracking-wider">
               system (optional)
             </label>
             <Input
@@ -72,7 +72,7 @@ export function Playground() {
             />
           </div>
           <div>
-            <label className="text-muted-foreground mb-1 block font-mono text-[10px] uppercase tracking-wider">
+            <label className="text-muted-foreground mb-2 block font-mono text-[10px] uppercase tracking-wider">
               user prompt
             </label>
             <Textarea

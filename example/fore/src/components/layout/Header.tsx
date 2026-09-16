@@ -37,8 +37,8 @@ export function Header() {
 
   return (
     <header className="border-border bg-card/40 flex h-12 shrink-0 items-center gap-3 border-b px-8">
-      <h1 className="text-sm font-semibold tracking-tight">{title}</h1>
-      <span className="text-muted-foreground text-xs">/ odyssey agent frontend</span>
+      <h1 className="font-mono text-sm font-semibold tracking-tight">{title}</h1>
+      <span className="text-muted-foreground font-mono text-xs">/ odyssey agent frontend</span>
 
       <div className="ml-auto flex items-center gap-2">
         <Badge variant="muted">

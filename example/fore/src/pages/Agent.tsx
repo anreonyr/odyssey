@@ -100,7 +100,7 @@ export function Agent() {
                 no sessions yet — start one above.
               </p>
             ) : (
-              <ul>
+              <ul className="divide-border/50 divide-y">
                 {sessions.map((s) => (
                   <li key={s.session_id}>
                     <button
@@ -108,7 +108,7 @@ export function Agent() {
                       data-session-id={s.session_id}
                       onClick={() => setSelectedId(s.session_id)}
                       className={cn(
-                        "border-border/50 hover:bg-accent/50 flex w-full items-center gap-2 border-b px-4 py-2.5 text-left text-xs transition-colors last:border-b-0",
+                        "hover:bg-accent/50 flex w-full items-center gap-2 px-4 py-3 text-left text-xs transition-colors",
                         selectedId === s.session_id && "bg-accent",
                       )}
                     >
@@ -253,7 +253,7 @@ function StartForm({
       className="space-y-3"
     >
       <div>
-        <label className="text-muted-foreground mb-1 block font-mono text-[10px] uppercase tracking-wider">
+        <label className="text-muted-foreground mb-2 block font-mono text-[10px] uppercase tracking-wider">
           goal
         </label>
         <Textarea
@@ -265,15 +265,15 @@ function StartForm({
         />
       </div>
       <div>
-        <label className="text-muted-foreground mb-1 block font-mono text-[10px] uppercase tracking-wider">
+        <label className="text-muted-foreground mb-2 block font-mono text-[10px] uppercase tracking-wider">
           tools ({tools.size}/{reachable.length})
         </label>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex flex-wrap gap-2">
           {reachable.map((t) => (
             <label
               key={t}
               className={cn(
-                "inline-flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 font-mono text-[11px] transition-colors",
+                "inline-flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1 font-mono text-[11px] transition-colors",
                 tools.has(t)
                   ? "border-primary/50 bg-primary/10 text-foreground"
                   : "border-border bg-card text-muted-foreground hover:border-border/80",

@@ -110,8 +110,6 @@ export function CapDetail() {
               <Meta label="plugin" value={capToPlugin(cap.name)} mono />
               <Meta label="timeout" value={`${cap.timeout_ms} ms`} mono />
               <Separator />
-              <Meta label="in" value={cap.in_type} mono />
-              <Meta label="out" value={cap.out_type} mono />
             </CardContent>
           </Card>
 
@@ -166,7 +164,7 @@ export function CapDetail() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div>
-              <label className="text-muted-foreground mb-1 block font-mono text-[10px] uppercase tracking-wider">
+              <label className="text-muted-foreground mb-2 block font-mono text-[10px] uppercase tracking-wider">
                 input (JSON)
               </label>
               <JsonEditor value={input} onChange={setInput} rows={8} />
@@ -175,7 +173,7 @@ export function CapDetail() {
             <Separator />
 
             <div>
-              <label className="text-muted-foreground mb-1 block font-mono text-[10px] uppercase tracking-wider">
+              <label className="text-muted-foreground mb-2 block font-mono text-[10px] uppercase tracking-wider">
                 result
               </label>
               {error ? (

@@ -83,7 +83,7 @@ export function Caps() {
     <div className="space-y-4">
       {/* Filter bar */}
       <div className="flex items-center gap-2">
-        <div className="relative max-w-md flex-1">
+        <div className="relative max-w-2xl flex-1">
           <Search className="text-muted-foreground absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
           <Input
             value={filter}
@@ -119,56 +119,62 @@ export function Caps() {
                 <Badge variant="muted">{group.length}</Badge>
               </CardHeader>
               <CardContent className="p-0">
-                {group.map((cap) => {
-                  const reachable_ = reachable.has(cap.name);
-                  const d = describes.get(cap.name);
-                  const ops = d && d.live ? d.operations : null;
-                  return (
-                    <Link
-                      key={cap.name}
-                      to={`/caps/${encodeURIComponent(cap.name)}`}
-                      data-cap-row={cap.name}
-                      className={cn(
-                        "border-border/50 hover:bg-accent/50 flex flex-col gap-1.5 border-b px-3 py-2 transition-colors last:border-b-0",
-                        !reachable_ && "opacity-60",
-                      )}
-                    >
-                      {/* line 1: kind badge · cap name · timeout */}
-                      <div className="flex min-w-0 items-center gap-2">
-                        <Badge variant={cap.streaming ? "stream" : "muted"} className="shrink-0">
-                          {cap.streaming ? "stream" : "sync"}
-                        </Badge>
-                        <code
-                          className="text-foreground min-w-0 flex-1 truncate font-mono text-xs"
-                          title={cap.name}
+                <ul className="divide-border/50 divide-y">
+                  {group.map((cap) => {
+                    const reachable_ = reachable.has(cap.name);
+                    const d = describes.get(cap.name);
+                    const ops = d && d.live ? d.operations : null;
+                    return (
+                      <li key={cap.name}>
+                        <Link
+                          to={`/caps/${encodeURIComponent(cap.name)}`}
+                          data-cap-row={cap.name}
+                          className={cn(
+                            "hover:bg-accent/50 flex flex-col gap-2 px-3 py-2 transition-colors",
+                            !reachable_ && "opacity-60",
+                          )}
                         >
-                          {cap.name}
-                        </code>
-                        <span className="text-muted-foreground shrink-0 font-mono text-[10px] tabular-nums">
-                          {cap.timeout_ms}ms
-                        </span>
-                      </div>
-                      {/* line 2: ops badges (or status) — wraps when long */}
-                      <div className="flex flex-wrap items-center gap-1 pl-1">
-                        {ops ? (
-                          ops.map((op) => (
-                            <Badge key={op} variant="muted" className="text-[9px]">
-                              {op}
+                          {/* line 1: kind badge · cap name · timeout */}
+                          <div className="flex min-w-0 items-center gap-2">
+                            <Badge
+                              variant={cap.streaming ? "stream" : "muted"}
+                              className="shrink-0"
+                            >
+                              {cap.streaming ? "stream" : "sync"}
                             </Badge>
-                          ))
-                        ) : d && !d.live ? (
-                          <Badge variant="destructive" className="text-[9px]">
-                            revoked
-                          </Badge>
-                        ) : !reachable_ ? (
-                          <Badge variant="outline" className="text-[9px]">
-                            not in binding row
-                          </Badge>
-                        ) : null}
-                      </div>
-                    </Link>
-                  );
-                })}
+                            <code
+                              className="text-foreground min-w-0 flex-1 truncate font-mono text-xs"
+                              title={cap.name}
+                            >
+                              {cap.name}
+                            </code>
+                            <span className="text-muted-foreground shrink-0 font-mono text-[10px] tabular-nums">
+                              {cap.timeout_ms}ms
+                            </span>
+                          </div>
+                          {/* line 2: ops badges (or status) — wraps when long */}
+                          <div className="flex flex-wrap items-center gap-1 pl-1">
+                            {ops ? (
+                              ops.map((op) => (
+                                <Badge key={op} variant="muted" className="text-[9px]">
+                                  {op}
+                                </Badge>
+                              ))
+                            ) : d && !d.live ? (
+                              <Badge variant="destructive" className="text-[9px]">
+                                revoked
+                              </Badge>
+                            ) : !reachable_ ? (
+                              <Badge variant="outline" className="text-[9px]">
+                                not in binding row
+                              </Badge>
+                            ) : null}
+                          </div>
+                        </Link>
+                      </li>
+                    );
+                  })}
+                </ul>
               </CardContent>
             </Card>
           ))}

@@ -90,7 +90,7 @@ export function Invoke() {
           {!ready ? (
             <p className="text-muted-foreground p-3 text-xs">loading…</p>
           ) : (
-            <ul>
+            <ul className="divide-border/50 divide-y">
               {filtered.map((c) => (
                 <li key={c.name}>
                   <button
@@ -98,7 +98,7 @@ export function Invoke() {
                     onClick={() => setSelectedCap(c.name)}
                     data-cap-name={c.name}
                     className={
-                      "border-border/50 hover:bg-accent/50 flex w-full items-center gap-2 border-b px-3 py-2 text-left text-xs last:border-b-0 " +
+                      "hover:bg-accent/50 flex w-full items-center gap-2 px-3 py-2 text-left text-xs " +
                       (selectedCap === c.name ? "bg-accent" : "")
                     }
                   >
@@ -143,13 +143,13 @@ export function Invoke() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div>
-            <label className="text-muted-foreground mb-1 block font-mono text-[10px] uppercase tracking-wider">
+            <label className="text-muted-foreground mb-2 block font-mono text-[10px] uppercase tracking-wider">
               input (JSON)
             </label>
             <JsonEditor value={input} onChange={setInput} rows={10} />
           </div>
           <div>
-            <label className="text-muted-foreground mb-1 block font-mono text-[10px] uppercase tracking-wider">
+            <label className="text-muted-foreground mb-2 block font-mono text-[10px] uppercase tracking-wider">
               result
             </label>
             {error ? (

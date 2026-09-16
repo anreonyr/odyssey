@@ -24,7 +24,7 @@ export function StepRow({ step }: { step: AgentHistoryEntry }) {
     <div className="flex items-start gap-3">
       <span aria-hidden className={cn("mt-1 h-3 w-0.5 shrink-0 rounded-r", style.bar)} />
       <div className="min-w-0 flex-1">
-        <div className="mb-0.5 flex items-center gap-1.5">
+        <div className="mb-1 flex items-center gap-2">
           <Badge variant="muted" className="text-[9px]">
             {style.label}
           </Badge>

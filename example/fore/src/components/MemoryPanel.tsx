@@ -79,7 +79,7 @@ function RecallPanel() {
         ) : (
           <ul className="space-y-2">
             {hits.map((h, i) => (
-              <li key={i} className="border-border bg-muted/20 rounded-md border p-2.5">
+              <li key={i} className="border-border bg-muted/20 rounded-md border p-2">
                 <p className="font-mono text-xs">{h.content}</p>
                 <div className="text-muted-foreground mt-1 flex items-center gap-2 text-[10px]">
                   <Badge variant="muted">score {h.score.toFixed(3)}</Badge>
