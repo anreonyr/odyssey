@@ -18,6 +18,8 @@ const TITLES: Array<[RegExp, string]> = [
   [/^\/caps$/, "Capabilities"],
   [/^\/agent\/[^/]+$/, "Session"],
   [/^\/agent$/, "Agent"],
+  [/^\/chat\/[^/]+$/, "Chat"],
+  [/^\/chat$/, "Chat"],
   [/^\/invoke$/, "Invoke"],
   [/^\/playground$/, "Playground"],
   [/^\/checkpoints$/, "Checkpoints"],

@@ -14,6 +14,8 @@ import { Agent } from "./pages/Agent";
 import { AgentSession } from "./pages/AgentSession";
 import { CapDetail } from "./pages/CapDetail";
 import { Caps } from "./pages/Caps";
+import { Chat } from "./pages/Chat";
+import { ChatSession } from "./pages/ChatSession";
 import { Checkpoints } from "./pages/Checkpoints";
 import { Invoke } from "./pages/Invoke";
 import { Overview } from "./pages/Overview";
@@ -28,6 +30,8 @@ export function App() {
         <Route path="caps/:name" element={<CapDetail />} />
         <Route path="agent" element={<Agent />} />
         <Route path="agent/:sessionId" element={<AgentSession />} />
+        <Route path="chat" element={<Chat />} />
+        <Route path="chat/:sessionId" element={<ChatSession />} />
         <Route path="invoke" element={<Invoke />} />
         <Route path="playground" element={<Playground />} />
         <Route path="checkpoints" element={<Checkpoints />} />

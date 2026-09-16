@@ -5,7 +5,16 @@
 // hooks the pages use, so the sidebar's badges always reflect
 // the same source of truth as the page content.
 
-import { LayoutDashboard, Boxes, Bot, Terminal, Sparkles, Save, CircleDot } from "lucide-react";
+import {
+  LayoutDashboard,
+  Boxes,
+  Bot,
+  Terminal,
+  Sparkles,
+  Save,
+  CircleDot,
+  MessageSquare,
+} from "lucide-react";
 import { NavLink } from "react-router-dom";
 
 import { useAgentSession } from "../../hooks/useAgentSession";
@@ -33,6 +42,12 @@ export function Sidebar() {
       to: "/agent",
       label: "Agent",
       icon: Bot,
+      badge: () => sessions.size || null,
+    },
+    {
+      to: "/chat",
+      label: "Chat",
+      icon: MessageSquare,
       badge: () => sessions.size || null,
     },
     { to: "/invoke", label: "Invoke", icon: Terminal },
