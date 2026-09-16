@@ -21,3 +21,7 @@
 # Per-phase worker / audit reports left in the workspace root
 # during the long phase-8 migration. Not part of the codebase.
 .phase*.md
+
+# React frontend (built on demand via `pnpm --dir examples/frontend build`)
+/examples/frontend/dist/
+/examples/frontend/node_modules/

@@ -1,0 +1,104 @@
+/* odyssey theme — GitHub Dark tokens exposed as HSL channels
+   so Tailwind's `bg-primary/50` syntax composes alpha without
+   recompiling. The previous theme.css used solid hex tokens;
+   shadcn/ui requires the split-channel form to keep its
+   Tailwind class API working. */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Base */
+    --background: 220 22% 9%;          /* #0d1117 */
+    --foreground: 217 18% 80%;         /* #c9d1d9 */
+
+    /* Surfaces */
+    --card: 220 16% 12%;               /* #161b22 */
+    --card-foreground: 217 18% 80%;
+    --popover: 220 16% 12%;
+    --popover-foreground: 217 18% 80%;
+
+    /* Muted text + bg */
+    --muted: 220 13% 18%;              /* #21262d */
+    --muted-foreground: 215 11% 65%;   /* #8b949e */
+
+    /* Subtle accent for hover/active rows */
+    --accent: 220 13% 18%;
+    --accent-foreground: 217 18% 80%;
+
+    /* Primary — GitHub blue */
+    --primary: 212 92% 68%;            /* #58a6ff */
+    --primary-foreground: 220 22% 9%;
+
+    /* Secondary — subdued */
+    --secondary: 220 13% 18%;
+    --secondary-foreground: 217 18% 80%;
+
+    /* Status colours */
+    --success: 137 56% 50%;            /* #3fb950 */
+    --success-foreground: 220 22% 9%;
+    --warning: 41 70% 47%;             /* #d29922 */
+    --warning-foreground: 220 22% 9%;
+    --destructive: 358 75% 60%;        /* #f85149 */
+    --destructive-foreground: 217 18% 80%;
+
+    /* Borders + inputs */
+    --border: 220 13% 18%;             /* #30363d */
+    --input: 220 13% 18%;
+    --ring: 212 92% 68%;
+
+    --radius: 0.5rem;
+
+    /* Type stacks kept here so Tailwind's `font-mono` / `font-sans`
+       utilities resolve the right stack. */
+    --font-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html, body {
+    @apply bg-background text-foreground antialiased;
+    font-family: var(--font-ui);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  body {
+    min-height: 100vh;
+  }
+
+  code, pre, kbd {
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+}
+
+/* Mono-sized labels and chips everywhere they appear. */
+.font-mono, code, pre, kbd, samp {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* Subtle scrollbar for dark theme; the default chromium bar
+   looks out of place against the muted bg. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: hsl(var(--background));
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 5px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.4);
+}
