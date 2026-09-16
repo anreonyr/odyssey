@@ -7,6 +7,14 @@
 // table is in-memory, so persisting the React side would create
 // the "list says yes, kernel says no" mismatch a refresh exposes.
 // Sessions disappear on reload — same on both sides.
+//
+// The state is held by a single `SessionProvider` mounted in
+// `AppShell`; every consumer of `useAgentSession()` reads the
+// SAME Map. Without the provider, the hook throws — there is no
+// per-component fallback, because per-component state silently
+// breaks the launcher → detail-view flow (the launcher adds a
+// session to its own Map, then the detail view's separate Map
+// can't see it). Context makes the data binding obvious.
 
 import type {
   AgentCancelInput,
@@ -17,7 +25,7 @@ import type {
   SessionSummary,
 } from "../api/types";
 
-import { useCallback, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useState } from "react";
 
 import { agent } from "../api/client";
 
@@ -26,7 +34,36 @@ export interface SessionEntry extends SessionSummary {
   history: AgentHistoryEntry[];
 }
 
-export function useAgentSession() {
+export interface AgentSessionStore {
+  sessions: Map<string, SessionEntry>;
+  busy: boolean;
+  error: string | null;
+  start: (input: AgentStartInput) => Promise<string>;
+  resume: (session_id: string, observation: Observation) => Promise<unknown>;
+  cancel: (session_id: string, path?: string) => Promise<void>;
+  load: (path: string) => Promise<string>;
+  remove: (session_id: string) => void;
+}
+
+const SessionContext = createContext<AgentSessionStore | null>(null);
+
+export function SessionProvider({ children }: { children: React.ReactNode }) {
+  const store = useSessionStore();
+  return <SessionContext.Provider value={store}>{children}</SessionContext.Provider>;
+}
+
+export function useAgentSession(): AgentSessionStore {
+  const store = useContext(SessionContext);
+  if (!store) {
+    throw new Error(
+      "useAgentSession must be called inside <SessionProvider>. " +
+        "AppShell mounts the provider; custom roots must wrap their tree with it.",
+    );
+  }
+  return store;
+}
+
+function useSessionStore(): AgentSessionStore {
   const [sessions, setSessions] = useState<Map<string, SessionEntry>>(new Map());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -126,9 +163,6 @@ export function useAgentSession() {
         const r = await agent.load({ path });
         upsert({
           session_id: r.session_id,
-          // Goal + allowed_tools are not in the load response —
-          // they come back via the first resume's history. Until
-          // then we show "(loaded from file)".
           goal: "(loaded from file)",
           status: "AwaitingObservation",
           history_len: 0,
@@ -154,5 +188,8 @@ export function useAgentSession() {
     });
   }, []);
 
-  return { sessions, busy, error, start, resume, cancel, load, remove };
+  return useMemo(
+    () => ({ sessions, busy, error, start, resume, cancel, load, remove }),
+    [sessions, busy, error, start, resume, cancel, load, remove],
+  );
 }

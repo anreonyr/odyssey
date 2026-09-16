@@ -11,6 +11,7 @@
 
 import { Outlet } from "react-router-dom";
 
+import { SessionProvider } from "../../hooks/useAgentSession";
 import { TooltipProvider } from "../ui/tooltip";
 import { Header } from "./Header";
 import { Sidebar } from "./Sidebar";
@@ -18,17 +19,19 @@ import { Sidebar } from "./Sidebar";
 export function AppShell() {
   return (
     <TooltipProvider delayDuration={150}>
-      <div className="bg-background text-foreground flex h-screen w-full overflow-hidden">
-        <Sidebar />
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <Header />
-          <main className="flex-1 overflow-auto">
-            <div className="mx-auto h-full w-full max-w-6xl px-8 py-6">
-              <Outlet />
-            </div>
-          </main>
+      <SessionProvider>
+        <div className="bg-background text-foreground flex h-screen w-full overflow-hidden">
+          <Sidebar />
+          <div className="flex flex-1 flex-col overflow-hidden">
+            <Header />
+            <main className="flex-1 overflow-auto">
+              <div className="mx-auto h-full w-full max-w-6xl px-8 py-6">
+                <Outlet />
+              </div>
+            </main>
+          </div>
         </div>
-      </div>
+      </SessionProvider>
     </TooltipProvider>
   );
 }
