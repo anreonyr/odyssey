@@ -154,10 +154,7 @@ async fn index(State(state): State<AppState>) -> Response {
 /// contains rather than maintaining an explicit list. 404s are
 /// honest: a stale index.html asking for a missing hash means
 /// the cache and the build drifted, not that the route is wrong.
-async fn static_asset(
-    State(state): State<AppState>,
-    Path(path): Path<String>,
-) -> Response {
+async fn static_asset(State(state): State<AppState>, Path(path): Path<String>) -> Response {
     // `path` is the wildcard tail after `/assets/`; reject
     // directory traversal by stripping leading `/`s and refusing
     // any `..` segment.
@@ -213,8 +210,8 @@ async fn list_caps(State(state): State<AppState>) -> Json<Vec<CapInfo>> {
 async fn list_checkpoints() -> Json<Vec<CheckpointInfo>> {
     use serde_json::Value;
 
-    let dir = std::env::var("ODYSSEY_CHECKPOINT_DIR")
-        .unwrap_or_else(|_| "./.checkpoints".to_string());
+    let dir =
+        std::env::var("ODYSSEY_CHECKPOINT_DIR").unwrap_or_else(|_| "./.checkpoints".to_string());
     let path = std::path::Path::new(&dir);
     if !path.is_dir() {
         return Json(Vec::new());
@@ -230,18 +227,23 @@ async fn list_checkpoints() -> Json<Vec<CheckpointInfo>> {
         if p.extension().and_then(|s| s.to_str()) != Some("json") {
             continue;
         }
-        let Ok(meta) = std::fs::metadata(&p) else { continue };
-        let Ok(bytes) = std::fs::read(&p) else { continue };
+        let Ok(meta) = std::fs::metadata(&p) else {
+            continue;
+        };
+        let Ok(bytes) = std::fs::read(&p) else {
+            continue;
+        };
         // The checkpoint envelope has many fields; we only
         // surface `id` (session_id) and `created_at_ms` (ms
         // epoch → converted to seconds for the page). Anything
         // we can't parse we drop — see the module doc above.
-        let Ok(v) = serde_json::from_slice::<Value>(&bytes) else { continue };
-        let Some(session_id) = v.get("id").and_then(|x| x.as_str()) else { continue };
-        let saved_at_ms = v
-            .get("created_at_ms")
-            .and_then(|x| x.as_u64())
-            .unwrap_or(0);
+        let Ok(v) = serde_json::from_slice::<Value>(&bytes) else {
+            continue;
+        };
+        let Some(session_id) = v.get("id").and_then(|x| x.as_str()) else {
+            continue;
+        };
+        let saved_at_ms = v.get("created_at_ms").and_then(|x| x.as_u64()).unwrap_or(0);
         out.push(CheckpointInfo {
             path: p.to_string_lossy().into_owned(),
             session_id: session_id.to_string(),
@@ -362,7 +364,10 @@ pub async fn serve(
         }
     };
     eprintln!("[http] listening on http://{addr}");
-    if let Err(e) = axum::serve(listener, app).with_graceful_shutdown(shutdown).await {
+    if let Err(e) = axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown)
+        .await
+    {
         eprintln!("[http] serve error: {e}");
     }
     eprintln!("[http] shut down");

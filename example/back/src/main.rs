@@ -1,5 +1,5 @@
 //! Odyssey basic example — boots the capability kernel + HTTP bridge
-//! and serves the React app from `example/frontend/dist`.
+//! and serves the React app from `example/fore/dist`.
 //!
 //! The example binary lives at `example/backend/` to break the
 //! cyclic dependency between the odyssey library and the
@@ -58,9 +58,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = std::env::var("ODYSSEY_ADDR").unwrap_or_else(|_| DEFAULT_BRIDGE_ADDR.to_string());
 
     // Frontend dist is one level up from the binary's manifest
-    // dir: `example/backend/` → `example/frontend/dist`. The
-    // library's serve reads from disk so we don't embed HTML;
-    // we just point it at the build artefact.
+    // dir: `example/back/` → `example/fore/dist`. The library's
+    // serve reads from disk so we don't embed HTML; we just
+    // point it at the build artefact.
     let frontend_dist: Option<PathBuf> = std::env::var("ODYSSEY_NO_FRONTEND")
         .ok()
         .map(|_| None)
@@ -69,7 +69,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                     .parent()
                     .expect("example/backend has a parent")
-                    .join("frontend/dist"),
+                    .join("fore/dist"),
             )
         });
 

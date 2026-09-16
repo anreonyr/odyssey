@@ -156,86 +156,74 @@ output.
 
 ## Layout
 
+```text
+odyssey/                       # root has no Cargo.toml — only scripts and docs
+├── scripts/
+│   ├── back.sh                # cargo build + run the example binary
+│   ├── fore.sh                # pnpm build/dev/preview/test for the React app
+│   └── test.sh                # cargo test in both crates + the jsdom smoke
+├── crate/                     # workspace A — the library
+│   ├── Cargo.toml             # members = ["odyssey"]
+│   └── odyssey/
+│       ├── Cargo.toml
+│       ├── src/                # lib.rs + 3 modules: capability, core, personality
+│       │   ├── lib.rs
+│       │   ├── capability/
+│       │   ├── core/
+│       │   └── personality/
+│       └── tests/
+│           └── layering.rs     # asserts core ⊥ capability ⊥ personality
+└── example/                   # not a workspace — just a directory
+    ├── back/                  # the example binary + the built-in plugins
+    │   ├── Cargo.toml         # single crate: [package] + [lib] + [[bin]]
+    │   ├── src/
+    │   │   ├── lib.rs          # builtin module root (lib name `odyssey_builtin`)
+    │   │   ├── main.rs         # binary entry — wires builtins → orchestrator
+    │   │   ├── agent.rs       # read-only observers (list, describe)
+    │   │   ├── agent_runtime.rs
+    │   │   ├── echo.rs
+    │   │   ├── reverse.rs
+    │   │   ├── database.rs
+    │   │   ├── streaming_echo.rs
+    │   │   ├── llm.rs
+    │   │   ├── memory.rs
+    │   │   ├── tool_descriptor.rs
+    │   │   └── profile_inspector.rs
+    │   └── tests/
+    │       └── smoke.rs        # builtin round-trips + frontend data-binding
+    └── fore/                  # Vite + React + TS — agent UI
+        ├── package.json
+        ├── pnpm-lock.yaml
+        ├── index.html         # Vite entry — restores after restructure
+        ├── src/
+        ├── test/
+        └── dist/              # gitignored, built on demand
 ```
-odyssey/
-├── Cargo.toml                # workspace = [".", "builtins"]
-├── CHANGELOG.md
-├── README.md
-├── src/
-│   ├── lib.rs                # 3 modules: capability, core, personality
-│   ├── capability/           # kernel implementation
-│   │   ├── mod.rs
-│   │   ├── enforce/          # quota runtime state + cspace
-│   │   │   ├── mod.rs
-│   │   │   ├── quota.rs      # QuotaState + CapabilityBudget (state)
-│   │   │   └── space.rs      # CapabilitySpace + CapabilityEventBus +
-│   │   │                      # CapabilityEvent + DeriveKind
-│   │   ├── handle/           # typed + erased capability handles
-│   │   │   ├── mod.rs
-│   │   │   ├── slot.rs       # Slot<R>
-│   │   │   └── cap/
-│   │   │       ├── mod.rs
-│   │   │       ├── typed.rs  # Capability<R>
-│   │   │       └── erased.rs # AnyCapability
-│   │   └── error.rs          # CapabilityError (typed variants)
-│   ├── core/                 # shared value types + abstract traits
-│   │   ├── mod.rs
-│   │   ├── identity/{mod,ids,kind}.rs
-│   │   ├── clock/{mod,clock}.rs
-│   │   ├── meta/{mod,meta,chunk}.rs
-│   │   ├── manifest/{mod,manifest}.rs
-│   │   ├── rights/{mod,rights}.rs
-│   │   ├── quota/{mod,quota}.rs     # value types
-│   │   └── contract/{mod,builtin,resource}.rs
-│   └── personality/          # orchestration
-│       ├── mod.rs
-│       ├── composition/{mod,resolve}.rs
-│       └── lifecycle/
-│           ├── mod.rs
-│           ├── boot.rs              # load_manifests + print_manifests
-│           ├── lifecycle_event.rs   # LifecycleEvent + LifecycleEventBus
-│           ├── mint.rs              # CapabilityFactory + meta_from_decl
-│           ├── ruin.rs              # ruin_runtime_plugins
-│           ├── run.rs               # run() orchestrator (the entry point)
-│           └── serve.rs             # axum router + spawn_http_bridge
-├── examples/
-│   ├── basic.rs              # wires builtins → personality orchestrator
-│   └── frontend/            # Vite + React + TS — agent UI
-├── tests/
-│   ├── layering.rs           # asserts core ⊥ capability ⊥ personality
-│   └── smoke.rs              # builtin round-trips + agent binding-table behaviour + frontend data-binding
-└── builtins/                 # workspace member
-    ├── Cargo.toml
-    └── src/
-        ├── lib.rs
-        ├── agent.rs              # read-only observers (list, describe)
-        ├── agent_runtime.rs      # AI agent runtime (start/resume/cancel/plan/stream/...)
-        ├── echo.rs
-        ├── reverse.rs
-        ├── database.rs
-        ├── streaming_echo.rs
-        ├── llm.rs                # LLM provider plugin (mock for MVP)
-        ├── memory.rs             # in-process memory backend
-        ├── tool_descriptor.rs    # reads a cap's `tool_schema`
-        └── profile_inspector.rs  # reads a cap's full CapabilityMeta
-```
+
+`crate/` is the only cargo workspace (lib only). `example/back/` is a
+single crate holding both the builtin **lib** (`odyssey_builtin`) and the
+example **bin** (`odyssey-example-back`); the previous `example/` workspace
++ `backend/odyssey-builtin/` member + their two `Cargo.toml`s collapsed
+into one. The example imports the lib across workspaces via
+`path = "../../crate/odyssey"`. The root has no `Cargo.toml` and no
+`pnpm-lock.yaml` — pnpm only serves `example/fore/`.
 
 ## Build
 
 ```sh
-cargo build --workspace                  # library + builtins
-cargo build --workspace --examples       # library + builtins + examples/basic.rs
-cargo test                              # integration tests: layering (3) + smoke (27)
-cargo run --example basic               # boot the orchestrator + HTTP bridge
+cd crate         && cargo build           # lib
+cd example/back  && cargo build           # example binary
+cd crate         && cargo test            # layering (3)
+cd example/back  && cargo test            # smoke (27)
 
-# The agent frontend lives in `examples/frontend/` and is a
-# Vite + React build. `cargo run --example basic` reads the
-# resulting `dist/index.html` from disk, so the React bundle is a
-# precondition for the example — not for `cargo build`, but for
-# any `cargo run --example basic` or `cargo test` that needs the
-# page rendered.
-pnpm --dir examples/frontend install
-pnpm --dir examples/frontend build
+./scripts/back.sh                       # build + run the example binary
+./scripts/fore.sh build                 # type-check + bundle the React app
+./scripts/test.sh                       # all of the above + the jsdom smoke
+
+# Set ODYSSEY_ADDR=host:port to move the bridge (the smoke test
+# asks the OS for a free port and passes it through, so its
+# assertions always run against the build under test rather
+# than whatever else is listening).
 ```
 
 The example binary listens on `127.0.0.1:3030` until Ctrl-C; set

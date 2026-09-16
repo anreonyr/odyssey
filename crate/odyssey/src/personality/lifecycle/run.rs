@@ -114,12 +114,7 @@ pub const DEFAULT_BRIDGE_ADDR: &str = "127.0.0.1:3030";
 pub async fn run(
     plugins: &[(PluginManifest, MintFn, RuinFn)],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    run_on(
-        DEFAULT_BRIDGE_ADDR.parse().unwrap(),
-        None,
-        plugins,
-    )
-    .await
+    run_on(DEFAULT_BRIDGE_ADDR.parse().unwrap(), None, plugins).await
 }
 
 /// `run` with an explicit bridge address.

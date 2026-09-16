@@ -1,16 +1,17 @@
-# Rust — each workspace has its own `target/` next to its
-# Cargo.toml; the root has none.
-/target/
-/crate/odyssey/target/
-/example/target/
+# Rust — cargo workspaces drop `target/` at the workspace
+# root. `crate/` is the lib workspace, `example/back/` is
+# a single crate (no workspace) so its target sits there.
+/crate/target/
+/example/back/target/
 
 # Cargo local cache
 /.cargo-cache/
 
-# pnpm — frontend workspace
-/pnpm-lock.yaml
-/node_modules/
-/example/frontend/node_modules/
+# pnpm — single frontend package at example/fore/.
+# /node_modules/ and /pnpm-lock.yaml at the root were
+# removed when the layout stopped being a pnpm workspace
+# at the project root.
+/example/fore/node_modules/
 
 # OS / editor
 .DS_Store
@@ -32,5 +33,5 @@
 .phase*.md
 
 # React frontend (built on demand via
-# `pnpm --dir example/frontend build`)
-/example/frontend/dist/
+# `./scripts/fore.sh build`)
+/example/fore/dist/

@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Run every test in every workspace. Two Rust workspaces
-# (`crate/` for the lib, `example/` for the binaries) plus
-# the frontend's jsdom smoke test against a live API.
+# Run every test in every workspace. The lib lives in
+# `crate/` (single workspace member) and the example app
+# lives in `example/back/` (single Rust crate holding the
+# builtin lib + the binary) plus `example/fore/` (pnpm /
+# React). The frontend's jsdom smoke test runs against a
+# live API.
 # Usage:
-#   ./scripts/test.sh          # all three
-#   ./scripts/test.sh lib      # crate/odyssey only
-#   ./scripts/test.sh example  # example/ only (the big smoke test)
-#   ./scripts/test.sh frontend # the jsdom test
+#   ./scripts/test.sh        # all three
+#   ./scripts/test.sh lib    # crate/odyssey only
+#   ./scripts/test.sh back   # example/back only
+#   ./scripts/test.sh fore   # the jsdom test
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -19,31 +22,31 @@ run_lib() {
     (cd "${REPO_ROOT}/crate" && cargo test --quiet "$@")
 }
 
-run_example() {
-    echo "=== example/backend ==="
+run_back() {
+    echo "=== example/back ==="
     # Build the React bundle first; the smoke test asserts on it.
-    "${REPO_ROOT}/scripts/frontend.sh" build
-    (cd "${REPO_ROOT}/example" && cargo test --quiet "$@")
+    "${REPO_ROOT}/scripts/fore.sh" build
+    (cd "${REPO_ROOT}/example" && cargo test --quiet --manifest-path back/Cargo.toml "$@")
 }
 
-run_frontend() {
-    echo "=== example/frontend (jsdom) ==="
-    "${REPO_ROOT}/scripts/frontend.sh" build
-    "${REPO_ROOT}/scripts/frontend.sh" test "$@"
+run_fore() {
+    echo "=== example/fore (jsdom) ==="
+    "${REPO_ROOT}/scripts/fore.sh" build
+    "${REPO_ROOT}/scripts/fore.sh" test "$@"
 }
 
 case "${SCOPE}" in
-    lib)     run_lib     "$@" ;;
-    example) run_example "$@" ;;
-    frontend) run_frontend "$@" ;;
-    all)
-        run_lib     "$@"
-        run_example "$@"
-        run_frontend "$@"
-        ;;
-    *)
-        echo "unknown scope: ${SCOPE}" >&2
-        echo "usage: $0 {all|lib|example|frontend} [args...]" >&2
-        exit 2
-        ;;
+lib)  run_lib  "$@" ;;
+back) run_back "$@" ;;
+fore) run_fore "$@" ;;
+all)
+    run_lib  "$@"
+    run_back "$@"
+    run_fore "$@"
+    ;;
+*)
+    echo "unknown scope: ${SCOPE}" >&2
+    echo "usage: $0 {all|lib|back|fore} [args...]" >&2
+    exit 2
+    ;;
 esac

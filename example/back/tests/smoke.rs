@@ -567,14 +567,14 @@ fn agent_describe_refuses_unknown_fields() {
 /// against the endpoints, and reading the HTML — and neither catches the
 /// failure that matters here: a field renamed on one side while the
 /// other keeps looking for the old name, which renders as a dash rather
-/// than an error. `../../frontend/test/frontend.test.mjs`
+/// than an error. `../../fore/test/frontend.test.mjs`
 /// loads the **built** React bundle into jsdom, drives it against a
 /// server this test spawns, and asserts the rendered DOM.
 ///
 /// Skipped when `node` is unavailable: the assertion needs a JS engine,
 /// and silently passing would be worse than not running. Fails loudly
 /// when the React `dist/` is missing — `pnpm --dir
-/// ../../frontend build` is a precondition.
+/// ../../fore build` is a precondition.
 #[test]
 fn frontend_script_binds_to_the_live_api() {
     use std::net::{SocketAddr, TcpStream};
@@ -621,7 +621,7 @@ fn frontend_script_binds_to_the_live_api() {
         String::from_utf8_lossy(&node.stderr)
     );
 
-    let bin: PathBuf = match option_env!("CARGO_BIN_EXE_odyssey-example-basic") {
+    let bin: PathBuf = match option_env!("CARGO_BIN_EXE_odyssey-example-back") {
         Some(path) => path.into(),
         // Cargo sets CARGO_BIN_EXE_<name> for `[[bin]]` targets; this
         // fallback lets the test still find the binary when the
@@ -694,26 +694,26 @@ fn frontend_script_binds_to_the_live_api() {
     }
     assert!(up, "the HTTP bridge never came up on {addr}");
 
-    // The React frontend lives in `../frontend/dist/`
+    // The React frontend lives in `../fore/dist/`
     // relative to this crate (the binary's `CARGO_MANIFEST_DIR`
-    // is `example/backend/`, so `../frontend` is `example/frontend/`).
-    // Built on demand via `pnpm --dir ../frontend build`.
+    // is `example/backend/`, so `../fore` is `example/fore/`).
+    // Built on demand via `pnpm --dir ../fore build`.
     let page: PathBuf = [
         env!("CARGO_MANIFEST_DIR"),
-        "../frontend/dist/index.html",
+        "../fore/dist/index.html",
     ]
     .iter()
     .collect();
     assert!(
         page.exists(),
-        "React frontend dist not built at {} — run `pnpm --dir ../frontend build`",
+        "React frontend dist not built at {} — run `pnpm --dir ../fore build`",
         page.display()
     );
 
     // The test script lives inside the package so node resolves
     // `jsdom` from its local node_modules. We invoke node from that
     // directory so the resolver walks the right tree.
-    let pkg_dir: PathBuf = [env!("CARGO_MANIFEST_DIR"), "../frontend"]
+    let pkg_dir: PathBuf = [env!("CARGO_MANIFEST_DIR"), "../fore"]
         .iter()
         .collect();
     let test_script = pkg_dir.join("test").join("frontend.test.mjs");
