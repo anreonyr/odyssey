@@ -58,6 +58,7 @@ pub fn meta_from_decl(
         kind: decl.kind,
         timeout_ms: budget.timeout_ms(),
         quota: budget.quota_spec(),
+        tool_schema: decl.tool_schema.clone(),
     }
 }
 

@@ -95,8 +95,73 @@ pub struct DatabaseBuiltin;
 
 impl BuiltinManifest for DatabaseBuiltin {
     fn manifest(&self) -> PluginManifest {
+        // The database's input shape is discriminated by the
+        // `op` field. JSON Schema's `oneOf` expresses the
+        // three shapes precisely; the LLM picks the right
+        // one based on the op it wants to perform. The
+        // in-memory store is per-process — values do not
+        // survive a restart. The schema declares the
+        // `additionalProperties: false` on each variant so
+        // the LLM doesn't accidentally pass a `value` on a
+        // `get`.
+        let tool_schema = serde_json::json!({
+            "description": "In-process JSON key-value store. Keys are strings, values are any JSON value. State is per-process and lost on restart.",
+            "input_schema": {
+                "oneOf": [
+                    {
+                        "type": "object",
+                        "properties": {
+                            "op": { "type": "string", "enum": ["get"] },
+                            "key": { "type": "string" }
+                        },
+                        "required": ["op", "key"],
+                        "additionalProperties": false
+                    },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "op": { "type": "string", "enum": ["set"] },
+                            "key": { "type": "string" },
+                            "value": { "description": "Any JSON value; stored verbatim." }
+                        },
+                        "required": ["op", "key", "value"],
+                        "additionalProperties": false
+                    },
+                    {
+                        "type": "object",
+                        "properties": {
+                            "op": { "type": "string", "enum": ["delete"] },
+                            "key": { "type": "string" }
+                        },
+                        "required": ["op", "key"],
+                        "additionalProperties": false
+                    }
+                ]
+            },
+            "output_schema": {
+                "oneOf": [
+                    {
+                        "description": "Returned by `get`.",
+                        "type": "object",
+                        "properties": {
+                            "ok": { "type": "boolean" },
+                            "value": { "description": "Present only when `ok` is true." }
+                        },
+                        "required": ["ok"]
+                    },
+                    {
+                        "description": "Returned by `set` and `delete`.",
+                        "type": "object",
+                        "properties": {
+                            "ok": { "type": "boolean" }
+                        },
+                        "required": ["ok"]
+                    }
+                ]
+            }
+        });
         ManifestBuilder::new("database")
-            .expose("database", "database")
+            .expose_with_schema("database", "database", tool_schema)
             .host("dispatcher")
             .timeout_ms(5000)
             .build()

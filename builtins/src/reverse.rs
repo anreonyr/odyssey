@@ -43,8 +43,31 @@ pub struct ReverseBuiltin;
 
 impl BuiltinManifest for ReverseBuiltin {
     fn manifest(&self) -> PluginManifest {
+        let tool_schema = serde_json::json!({
+            "description": "Reverses the input string character by character. Useful for palindrome checks and string processing.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The string to reverse. Unicode scalar values are reversed as a sequence, not grapheme clusters."
+                    }
+                },
+                "required": ["text"]
+            },
+            "output_schema": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The reversed string."
+                    }
+                },
+                "required": ["text"]
+            }
+        });
         ManifestBuilder::new("reverse")
-            .expose("reverse", "reverse")
+            .expose_with_schema("reverse", "reverse", tool_schema)
             .host("dispatcher")
             .timeout_ms(5000)
             .build()

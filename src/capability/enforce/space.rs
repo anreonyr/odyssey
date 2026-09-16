@@ -301,6 +301,20 @@ impl CapabilitySpace {
         self.lookup_erased(slot)
     }
 
+    /// Resolve a cap name to its `SlotId` without going through
+    /// the cap lookup. Useful for typed `Slot<R>` construction
+    /// in plugins that already know which `R` they want.
+    pub fn slot_for_name(&self, name: &str) -> Option<SlotId> {
+        Some(
+            *self
+                .inner
+                .names
+                .read()
+                .expect("cspace poisoned")
+                .get(name)?,
+        )
+    }
+
     pub fn name_for_slot(&self, slot: SlotId) -> Option<String> {
         let names = self.inner.names.read().expect("cspace poisoned");
         names

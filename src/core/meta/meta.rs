@@ -15,6 +15,8 @@
 //! authority bitflags type that already lives in
 //! `core::rights::rights`.
 
+use serde_json::Value;
+
 use crate::core::identity::ids::CapabilityId;
 use crate::core::identity::ids::PluginId;
 use crate::core::identity::kind::CapKind;
@@ -48,4 +50,10 @@ pub struct CapabilityMeta {
     pub kind: CapKind,
     pub timeout_ms: u32,
     pub quota: QuotaSpec,
+    /// Mirror of `CapabilityDecl::tool_schema`. Opaque to the kernel;
+    /// the `tool_descriptor` plugin reads it to answer agent queries
+    /// about a tool's input/output contract. `None` for caps that
+    /// don't publish a schema (e.g. echo, reverse, the agent caps
+    /// themselves).
+    pub tool_schema: Option<Value>,
 }

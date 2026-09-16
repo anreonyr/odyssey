@@ -103,8 +103,44 @@ pub struct StreamingEchoBuiltin;
 
 impl BuiltinManifest for StreamingEchoBuiltin {
     fn manifest(&self) -> PluginManifest {
+        // The output is a stream — JSON Schema doesn't have a
+        // first-class "stream of T" primitive, so we describe
+        // each chunk's shape and note the count. The agent
+        // advertises the tool as a streaming one; the LLM
+        // sees the kind and the schema in concert.
+        let tool_schema = serde_json::json!({
+            "description": "Echoes `text` back `count` times as a stream of `count + 1` chunks (the last is a terminal Done). Optional `delay_ms` between chunks; default 0.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The text to echo on every chunk."
+                    },
+                    "count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "description": "Number of payload chunks to emit before Done."
+                    },
+                    "delay_ms": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Sleep between chunks; default 0. Set to ~150 for visible streaming over SSE."
+                    }
+                },
+                "required": ["text", "count"]
+            },
+            "output_schema": {
+                "description": "Stream of N+1 chunks: N payload chunks then one Done sentinel.",
+                "type": "object",
+                "properties": {
+                    "text": { "type": "string" },
+                    "index": { "type": "integer", "description": "0-based chunk index in [0, count)." }
+                }
+            }
+        });
         ManifestBuilder::new("streaming_echo")
-            .expose_streaming("streaming_echo", "streaming_echo")
+            .expose_streaming_with_schema("streaming_echo", "streaming_echo", tool_schema)
             .host("dispatcher")
             .timeout_ms(5000)
             .build()

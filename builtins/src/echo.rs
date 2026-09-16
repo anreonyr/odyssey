@@ -33,8 +33,28 @@ pub struct EchoBuiltin;
 
 impl BuiltinManifest for EchoBuiltin {
     fn manifest(&self) -> PluginManifest {
+        // `tool_schema` is opaque to the kernel but lets the
+        // `tool_descriptor` cap answer "what is this tool's
+        // input/output contract?" and lets the agent advertise
+        // the tool to a real LLM via native tool calling. Echo
+        // takes any JSON input verbatim and returns it
+        // verbatim, so the schema is `{"type":"object"}` with
+        // a `value` property that takes any shape.
+        let tool_schema = serde_json::json!({
+            "description": "Echoes its input back unchanged. The agent uses this to verify the tool-call round-trip.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "value": { "description": "Anything JSON-serialisable; returned verbatim." }
+                }
+            },
+            "output_schema": {
+                "type": "object",
+                "description": "The exact JSON value the caller supplied."
+            }
+        });
         ManifestBuilder::new("echo")
-            .expose("echo", "echo")
+            .expose_with_schema("echo", "echo", tool_schema)
             .host("dispatcher")
             .timeout_ms(5000)
             .build()

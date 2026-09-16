@@ -25,6 +25,7 @@
 //! loaders must honour — live under `docs/deferred/`.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 pub use crate::core::identity::ids::PluginId;
 use crate::core::identity::kind::CapKind;
@@ -133,6 +134,15 @@ pub struct CapabilityDecl {
     /// `"generator"`, `"embedder"`, `"database"`, `"agent"`.
     #[serde(default)]
     pub contract_name: String,
+    /// Optional tool schema — a JSON object the agent reads via the
+    /// `tool_descriptor` capability to learn the tool's input/output
+    /// contract. `None` means "no schema published" — the cap is not
+    /// agent-callable in a schema-driven way (an agent can still call
+    /// it by name through the cspace, just without structured schema
+    /// metadata). The value is opaque to the kernel; it's the
+    /// `tool_descriptor` plugin that interprets it.
+    #[serde(default)]
+    pub tool_schema: Option<Value>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -241,6 +251,28 @@ impl ManifestBuilder {
             out_type: "any".into(),
             kind: CapKind::Sync,
             contract_name: contract_name.into(),
+            tool_schema: None,
+        });
+        self
+    }
+
+    /// Append a sync capability and attach a `tool_schema` JSON
+    /// object. Use this when the capability is meant to be called by
+    /// the agent through `tool_descriptor`; the schema is opaque to
+    /// the kernel.
+    pub fn expose_with_schema(
+        mut self,
+        name: impl Into<String>,
+        contract_name: impl Into<String>,
+        tool_schema: Value,
+    ) -> Self {
+        self.exposes.push(CapabilityDecl {
+            name: name.into(),
+            in_type: "any".into(),
+            out_type: "any".into(),
+            kind: CapKind::Sync,
+            contract_name: contract_name.into(),
+            tool_schema: Some(tool_schema),
         });
         self
     }
@@ -261,6 +293,29 @@ impl ManifestBuilder {
             out_type: "any".into(),
             kind: CapKind::Stream,
             contract_name: contract_name.into(),
+            tool_schema: None,
+        });
+        self
+    }
+
+    /// Append a streaming capability with a `tool_schema`.
+    /// Symmetric with [`Self::expose_with_schema`]; the
+    /// schema's `output_schema` describes one chunk of the
+    /// stream, and the cap's `kind` tells the LLM the result
+    /// is a stream of those.
+    pub fn expose_streaming_with_schema(
+        mut self,
+        name: impl Into<String>,
+        contract_name: impl Into<String>,
+        tool_schema: Value,
+    ) -> Self {
+        self.exposes.push(CapabilityDecl {
+            name: name.into(),
+            in_type: "any".into(),
+            out_type: "any".into(),
+            kind: CapKind::Stream,
+            contract_name: contract_name.into(),
+            tool_schema: Some(tool_schema),
         });
         self
     }

@@ -39,6 +39,11 @@ odyssey-builtins = { path = "builtins" }
 # group imports (`use crate::{capability, personality};`) and
 # as not scanning the `builtins/` workspace member.
 syn = { version = "2", features = ["full", "parsing", "visit"] }
+# `openai_backend_round_trips_through_local_http_server`
+# spawns a tiny axum server in-process to exercise the
+# OpenAiBackend HTTP path without an external provider.
+# Already a regular dep of the library, so no extra build cost.
+axum = "0.7"
 
 [features]
 default = []
