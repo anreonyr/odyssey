@@ -1,0 +1,8 @@
+    Checking unicode-ident v1.0.24
+    Checking odyssey v0.1.0 (/home/anreonyr/Develop/odyssey/crate/odyssey)
+    Checking proc-macro2 v1.0.107
+    Checking quote v1.0.47
+    Checking syn v2.0.119
+error: could not compile `odyssey` (lib) due to 10 previous errors
+warning: build failed, waiting for other jobs to finish...
+error: could not compile `odyssey` (lib test) due to 10 previous errors

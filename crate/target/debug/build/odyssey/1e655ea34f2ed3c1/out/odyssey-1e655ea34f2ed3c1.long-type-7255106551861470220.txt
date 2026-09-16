@@ -1,0 +1,1 @@
+fn(std::path::Path) -> impl futures_core::Future<Output = impl IntoResponse> {static_asset}: Handler<_, _>
