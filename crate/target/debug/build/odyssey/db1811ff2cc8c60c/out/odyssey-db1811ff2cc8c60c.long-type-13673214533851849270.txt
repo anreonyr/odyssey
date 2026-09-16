@@ -1,2 +1,0 @@
-fn(axum::extract::State<personality::lifecycle::serve::AppState>, std::path::Path) -> impl futures_core::Future<Output = {type error}> {personality::lifecycle::serve::static_asset}
-fn(axum::extract::State<personality::lifecycle::serve::AppState>, std::path::Path) -> impl futures_core::Future<Output = {type error}> {personality::lifecycle::serve::static_asset}: axum::handler::Handler<_, _>

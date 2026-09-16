@@ -1,1 +1,0 @@
-{"$message_type":"unused_extern","lint_level":"force-warn","unused_extern_names":["axum","bitflags","futures_core","futures_util","odyssey","serde","serde_json","tokio","tokio_stream"]}

@@ -46,9 +46,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::llm::{LlmCompleteResource, LlmEmbedResource};
+use crate::memory::{MemoryInsertResource, MemoryQueryResource};
+use odyssey::capability::enforce::quota::CapabilityBudget;
 use odyssey::capability::enforce::space::CapabilitySpace;
 use odyssey::capability::handle::slot::Slot;
-use odyssey::capability::enforce::quota::CapabilityBudget;
 use odyssey::core::Resource;
 use odyssey::core::contract::builtin::BuiltinManifest;
 use odyssey::core::identity::ids::{PluginId, SlotId};
@@ -58,8 +60,6 @@ use odyssey::core::rights::rights::OperationRights;
 use odyssey::personality::composition::resolve::ResolvedBinding;
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
 use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
-use crate::llm::{LlmCompleteResource, LlmEmbedResource};
-use crate::memory::{MemoryInsertResource, MemoryQueryResource};
 use serde_json::{Value, json};
 use tokio::sync::broadcast;
 
@@ -104,13 +104,26 @@ pub const REACHES: [(&str, &str); 4] = [
 pub enum AgentError {
     Input(String),
     UnknownSession(String),
-    SessionTerminal { id: String, status: String },
-    SessionLimit { id: String, limit: String, observed: u32 },
+    SessionTerminal {
+        id: String,
+        status: String,
+    },
+    SessionLimit {
+        id: String,
+        limit: String,
+        observed: u32,
+    },
     NoLlm,
     NoMemory,
-    ToolDenied { tool: String, reason: &'static str },
+    ToolDenied {
+        tool: String,
+        reason: &'static str,
+    },
     ToolUnknown(String),
-    ToolFailed { tool: String, error: String },
+    ToolFailed {
+        tool: String,
+        error: String,
+    },
     LlmFailed(String),
     MemoryFailed(String),
     SchemaMissing(String),
@@ -125,8 +138,15 @@ impl std::fmt::Display for AgentError {
             Self::SessionTerminal { id, status } => {
                 write!(f, "agent: session `{id}` is terminal ({status})")
             }
-            Self::SessionLimit { id, limit, observed } => {
-                write!(f, "agent: session `{id}` exceeded {limit} (observed: {observed})")
+            Self::SessionLimit {
+                id,
+                limit,
+                observed,
+            } => {
+                write!(
+                    f,
+                    "agent: session `{id}` exceeded {limit} (observed: {observed})"
+                )
             }
             Self::NoLlm => write!(f, "agent: LLM cap not bound"),
             Self::NoMemory => write!(f, "agent: memory cap not bound"),
@@ -338,7 +358,9 @@ impl History {
                     Step::LlmReply(LlmReply::Final(f)) => json!({
                         "kind":"llm_final","value":f.value,"reason":format!("{:?}",f.reason)
                     }),
-                    Step::ToolCall(inv) => json!({"kind":"tool_call","tool":inv.tool,"args":inv.args}),
+                    Step::ToolCall(inv) => {
+                        json!({"kind":"tool_call","tool":inv.tool,"args":inv.args})
+                    }
                     Step::ToolResult(r) => {
                         let outcome = match &r.outcome {
                             Ok(v) => json!({"ok":true,"value":v}),
@@ -408,9 +430,7 @@ impl AgentSlots {
             let b = bindings
                 .iter()
                 .find(|b| b.handle == handle)
-                .unwrap_or_else(|| {
-                    panic!("agent_runtime: required handle `{handle}` missing")
-                });
+                .unwrap_or_else(|| panic!("agent_runtime: required handle `{handle}` missing"));
             cspace.slot_for_name(&b.capability).unwrap_or_else(|| {
                 panic!("agent_runtime: cap `{}` not bound to a slot", b.capability)
             })
@@ -589,9 +609,7 @@ pub fn push_event_to_session(session_id: &str, event: AgentEvent) {
 /// tests and by the `agent_stream` cap to receive
 /// per-token `LlmDelta`s. Returns `None` if the session
 /// is unknown (it has been cancelled or the id is wrong).
-pub fn subscribe_session_broadcast(
-    session_id: &str,
-) -> Option<broadcast::Receiver<AgentEvent>> {
+pub fn subscribe_session_broadcast(session_id: &str) -> Option<broadcast::Receiver<AgentEvent>> {
     let sessions_arc = global_sessions();
     let sessions = sessions_arc.lock().expect("sessions poisoned");
     sessions
@@ -608,7 +626,6 @@ pub struct AgentRuntime {
     pub bindings: Vec<ResolvedBinding>,
     pub sessions: Sessions,
 }
-
 
 impl AgentRuntime {
     pub fn new(cspace: CapabilitySpace, bindings: Vec<ResolvedBinding>) -> Self {
@@ -721,9 +738,12 @@ impl AgentRuntime {
             // chronological order matches what the LLM
             // produced.
             if let Some(prose) = llm_resp.get("text").and_then(Value::as_str)
-                && !prose.is_empty() {
-                    session.history.push(Step::LlmReply(LlmReply::Text(prose.to_string())));
-                }
+                && !prose.is_empty()
+            {
+                session
+                    .history
+                    .push(Step::LlmReply(LlmReply::Text(prose.to_string())));
+            }
             if !session.allowed_tools.is_empty()
                 && !session.allowed_tools.contains(&invocation.tool)
             {
@@ -742,12 +762,12 @@ impl AgentRuntime {
                     reason: "missing EXECUTE",
                 });
             }
-            let outcome = cap
-                .invoke_dyn_typed(invocation.args.clone())
-                .map_err(|e| AgentError::ToolFailed {
-                    tool: invocation.tool.clone(),
-                    error: e.to_string(),
-                });
+            let outcome =
+                cap.invoke_dyn_typed(invocation.args.clone())
+                    .map_err(|e| AgentError::ToolFailed {
+                        tool: invocation.tool.clone(),
+                        error: e.to_string(),
+                    });
             let tr = ToolResult {
                 tool: invocation.tool.clone(),
                 outcome: outcome.map_err(|e| e.to_string()),
@@ -778,9 +798,10 @@ impl AgentRuntime {
         // step→event mapping below.
         if let Step::ToolResult(ref tr) = step {
             if let Some(prose) = llm_resp.get("text").and_then(Value::as_str)
-                && !prose.is_empty() {
-                    session.push_event(AgentEvent::LlmReplyText(prose.to_string()));
-                }
+                && !prose.is_empty()
+            {
+                session.push_event(AgentEvent::LlmReplyText(prose.to_string()));
+            }
             // The tool call itself is a separate event
             // from the result. `step` carries only the
             // result, so emit the matching ToolCall from
@@ -828,9 +849,10 @@ impl AgentRuntime {
         if let Some(p) = path {
             let checkpoint = SessionCheckpoint::from_session(&session, &sid);
             if let Some(parent) = std::path::Path::new(p).parent()
-                && !parent.as_os_str().is_empty() {
-                    let _ = std::fs::create_dir_all(parent);
-                }
+                && !parent.as_os_str().is_empty()
+            {
+                let _ = std::fs::create_dir_all(parent);
+            }
             let bytes = serde_json::to_vec_pretty(&checkpoint).map_err(|e| {
                 AgentError::Serialization(format!("session checkpoint serialise: {e}"))
             })?;
@@ -849,9 +871,8 @@ impl AgentRuntime {
     pub fn load(&self, path: &str) -> Result<String, AgentError> {
         let bytes = std::fs::read(path)
             .map_err(|e| AgentError::Serialization(format!("session checkpoint read: {e}")))?;
-        let checkpoint: SessionCheckpoint = serde_json::from_slice(&bytes).map_err(|e| {
-            AgentError::Serialization(format!("session checkpoint parse: {e}"))
-        })?;
+        let checkpoint: SessionCheckpoint = serde_json::from_slice(&bytes)
+            .map_err(|e| AgentError::Serialization(format!("session checkpoint parse: {e}")))?;
         let sid = SessionId(checkpoint.id.0.clone());
         let slots = AgentSlots::from_bindings(&self.cspace, &self.bindings);
         let (sender, _rx) = broadcast::channel(64);
@@ -999,10 +1020,9 @@ fn build_prompt(session: &Session, observation: &Observation) -> String {
     s.push_str("\n\nHistory (most recent last):\n");
     for step in session.history.iter() {
         match step {
-            Step::ToolCall(inv) => s.push_str(&format!(
-                "  - tool_call {} {}\n",
-                inv.tool, inv.args
-            )),
+            Step::ToolCall(inv) => {
+                s.push_str(&format!("  - tool_call {} {}\n", inv.tool, inv.args))
+            }
             Step::ToolResult(r) => {
                 let outcome = match &r.outcome {
                     Ok(v) => format!("ok {}", v),
@@ -1056,11 +1076,7 @@ fn collect_tool_schemas(cspace: &CapabilitySpace, allowed_tools: &[String]) -> V
         // No whitelist — advertise every cap that carries a
         // tool_schema. This is the broadest "what can the
         // LLM call" view.
-        let names: Vec<String> = cspace
-            .enumerate()
-            .into_iter()
-            .map(|m| m.name)
-            .collect();
+        let names: Vec<String> = cspace.enumerate().into_iter().map(|m| m.name).collect();
         names
     } else {
         allowed_tools.to_vec()
@@ -1102,7 +1118,10 @@ fn first_native_tool_call(llm_resp: &Value) -> Option<ToolInvocation> {
     let tc = llm_resp.get("tool_calls")?.as_array()?.first()?;
     let name = tc.get("name").and_then(Value::as_str)?.to_string();
     let arguments = tc.get("arguments").cloned().unwrap_or(Value::Null);
-    Some(ToolInvocation { tool: name, args: arguments })
+    Some(ToolInvocation {
+        tool: name,
+        args: arguments,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -1117,57 +1136,58 @@ fn parse_llm_reply(
 ) -> Result<(Step, SessionStatus), AgentError> {
     let trimmed = text.trim();
     if trimmed.starts_with('{')
-        && let Ok(v) = serde_json::from_str::<Value>(trimmed) {
-            if let Some(tc) = v.get("tool_call") {
-                let tool = tc
-                    .get("tool")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| AgentError::LlmFailed("tool_call missing `tool`".into()))?
-                    .to_string();
-                let args = tc.get("args").cloned().unwrap_or(Value::Null);
-                if !allowed_tools.is_empty() && !allowed_tools.contains(&tool) {
-                    return Err(AgentError::ToolDenied {
-                        tool,
-                        reason: "not in allowed_tools",
-                    });
-                }
-                let cap = cspace
-                    .lookup_by_name(&tool)
-                    .ok_or_else(|| AgentError::ToolUnknown(tool.clone()))?;
-                let ops = cap.operations();
-                if !ops.contains(OperationRights::EXECUTE) {
-                    return Err(AgentError::ToolDenied {
-                        tool,
-                        reason: "missing EXECUTE",
-                    });
-                }
-                let outcome = cap.invoke_dyn_typed(args.clone()).map_err(|e| {
-                    AgentError::ToolFailed {
-                        tool: tool.clone(),
-                        error: e.to_string(),
-                    }
+        && let Ok(v) = serde_json::from_str::<Value>(trimmed)
+    {
+        if let Some(tc) = v.get("tool_call") {
+            let tool = tc
+                .get("tool")
+                .and_then(Value::as_str)
+                .ok_or_else(|| AgentError::LlmFailed("tool_call missing `tool`".into()))?
+                .to_string();
+            let args = tc.get("args").cloned().unwrap_or(Value::Null);
+            if !allowed_tools.is_empty() && !allowed_tools.contains(&tool) {
+                return Err(AgentError::ToolDenied {
+                    tool,
+                    reason: "not in allowed_tools",
                 });
-                let tr = ToolResult {
-                    tool: tool.clone(),
-                    outcome: outcome.map_err(|e| e.to_string()),
-                };
-                let invocation = ToolInvocation {
-                    tool: tool.clone(),
-                    args,
-                };
-                history.push(Step::ToolCall(invocation));
-                history.push(Step::ToolResult(tr.clone()));
-                return Ok((Step::ToolResult(tr), SessionStatus::AwaitingObservation));
             }
-            if let Some(final_v) = v.get("final") {
-                let f = FinalAnswer {
-                    value: final_v.clone(),
-                    reason: FinalReason::Goal,
-                };
-                history.push(Step::Final(f.clone()));
-                return Ok((Step::Final(f), SessionStatus::Done));
+            let cap = cspace
+                .lookup_by_name(&tool)
+                .ok_or_else(|| AgentError::ToolUnknown(tool.clone()))?;
+            let ops = cap.operations();
+            if !ops.contains(OperationRights::EXECUTE) {
+                return Err(AgentError::ToolDenied {
+                    tool,
+                    reason: "missing EXECUTE",
+                });
             }
+            let outcome = cap
+                .invoke_dyn_typed(args.clone())
+                .map_err(|e| AgentError::ToolFailed {
+                    tool: tool.clone(),
+                    error: e.to_string(),
+                });
+            let tr = ToolResult {
+                tool: tool.clone(),
+                outcome: outcome.map_err(|e| e.to_string()),
+            };
+            let invocation = ToolInvocation {
+                tool: tool.clone(),
+                args,
+            };
+            history.push(Step::ToolCall(invocation));
+            history.push(Step::ToolResult(tr.clone()));
+            return Ok((Step::ToolResult(tr), SessionStatus::AwaitingObservation));
         }
+        if let Some(final_v) = v.get("final") {
+            let f = FinalAnswer {
+                value: final_v.clone(),
+                reason: FinalReason::Goal,
+            };
+            history.push(Step::Final(f.clone()));
+            return Ok((Step::Final(f), SessionStatus::Done));
+        }
+    }
     // Plain text — treat as a final answer.
     let f = FinalAnswer {
         value: Value::String(text.to_string()),
@@ -1258,10 +1278,7 @@ impl Resource for AgentCancelResource {
             .get("path")
             .and_then(Value::as_str)
             .filter(|s| !s.is_empty());
-        let history = self
-            .runtime
-            .cancel(id, path)
-            .map_err(|e| e.to_string())?;
+        let history = self.runtime.cancel(id, path).map_err(|e| e.to_string())?;
         let mut out = json!({ "status": "Cancelled", "history": history });
         if let Some(p) = path {
             out["checkpoint_path"] = json!(p);
@@ -1302,10 +1319,8 @@ impl Resource for AgentStreamResource {
     fn open(
         &self,
         input: Value,
-    ) -> Result<
-        tokio::sync::mpsc::Receiver<odyssey::core::meta::chunk::CapabilityChunk>,
-        String,
-    > {
+    ) -> Result<tokio::sync::mpsc::Receiver<odyssey::core::meta::chunk::CapabilityChunk>, String>
+    {
         let id = input
             .get("session_id")
             .and_then(Value::as_str)
@@ -1320,18 +1335,16 @@ impl Resource for AgentStreamResource {
             session.sender.subscribe()
         };
 
-        let (tx, rx) = tokio::sync::mpsc::channel::<
-            odyssey::core::meta::chunk::CapabilityChunk,
-        >(32);
+        let (tx, rx) =
+            tokio::sync::mpsc::channel::<odyssey::core::meta::chunk::CapabilityChunk>(32);
 
         let id_owned = id.to_string();
         tokio::spawn(async move {
             loop {
                 match rx_bcast.recv().await {
                     Ok(ev) => {
-                        let chunk = odyssey::core::meta::chunk::CapabilityChunk::Item(
-                            ev.to_value(),
-                        );
+                        let chunk =
+                            odyssey::core::meta::chunk::CapabilityChunk::Item(ev.to_value());
                         if tx.send(chunk).await.is_err() {
                             break;
                         }
@@ -1345,8 +1358,7 @@ impl Resource for AgentStreamResource {
                         }
                     }
                     Err(broadcast::error::RecvError::Closed) => {
-                        let chunk =
-                            odyssey::core::meta::chunk::CapabilityChunk::Done;
+                        let chunk = odyssey::core::meta::chunk::CapabilityChunk::Done;
                         let _ = tx.send(chunk).await;
                         break;
                     }
@@ -1548,7 +1560,10 @@ impl AgentRuntimeBuiltin {
         budget: CapabilityBudget,
         bindings: &[ResolvedBinding],
     ) -> SlotId {
-        let runtime = Arc::new(AgentRuntime::new(factory.space().clone(), bindings.to_vec()));
+        let runtime = Arc::new(AgentRuntime::new(
+            factory.space().clone(),
+            bindings.to_vec(),
+        ));
         match decl.name.as_str() {
             NAME_START => factory.mint(
                 kind,

@@ -108,14 +108,8 @@ impl ToolDescriptorResource {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        let input_schema = schema
-            .get("input_schema")
-            .cloned()
-            .unwrap_or(Value::Null);
-        let output_schema = schema
-            .get("output_schema")
-            .cloned()
-            .unwrap_or(Value::Null);
+        let input_schema = schema.get("input_schema").cloned().unwrap_or(Value::Null);
+        let output_schema = schema.get("output_schema").cloned().unwrap_or(Value::Null);
 
         Ok(json!({
             "name": meta.name,

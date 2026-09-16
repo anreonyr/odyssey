@@ -8,10 +8,12 @@
 /.cargo-cache/
 
 # pnpm — single frontend package at example/fore/.
-# /node_modules/ and /pnpm-lock.yaml at the root were
-# removed when the layout stopped being a pnpm workspace
-# at the project root.
+# The root /node_modules/ + /pnpm-lock.yaml + /.pnpm-store/
+# were removed when the layout stopped being a pnpm
+# workspace at the project root.
+/node_modules/
 /example/fore/node_modules/
+/.pnpm-store/
 
 # OS / editor
 .DS_Store

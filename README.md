@@ -203,7 +203,7 @@ odyssey/                       # root has no Cargo.toml — only scripts and doc
 `crate/` is the only cargo workspace (lib only). `example/back/` is a
 single crate holding both the builtin **lib** (`odyssey_builtin`) and the
 example **bin** (`odyssey-example-back`); the previous `example/` workspace
-+ `backend/odyssey-builtin/` member + their two `Cargo.toml`s collapsed
+- `backend/odyssey-builtin/` member + their two `Cargo.toml`s collapsed
 into one. The example imports the lib across workspaces via
 `path = "../../crate/odyssey"`. The root has no `Cargo.toml` and no
 `pnpm-lock.yaml` — pnpm only serves `example/fore/`.

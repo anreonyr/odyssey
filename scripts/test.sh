@@ -36,11 +36,11 @@ run_fore() {
 }
 
 case "${SCOPE}" in
-lib)  run_lib  "$@" ;;
+lib) run_lib "$@" ;;
 back) run_back "$@" ;;
 fore) run_fore "$@" ;;
 all)
-    run_lib  "$@"
+    run_lib "$@"
     run_back "$@"
     run_fore "$@"
     ;;

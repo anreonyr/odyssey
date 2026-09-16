@@ -1,2 +1,0 @@
-fn(std::path::Path) -> impl futures_core::Future<Output = impl axum::response::IntoResponse> {personality::lifecycle::serve::static_asset}
-fn(std::path::Path) -> impl futures_core::Future<Output = impl axum::response::IntoResponse> {personality::lifecycle::serve::static_asset}: axum::handler::Handler<_, _>

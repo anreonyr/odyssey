@@ -125,10 +125,7 @@ impl MemoryBackend for InMemoryBackend {
         let store = self.store.lock().expect("store poisoned");
         let mut candidates: Vec<Record> = store
             .values()
-            .filter(|r| {
-                filter_tags.is_empty()
-                    || filter_tags.iter().all(|t| r.tags.contains(t))
-            })
+            .filter(|r| filter_tags.is_empty() || filter_tags.iter().all(|t| r.tags.contains(t)))
             .cloned()
             .collect();
 
@@ -181,8 +178,7 @@ impl FileMemoryBackend {
     pub fn open(path: impl Into<std::path::PathBuf>) -> Result<Self, String> {
         let path = path.into();
         let store = if path.exists() {
-            let bytes = std::fs::read(&path)
-                .map_err(|e| format!("memory file read: {e}"))?;
+            let bytes = std::fs::read(&path).map_err(|e| format!("memory file read: {e}"))?;
             if bytes.is_empty() {
                 HashMap::new()
             } else {
@@ -222,21 +218,19 @@ impl FileMemoryBackend {
             .map(|r| serde_json::to_value(r).expect("Record is serialisable"))
             .collect();
         let body = serde_json::json!({ "records": arr });
-        let bytes = serde_json::to_vec_pretty(&body)
-            .map_err(|e| format!("memory file serialise: {e}"))?;
+        let bytes =
+            serde_json::to_vec_pretty(&body).map_err(|e| format!("memory file serialise: {e}"))?;
         if let Some(parent) = self.path.parent()
-            && !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| format!("memory file mkdir: {e}"))?;
-            }
+            && !parent.as_os_str().is_empty()
+        {
+            std::fs::create_dir_all(parent).map_err(|e| format!("memory file mkdir: {e}"))?;
+        }
         // Write to a sibling temp file then atomically rename,
         // so a crash mid-write doesn't leave a half-baked file
         // that the next `open` would parse incorrectly.
         let tmp = self.path.with_extension("json.tmp");
-        std::fs::write(&tmp, &bytes)
-            .map_err(|e| format!("memory file write: {e}"))?;
-        std::fs::rename(&tmp, &self.path)
-            .map_err(|e| format!("memory file rename: {e}"))?;
+        std::fs::write(&tmp, &bytes).map_err(|e| format!("memory file write: {e}"))?;
+        std::fs::rename(&tmp, &self.path).map_err(|e| format!("memory file rename: {e}"))?;
         Ok(())
     }
 
@@ -283,18 +277,11 @@ impl MemoryBackend for FileMemoryBackend {
     ) -> Vec<Record> {
         // Reuse the in-memory logic by extracting the inner
         // store snapshot. Cheap O(N) on a per-call basis.
-        let snapshot: HashMap<String, Record> = self
-            .store
-            .lock()
-            .expect("store poisoned")
-            .clone();
+        let snapshot: HashMap<String, Record> = self.store.lock().expect("store poisoned").clone();
 
         let mut candidates: Vec<Record> = snapshot
             .into_values()
-            .filter(|r| {
-                filter_tags.is_empty()
-                    || filter_tags.iter().all(|t| r.tags.contains(t))
-            })
+            .filter(|r| filter_tags.is_empty() || filter_tags.iter().all(|t| r.tags.contains(t)))
             .collect();
 
         if let Some(v) = vector {
@@ -328,11 +315,7 @@ fn cosine(a: &[f32], b: &[f32]) -> f32 {
         nb += b[i] * b[i];
     }
     let denom = (na.sqrt()) * (nb.sqrt());
-    if denom == 0.0 {
-        0.0
-    } else {
-        dot / denom
-    }
+    if denom == 0.0 { 0.0 } else { dot / denom }
 }
 
 fn value_to_string(v: &Value) -> String {
@@ -370,9 +353,7 @@ fn now_iso8601() -> String {
     let secs = (now / 1000) as i64;
     let ms = (now % 1000) as u32;
     let (year, month, day, hour, min, sec) = epoch_to_ymdhms(secs);
-    format!(
-        "{year:04}-{month:02}-{day:02}T{hour:02}:{min:02}:{sec:02}.{ms:03}Z"
-    )
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{min:02}:{sec:02}.{ms:03}Z")
 }
 
 fn epoch_to_ymdhms(secs: i64) -> (i32, u32, u32, u32, u32, u32) {
@@ -409,15 +390,12 @@ impl Resource for MemoryQueryResource {
             .get("query")
             .and_then(Value::as_str)
             .map(|s| s.to_string());
-        let vector = input
-            .get("vector")
-            .and_then(Value::as_array)
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(Value::as_f64)
-                    .map(|n| n as f32)
-                    .collect::<Vec<f32>>()
-            });
+        let vector = input.get("vector").and_then(Value::as_array).map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_f64)
+                .map(|n| n as f32)
+                .collect::<Vec<f32>>()
+        });
         let top_k = input
             .get("top_k")
             .and_then(Value::as_u64)
@@ -441,12 +419,9 @@ impl Resource for MemoryQueryResource {
             );
         }
 
-        let hits = self.backend.query(
-            query.as_deref(),
-            vector.as_deref(),
-            top_k,
-            &filter_tags,
-        );
+        let hits = self
+            .backend
+            .query(query.as_deref(), vector.as_deref(), top_k, &filter_tags);
 
         let hit_values: Vec<Value> = hits
             .into_iter()
@@ -487,15 +462,12 @@ impl Resource for MemoryInsertResource {
                     .collect::<Vec<String>>()
             })
             .unwrap_or_default();
-        let vector: Option<Vec<f32>> = input
-            .get("vector")
-            .and_then(Value::as_array)
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(Value::as_f64)
-                    .map(|n| n as f32)
-                    .collect::<Vec<f32>>()
-            });
+        let vector: Option<Vec<f32>> = input.get("vector").and_then(Value::as_array).map(|arr| {
+            arr.iter()
+                .filter_map(Value::as_f64)
+                .map(|n| n as f32)
+                .collect::<Vec<f32>>()
+        });
         let id_provided = input
             .get("id")
             .and_then(Value::as_str)

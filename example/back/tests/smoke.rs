@@ -698,12 +698,9 @@ fn frontend_script_binds_to_the_live_api() {
     // relative to this crate (the binary's `CARGO_MANIFEST_DIR`
     // is `example/backend/`, so `../fore` is `example/fore/`).
     // Built on demand via `pnpm --dir ../fore build`.
-    let page: PathBuf = [
-        env!("CARGO_MANIFEST_DIR"),
-        "../fore/dist/index.html",
-    ]
-    .iter()
-    .collect();
+    let page: PathBuf = [env!("CARGO_MANIFEST_DIR"), "../fore/dist/index.html"]
+        .iter()
+        .collect();
     assert!(
         page.exists(),
         "React frontend dist not built at {} — run `pnpm --dir ../fore build`",
@@ -713,9 +710,7 @@ fn frontend_script_binds_to_the_live_api() {
     // The test script lives inside the package so node resolves
     // `jsdom` from its local node_modules. We invoke node from that
     // directory so the resolver walks the right tree.
-    let pkg_dir: PathBuf = [env!("CARGO_MANIFEST_DIR"), "../fore"]
-        .iter()
-        .collect();
+    let pkg_dir: PathBuf = [env!("CARGO_MANIFEST_DIR"), "../fore"].iter().collect();
     let test_script = pkg_dir.join("test").join("frontend.test.mjs");
 
     let out = Command::new("node")

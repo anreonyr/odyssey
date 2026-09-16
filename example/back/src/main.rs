@@ -26,8 +26,8 @@ use std::path::PathBuf;
 
 use odyssey::personality::lifecycle::run::{DEFAULT_BRIDGE_ADDR, run_on};
 use odyssey_builtin::{
-    agent, agent_runtime, database, echo, llm, memory, profile_inspector, reverse,
-    streaming_echo, tool_descriptor,
+    agent, agent_runtime, database, echo, llm, memory, profile_inspector, reverse, streaming_echo,
+    tool_descriptor,
 };
 
 #[tokio::main(flavor = "current_thread")]

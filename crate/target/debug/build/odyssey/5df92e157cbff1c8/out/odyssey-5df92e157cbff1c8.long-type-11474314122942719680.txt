@@ -1,2 +1,0 @@
-fn(State<AppState>, std::path::Path) -> impl futures_core::Future<Output = {type error}> {static_asset}
-fn(State<AppState>, std::path::Path) -> impl futures_core::Future<Output = {type error}> {static_asset}: Handler<_, _>
