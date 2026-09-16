@@ -46,18 +46,23 @@ the typed capability.
   (`EchoResource`, `ReverseResource`, `DatabaseResource`, ...).
   Sync vs Stream is distinguished at runtime via `CapKind`,
   not at the type level. The `Slot<R>` reference is uniform;
-  `slot.invoke(...)` works on sync caps; `slot.open(...)` works
+  `slot.invoke(op, ...)` works on sync caps; `slot.open(...)` works
   on streaming caps; calling the wrong one returns
-  `CapabilityError::KindMismatch`.
+  `CapabilityError::KindMismatch`. The `op` is `OperationRights`
+  (a bitflag of `READ | WRITE | EXECUTE | ADMIN`); the kernel
+  checks the held rights against the requested op and returns
+  `CapabilityError::OperationDenied` on a miss. See
+  `example/back/tests/smoke.rs::attenuated_capability_denies_unheld_op`
+  for the contract.
 
 ```rust
 // Builtins construct typed slots from the SlotId returned by
 // their inherent mint() method. The plugin's plugin code
 // stores the slot in a struct field; dispatch is just
-// `self.slot.invoke(input)`.
+// `self.slot.invoke(op, input)`.
 let slot: Slot<EchoResource> = Slot::new(cspace.clone(), slot_id);
 
-slot.invoke(json!({"hello": "world"}))?;     // sync — wall-clock budget enforced
+slot.invoke(OperationRights::EXECUTE, json!({"hello": "world"}))?;
 // For streaming caps:
 // let stream: Slot<GeneratorResource> = Slot::new(cspace.clone(), stream_slot_id);
 // stream.open(json!("hi"))?;                  // returns Receiver<CapabilityChunk>

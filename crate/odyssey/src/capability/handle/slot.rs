@@ -47,22 +47,24 @@ impl<R: Resource> Slot<R> {
         self.space.slot_meta(self.id)
     }
 
-    /// Direct sync invocation via the slot. Returns typed
-    /// `CapabilityError` (Phase 5 M4 / n1).
-    pub fn invoke(&self, input: Value) -> Result<Value, CapabilityError> {
+    /// Sync invocation via the slot. The caller declares which
+    /// operation is being requested; the kernel checks the
+    /// underlying capability's held rights against `op` and
+    /// surfaces `CapabilityError::OperationDenied` on a miss.
+    /// Resolves the slot then defers to `Capability::invoke`.
+    /// Returns typed `CapabilityError` (Phase 5 M4).
+    ///
+    /// Pre-M3: the no-op variant of this method
+    /// (`Slot::invoke(input)`) bypassed the rights check; the
+    /// op-aware variant lived separately as `Slot::invoke_op`.
+    /// M3 collapses them — every external entry point has to
+    /// declare intent, and the kernel decides whether the
+    /// requested operation is contained in the held rights.
+    pub fn invoke(&self, op: OperationRights, input: Value) -> Result<Value, CapabilityError> {
         let cap = self
             .capability()
             .ok_or(CapabilityError::SlotEmpty(self.id))?;
-        cap.invoke(input)
-    }
-
-    /// Operation-aware invocation via the slot. Resolves the slot
-    /// then defers to `Capability::invoke_op`.
-    pub fn invoke_op(&self, op: OperationRights, input: Value) -> Result<Value, CapabilityError> {
-        let cap = self
-            .capability()
-            .ok_or(CapabilityError::SlotEmpty(self.id))?;
-        cap.invoke_op(op, input)
+        cap.invoke(op, input)
     }
 
     /// Direct stream open via the slot. Phase 5 M4: typed

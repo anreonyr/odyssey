@@ -32,7 +32,7 @@ pub trait AnyCapability: Any + Send + Sync {
     fn meta(&self) -> &CapabilityMeta;
     fn is_streaming(&self) -> bool;
     fn operations(&self) -> OperationRights;
-    fn invoke_dyn(&self, input: Value) -> Result<Value, String>;
+    fn invoke_dyn(&self, op: OperationRights, input: Value) -> Result<Value, String>;
     fn open_dyn(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String>;
     fn as_any(&self) -> &dyn Any;
 
@@ -48,8 +48,18 @@ pub trait AnyCapability: Any + Send + Sync {
     /// was the pipeline. Now that the kernel exposes the typed
     /// variant here, the pipeline can stop doing substring
     /// checks against the rendered error message.
-    fn invoke_dyn_typed(&self, input: Value) -> Result<Value, CapabilityError> {
-        self.invoke_dyn(input)
+    ///
+    /// Pre-M3: this method pair (`invoke_dyn` / `invoke_dyn_typed`)
+    /// silently called the no-rights `Capability::invoke` path —
+    /// the entire erased view bypassed the rights check. M3
+    /// collapses the two views into one: every caller must
+    /// declare the operation it needs, and the kernel enforces.
+    fn invoke_dyn_typed(
+        &self,
+        op: OperationRights,
+        input: Value,
+    ) -> Result<Value, CapabilityError> {
+        self.invoke_dyn(op, input)
             .map_err(|message| CapabilityError::Handler {
                 name: self.meta().name.clone(),
                 message,
@@ -91,11 +101,15 @@ impl<R: Resource> AnyCapability for Capability<R> {
     fn operations(&self) -> OperationRights {
         Capability::operations(self)
     }
-    fn invoke_dyn(&self, input: Value) -> Result<Value, String> {
-        self.invoke(input).map_err(|e| e.to_string())
+    fn invoke_dyn(&self, op: OperationRights, input: Value) -> Result<Value, String> {
+        self.invoke(op, input).map_err(|e| e.to_string())
     }
-    fn invoke_dyn_typed(&self, input: Value) -> Result<Value, CapabilityError> {
-        self.invoke(input)
+    fn invoke_dyn_typed(
+        &self,
+        op: OperationRights,
+        input: Value,
+    ) -> Result<Value, CapabilityError> {
+        self.invoke(op, input)
     }
     fn open_dyn(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String> {
         self.open(input).map_err(|e| e.to_string())

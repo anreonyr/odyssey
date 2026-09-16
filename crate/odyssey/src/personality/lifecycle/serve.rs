@@ -36,6 +36,7 @@ use crate::capability::enforce::space::CapabilitySpace;
 use crate::core::identity::kind::CapKind;
 use crate::core::meta::chunk::CapabilityChunk;
 use crate::core::meta::meta::CapabilityMeta;
+use crate::core::rights::rights::OperationRights;
 
 /// Optional path to the built React app (`dist/` produced by
 /// `pnpm --dir example/frontend build`). When `None`, the
@@ -278,7 +279,13 @@ async fn invoke(
     // future `?as_error_variant=` extension to the response
     // shape. Today every typed variant renders to a useful
     // string, so this is the more informative default.
-    match cap.invoke_dyn_typed(req.input) {
+    //
+    // Phase M3: the bridge declares EXECUTE — a POST to
+    // /api/invoke is the user asking the kernel to *do*
+    // something. If a capability has been attenuated below
+    // EXECUTE (READ-only derived slot), the kernel surfaces
+    // `CapabilityError::OperationDenied` here.
+    match cap.invoke_dyn_typed(OperationRights::EXECUTE, req.input) {
         Ok(value) => Ok(Json(InvokeResp {
             capability: req.capability,
             value,

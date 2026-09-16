@@ -718,7 +718,7 @@ impl AgentRuntime {
         let llm_resp = session
             .slots
             .llm_complete
-            .invoke(llm_input)
+            .invoke(OperationRights::EXECUTE, llm_input)
             .map_err(|e| AgentError::LlmFailed(e.to_string()))?;
 
         // The LLM backend may return either:
@@ -755,19 +755,19 @@ impl AgentRuntime {
             let cap = cspace_ref
                 .lookup_by_name(&invocation.tool)
                 .ok_or_else(|| AgentError::ToolUnknown(invocation.tool.clone()))?;
-            let ops = cap.operations();
-            if !ops.contains(odyssey::core::rights::rights::OperationRights::EXECUTE) {
-                return Err(AgentError::ToolDenied {
+            // Phase M3: the kernel enforces rights now. The
+            // pre-M3 `ops.contains(EXECUTE)` plugin-side check
+            // was needed because every entry point bypassed
+            // `Capability::invoke`'s rights test. With
+            // `invoke_dyn_typed` going through the with-check
+            // path, this branch is unreachable; the kernel
+            // surfaces `OperationDenied` as `Handler` error.
+            let outcome = cap
+                .invoke_dyn_typed(OperationRights::EXECUTE, invocation.args.clone())
+                .map_err(|e| AgentError::ToolFailed {
                     tool: invocation.tool.clone(),
-                    reason: "missing EXECUTE",
+                    error: e.to_string(),
                 });
-            }
-            let outcome =
-                cap.invoke_dyn_typed(invocation.args.clone())
-                    .map_err(|e| AgentError::ToolFailed {
-                        tool: invocation.tool.clone(),
-                        error: e.to_string(),
-                    });
             let tr = ToolResult {
                 tool: invocation.tool.clone(),
                 outcome: outcome.map_err(|e| e.to_string()),
@@ -906,11 +906,14 @@ impl AgentRuntime {
         let system = build_plan_prompt(tools);
         let resp = slots
             .llm_complete
-            .invoke(json!({
-                "prompt": goal,
-                "system": system,
-                "temperature": 0.5,
-            }))
+            .invoke(
+                OperationRights::EXECUTE,
+                json!({
+                    "prompt": goal,
+                    "system": system,
+                    "temperature": 0.5,
+                }),
+            )
             .map_err(|e| AgentError::LlmFailed(e.to_string()))?;
         let text = resp
             .get("text")
@@ -929,7 +932,7 @@ impl AgentRuntime {
         let slots = AgentSlots::from_bindings(&self.cspace, &self.bindings);
         let embed_resp = slots
             .llm_embed
-            .invoke(json!({ "texts": [query] }))
+            .invoke(OperationRights::EXECUTE, json!({ "texts": [query] }))
             .map_err(|e| AgentError::LlmFailed(e.to_string()))?;
         let vector: Option<Vec<f32>> = embed_resp
             .get("vectors")
@@ -952,7 +955,7 @@ impl AgentRuntime {
         }
         let resp = slots
             .memory_query
-            .invoke(input)
+            .invoke(OperationRights::EXECUTE, input)
             .map_err(|e| AgentError::MemoryFailed(e.to_string()))?;
         Ok(resp)
     }
@@ -962,7 +965,7 @@ impl AgentRuntime {
         let text_repr = content.to_string();
         let embed_resp = slots
             .llm_embed
-            .invoke(json!({ "texts": [text_repr] }))
+            .invoke(OperationRights::EXECUTE, json!({ "texts": [text_repr] }))
             .map_err(|e| AgentError::LlmFailed(e.to_string()))?;
         let vector: Option<Vec<f32>> = embed_resp
             .get("vectors")
@@ -981,7 +984,7 @@ impl AgentRuntime {
         }
         let resp = slots
             .memory_insert
-            .invoke(input)
+            .invoke(OperationRights::EXECUTE, input)
             .map_err(|e| AgentError::MemoryFailed(e.to_string()))?;
         Ok(resp)
     }
@@ -1154,15 +1157,11 @@ fn parse_llm_reply(
             let cap = cspace
                 .lookup_by_name(&tool)
                 .ok_or_else(|| AgentError::ToolUnknown(tool.clone()))?;
-            let ops = cap.operations();
-            if !ops.contains(OperationRights::EXECUTE) {
-                return Err(AgentError::ToolDenied {
-                    tool,
-                    reason: "missing EXECUTE",
-                });
-            }
+            // Phase M3: see comment in `advance` — the kernel
+            // enforces EXECUTE; this redundant plugin-side check
+            // is dead. Delete.
             let outcome = cap
-                .invoke_dyn_typed(args.clone())
+                .invoke_dyn_typed(OperationRights::EXECUTE, args.clone())
                 .map_err(|e| AgentError::ToolFailed {
                     tool: tool.clone(),
                     error: e.to_string(),

@@ -196,71 +196,25 @@ impl<R: Resource> Capability<R> {
         }
     }
 
-    /// Sync invoke without an operation-rights check. Returns
-    /// typed `CapabilityError` (Phase 5 M4). M3 reorder:
+    /// Sync invoke. The caller declares which operation is being
+    /// requested; the kernel checks `self.operations.contains(op)`
+    /// and surfaces `CapabilityError::OperationDenied` on a miss.
+    /// Phase 5 M4: returns typed `CapabilityError`. M3 reorder:
     /// the handler runs first; on success the elapsed
     /// wall-clock is recorded via `self.clock.now()`; the
     /// per-call timeout is checked (the successful result
     /// is dropped on a late timeout — the budget is the
     /// contract); the per-minute quota is debited; the
     /// handler result is surfaced.
-    pub fn invoke(&self, input: Value) -> Result<Value, CapabilityError> {
-        if self.kind != CapKind::Sync {
-            return Err(CapabilityError::KindMismatch {
-                name: self.meta.name.clone(),
-                expected: "sync",
-                got: "stream",
-            });
-        }
-        if self.is_revoked() {
-            return Err(CapabilityError::Revoked(
-                self.slot.unwrap_or(SlotId::new(1)),
-            ));
-        }
-        let start = self.clock.now();
-        let result = self.handler.invoke(input);
-        let elapsed = start.elapsed();
-        self.budget.record_elapsed(elapsed);
-
-        let elapsed_ms = elapsed.as_micros().div_ceil(1000) as u64;
-        let budget_ms = self.budget.timeout_ms() as u64;
-        if elapsed_ms > budget_ms {
-            return Err(CapabilityError::Timeout {
-                name: self.meta.name.clone(),
-                elapsed_ms,
-                budget_ms: self.budget.timeout_ms(),
-            });
-        }
-
-        if let Err(kind) = self.budget.try_call() {
-            return Err(CapabilityError::QuotaExceeded {
-                name: self.meta.name.clone(),
-                kind,
-            });
-        }
-
-        result.map_err(|message| CapabilityError::Handler {
-            name: self.meta.name.clone(),
-            message,
-        })
-    }
-
-    /// Sync invoke with operation-rights check. Phase 5 M4: returns
-    /// typed `CapabilityError`. The handler's `String` error is
-    /// wrapped as `CapabilityError::Handler`.
     ///
-    /// Phase 5 M3 reorder: the handler runs first; on success the
-    /// elapsed wall-clock is recorded via `self.clock.now()`; the
-    /// per-call timeout is checked (a late answer is not a correct
-    /// answer — we drop the successful handler result and surface
-    /// `CapabilityError::Timeout` if the budget was blown); the
-    /// per-minute quota is debited (`CapabilityError::QuotaExceeded`
-    /// if the bucket is full); the handler result is returned.
-    pub fn invoke_op(
-        &self,
-        requested: OperationRights,
-        input: Value,
-    ) -> Result<Value, CapabilityError> {
+    /// The pre-M3 phase kept a separate `invoke` (no-rights-check)
+    /// next to this one. That second path was the kernel's
+    /// soundness gap: every external entry point (the HTTP bridge,
+    /// the agent runtime's tool dispatch, the erased `invoke_dyn`
+    /// view) called the unchecked version, so the rights declared
+    /// on the capability were documentary. This single entry point
+    /// closes that gap — there is no shortcut.
+    pub fn invoke(&self, op: OperationRights, input: Value) -> Result<Value, CapabilityError> {
         if self.kind != CapKind::Sync {
             return Err(CapabilityError::KindMismatch {
                 name: self.meta.name.clone(),
@@ -273,10 +227,10 @@ impl<R: Resource> Capability<R> {
                 self.slot.unwrap_or(SlotId::new(1)),
             ));
         }
-        if !self.operations.contains(requested) {
+        if !self.operations.contains(op) {
             return Err(CapabilityError::OperationDenied {
                 name: self.meta.name.clone(),
-                requested,
+                requested: op,
                 held: self.operations,
             });
         }
