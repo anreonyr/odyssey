@@ -964,48 +964,57 @@ impl Resource for LlmCompleteResource {
             tools,
         };
 
-        // Use the streaming path. The OpenAI backend spawns
-        // a thread that runs `curl --no-buffer` and writes
-        // `Delta`/`Done`/`Error` events to `tx`; the mock
-        // uses the default `complete_stream` impl that
-        // forwards `complete`'s result. We block-drain
-        // `rx` for the final `Done` event. Per-token
-        // `Delta`s are currently discarded by this caller —
-        // they're a side-channel for `agent_stream`
-        // subscribers; the resource-level return is
-        // identical to the pre-streaming `complete` path.
+        // The streaming channel dance (call `complete_stream`
+        // + drain `rx` for `Done`) cannot run on the caller's
+        // thread: `blocking_send` / `blocking_recv` panic from
+        // a tokio runtime thread, and `LlmBuiltin::invoke` is
+        // reachable from both sync (`#[test]`) and async
+        // (`#[tokio::main]` in the example binary) callers.
+        // The OpenAI override already spawns a thread for the
+        // curl work, so `blocking_send` lands off-runtime
+        // there; the default impl + the receiver drain both
+        // touch the runtime thread though. Spawning an OS
+        // thread for the whole dance and `.join()`-ing
+        // isolates the blocking work without changing the
+        // trait shape (which is sync because `Resource::invoke`
+        // is sync).
         //
-        // The agent's `advance` puts its `session_id` in
-        // the input so we can route per-token `Delta`s to
-        // that session's broadcast sender, which
-        // `agent_stream` subscribers consume. The lookup is
-        // a global; missing session is a no-op (the call
-        // raced with a `cancel`, or the test didn't bother
-        // to register one).
+        // Per-token `Delta`s are routed to the session's
+        // broadcast sender (`agent_stream` subscribers) from
+        // inside the worker thread — `push_event_to_session`
+        // takes a global `Mutex` and the broadcast `Sender`
+        // is `Send`, so it crosses the thread boundary fine.
+        // The agent's `advance` puts its `session_id` in the
+        // input; a missing session is a no-op (the call raced
+        // with a `cancel` or the test didn't register one).
         let session_id = input
             .get("session_id")
             .and_then(Value::as_str)
             .map(String::from);
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
-        self.backend
-            .complete_stream(req, tx)
-            .map_err(|e| e)?;
-        let resp = loop {
-            match rx.blocking_recv() {
-                Some(StreamEvent::Done(r)) => break r,
-                Some(StreamEvent::Error(e)) => return Err(e),
-                Some(StreamEvent::Delta(s)) => {
-                    if let Some(sid) = session_id.as_deref() {
-                        crate::agent_runtime::push_event_to_session(
-                            sid,
-                            crate::agent_runtime::AgentEvent::LlmDelta(s),
-                        );
+        let backend = self.backend.clone();
+        let join = std::thread::spawn(move || -> Result<CompleteResponse, String> {
+            let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
+            backend.complete_stream(req, tx).map_err(|e| e)?;
+            loop {
+                match rx.blocking_recv() {
+                    Some(StreamEvent::Done(r)) => break Ok(r),
+                    Some(StreamEvent::Error(e)) => break Err(e),
+                    Some(StreamEvent::Delta(s)) => {
+                        if let Some(sid) = session_id.as_deref() {
+                            crate::agent_runtime::push_event_to_session(
+                                sid,
+                                crate::agent_runtime::AgentEvent::LlmDelta(s),
+                            );
+                        }
+                        continue;
                     }
-                    continue;
+                    None => break Err("openai stream: closed before Done".to_string()),
                 }
-                None => return Err("openai stream: closed before Done".to_string()),
             }
-        };
+        });
+        let resp = join
+            .join()
+            .map_err(|_| "llm_complete: worker thread panicked".to_string())??;
         // The response carries both the assistant's text and
         // any tool calls the LLM made. Empty `tool_calls` is
         // represented as an empty array so callers can do
