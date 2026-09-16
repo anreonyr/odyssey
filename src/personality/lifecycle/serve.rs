@@ -6,6 +6,8 @@
 //!
 //! Routes:
 //!
+//! - `GET  /`            → React app entry (`dist/index.html`)
+//! - `GET  /assets/*`    → React app's hashed bundle
 //! - `GET  /api/caps`    → list capabilities
 //! - `POST /api/invoke`  → invoke a sync capability
 //! - `POST /api/stream`  → open a streaming capability (SSE)
@@ -13,10 +15,12 @@
 use std::convert::Infallible;
 use std::future::Future;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 
 use axum::{
     Router,
-    extract::State,
+    extract::{Path, State},
+    http::StatusCode,
     response::{
         Html, IntoResponse, Json,
         sse::{Event, KeepAlive, Sse},
@@ -32,6 +36,15 @@ use crate::capability::enforce::space::CapabilitySpace;
 use crate::core::identity::kind::CapKind;
 use crate::core::meta::chunk::CapabilityChunk;
 use crate::core::meta::meta::CapabilityMeta;
+
+/// Path to the built React app. The example binary's `dist/`
+/// is what `pnpm --dir examples/frontend build` produces;
+/// `serve` reads from disk so the library stays UI-free (no
+/// `include_str!` of HTML, no embed-time binding).
+const FRONTEND_DIST: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/examples/frontend/dist"
+);
 
 #[derive(Clone)]
 struct AppState {
@@ -70,21 +83,69 @@ struct ErrorResp {
     error: String,
 }
 
+#[derive(Serialize)]
+struct CheckpointInfo {
+    path: String,
+    session_id: String,
+    saved_at: u64,
+    size: u64,
+}
+
 pub fn router(cspace: CapabilitySpace) -> Router {
     Router::new()
         .route("/", get(index))
+        // SPA fallback — any GET that doesn't match an asset or
+        // an API endpoint returns the React app's index.html. The
+        // client-side router (BrowserRouter) takes it from there.
+        // /assets/* and /api/* are listed first so they take
+        // precedence; the wildcard below only catches paths the
+        // router hasn't already matched.
+        .route("/assets/*path", get(static_asset))
         .route("/api/caps", get(list_caps))
         .route("/api/invoke", post(invoke))
         .route("/api/stream", post(stream))
+        .route("/api/checkpoints", get(list_checkpoints))
+        .fallback(get(index))
         .with_state(AppState { cspace })
 }
 
+/// Reads the React app's `index.html` from disk. The build
+/// pipeline (`pnpm --dir examples/frontend build`) writes
+/// it next to the example binary; we don't embed it so the
+/// library can stay free of UI assets.
 async fn index() -> impl IntoResponse {
-    // Phase 8: the HTML UI moves out of the binary's
-    // `include_str!` — the example binary now reads it from
-    // `examples/frontend/index.html` at runtime. The library
-    // stays UI-free.
-    Html(include_str!("../../../examples/frontend/index.html"))
+    let path = PathBuf::from(FRONTEND_DIST).join("index.html");
+    match std::fs::read_to_string(&path) {
+        Ok(html) => Html(html).into_response(),
+        Err(e) => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            format!(
+                "React app not built. Run `pnpm --dir examples/frontend build` \
+                 first. ({e})"
+            ),
+        )
+            .into_response(),
+    }
+}
+
+/// Serves files under `dist/assets/*` — Vite emits a hashed
+/// filename per asset, so we serve anything the assets directory
+/// contains rather than maintaining an explicit list. 404s are
+/// honest: a stale index.html asking for a missing hash means
+/// the cache and the build drifted, not that the route is wrong.
+async fn static_asset(Path(path): Path<String>) -> impl IntoResponse {
+    // `path` is the wildcard tail after `/assets/`; reject
+    // directory traversal by stripping leading `/`s and refusing
+    // any `..` segment.
+    let safe = path.trim_start_matches('/');
+    if safe.is_empty() || safe.contains("..") {
+        return (StatusCode::BAD_REQUEST, "bad path").into_response();
+    }
+    let full = PathBuf::from(FRONTEND_DIST).join("assets").join(safe);
+    match std::fs::read(&full) {
+        Ok(bytes) => bytes.into_response(),
+        Err(_) => (StatusCode::NOT_FOUND, "asset not found").into_response(),
+    }
 }
 
 async fn list_caps(State(state): State<AppState>) -> Json<Vec<CapInfo>> {
@@ -103,6 +164,63 @@ async fn list_caps(State(state): State<AppState>) -> Json<Vec<CapInfo>> {
             })
             .collect(),
     )
+}
+
+/// Enumerate checkpoint files under `ODYSSEY_CHECKPOINT_DIR` (or
+/// the default `./.checkpoints/` if unset). Each file is a
+/// `SessionCheckpoint` JSON the agent_runtime writes from
+/// `cancel(path=...)`; we read enough of it to surface
+/// `session_id` + `saved_at` + size, then filter out anything
+/// that failed to parse so a single corrupt file can't take the
+/// page down.
+///
+/// The directory is intentionally not auto-created: if it
+/// doesn't exist, no checkpoints have been written yet, so we
+/// return `[]` rather than 404. (Page treats `[]` as empty
+/// state.) Files that vanish between readdir and stat are
+/// skipped silently — the listing is a snapshot, not a lock.
+async fn list_checkpoints() -> Json<Vec<CheckpointInfo>> {
+    use serde_json::Value;
+
+    let dir = std::env::var("ODYSSEY_CHECKPOINT_DIR")
+        .unwrap_or_else(|_| "./.checkpoints".to_string());
+    let path = std::path::Path::new(&dir);
+    if !path.is_dir() {
+        return Json(Vec::new());
+    }
+
+    let mut out = Vec::new();
+    let entries = match std::fs::read_dir(path) {
+        Ok(e) => e,
+        Err(_) => return Json(Vec::new()),
+    };
+    for entry in entries.flatten() {
+        let p = entry.path();
+        if p.extension().and_then(|s| s.to_str()) != Some("json") {
+            continue;
+        }
+        let Ok(meta) = std::fs::metadata(&p) else { continue };
+        let Ok(bytes) = std::fs::read(&p) else { continue };
+        // The checkpoint envelope has many fields; we only
+        // surface `id` (session_id) and `created_at_ms` (ms
+        // epoch → converted to seconds for the page). Anything
+        // we can't parse we drop — see the module doc above.
+        let Ok(v) = serde_json::from_slice::<Value>(&bytes) else { continue };
+        let Some(session_id) = v.get("id").and_then(|x| x.as_str()) else { continue };
+        let saved_at_ms = v
+            .get("created_at_ms")
+            .and_then(|x| x.as_u64())
+            .unwrap_or(0);
+        out.push(CheckpointInfo {
+            path: p.to_string_lossy().into_owned(),
+            session_id: session_id.to_string(),
+            saved_at: saved_at_ms / 1000,
+            size: meta.len(),
+        });
+    }
+    // Newest first so the page's first row is the most recent save.
+    out.sort_by(|a, b| b.saved_at.cmp(&a.saved_at));
+    Json(out)
 }
 
 async fn invoke(
