@@ -695,9 +695,12 @@ fn frontend_script_binds_to_the_live_api() {
     // The React frontend lives in `examples/frontend/dist/`,
     // produced by `pnpm --dir examples/frontend build`. The
     // test fails loudly when the dist is missing — no silent skip.
-    let page: PathBuf = [env!("CARGO_MANIFEST_DIR"), "examples/frontend/dist/index.html"]
-        .iter()
-        .collect();
+    let page: PathBuf = [
+        env!("CARGO_MANIFEST_DIR"),
+        "examples/frontend/dist/index.html",
+    ]
+    .iter()
+    .collect();
     assert!(
         page.exists(),
         "React frontend dist not built at {} — run `pnpm --dir examples/frontend build`",
@@ -707,7 +710,9 @@ fn frontend_script_binds_to_the_live_api() {
     // The test script lives inside the package so node resolves
     // `jsdom` from its local node_modules. We invoke node from that
     // directory so the resolver walks the right tree.
-    let pkg_dir: PathBuf = [env!("CARGO_MANIFEST_DIR"), "examples/frontend"].iter().collect();
+    let pkg_dir: PathBuf = [env!("CARGO_MANIFEST_DIR"), "examples/frontend"]
+        .iter()
+        .collect();
     let test_script = pkg_dir.join("test").join("frontend.test.mjs");
 
     let out = Command::new("node")
@@ -741,7 +746,9 @@ fn frontend_script_binds_to_the_live_api() {
 #[test]
 fn llm_complete_builtin_round_trips_through_typed_mint() {
     let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-    unsafe { std::env::remove_var("OPENAI_API_BASE"); }
+    unsafe {
+        std::env::remove_var("OPENAI_API_BASE");
+    }
     use odyssey_builtins::llm::{LlmBuiltin, LlmCompleteResource};
 
     let cspace = CapabilitySpace::new();
@@ -774,8 +781,10 @@ fn llm_complete_builtin_round_trips_through_typed_mint() {
 #[test]
 fn llm_embed_builtin_round_trips_through_typed_mint() {
     let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-    unsafe { std::env::remove_var("OPENAI_API_BASE"); }
-    use odyssey_builtins::llm::{LlmEmbedResource, LlmBuiltin};
+    unsafe {
+        std::env::remove_var("OPENAI_API_BASE");
+    }
+    use odyssey_builtins::llm::{LlmBuiltin, LlmEmbedResource};
 
     let cspace = CapabilitySpace::new();
     let factory = CapabilityFactory::with_clock(cspace.clone(), Arc::new(SystemClock));
@@ -800,7 +809,11 @@ fn llm_embed_builtin_round_trips_through_typed_mint() {
         .expect("llm_embed invoke should succeed");
     let vectors = out["vectors"].as_array().expect("vectors must be array");
     assert_eq!(vectors.len(), 2, "one vector per input text");
-    assert_eq!(vectors[0].as_array().unwrap().len(), 4, "mock returns 4-dim");
+    assert_eq!(
+        vectors[0].as_array().unwrap().len(),
+        4,
+        "mock returns 4-dim"
+    );
 }
 
 /// Memory round-trip: insert three records, query by substring,
@@ -818,7 +831,10 @@ fn memory_query_finds_inserted_record_by_substring() {
 
     let insert_id = MemoryBuiltin.mint(
         &factory,
-        &PluginId { name: "memory".into(), version: "0.1.0".into() },
+        &PluginId {
+            name: "memory".into(),
+            version: "0.1.0".into(),
+        },
         insert_decl,
         CapKind::Sync,
         CapabilityBudget::new(5000),
@@ -826,7 +842,10 @@ fn memory_query_finds_inserted_record_by_substring() {
     );
     let query_id = MemoryBuiltin.mint(
         &factory,
-        &PluginId { name: "memory".into(), version: "0.1.0".into() },
+        &PluginId {
+            name: "memory".into(),
+            version: "0.1.0".into(),
+        },
         query_decl,
         CapKind::Sync,
         CapabilityBudget::new(5000),
@@ -875,7 +894,10 @@ fn tool_descriptor_reports_schema_missing_for_unschemaed_caps() {
     // the cspace has a cap to look up.
     AgentListBuiltin.mint(
         &factory,
-        &PluginId { name: "agent_list".into(), version: "0.1.0".into() },
+        &PluginId {
+            name: "agent_list".into(),
+            version: "0.1.0".into(),
+        },
         &AgentListBuiltin.manifest().exposes[0],
         CapKind::Sync,
         CapabilityBudget::new(5000),
@@ -884,7 +906,10 @@ fn tool_descriptor_reports_schema_missing_for_unschemaed_caps() {
     let td_manifest = ToolDescriptorBuiltin.manifest();
     let td_id = ToolDescriptorBuiltin.mint(
         &factory,
-        &PluginId { name: "tool_descriptor".into(), version: "0.1.0".into() },
+        &PluginId {
+            name: "tool_descriptor".into(),
+            version: "0.1.0".into(),
+        },
         &td_manifest.exposes[0],
         CapKind::Sync,
         CapabilityBudget::new(5000),
@@ -927,7 +952,10 @@ fn tool_descriptor_returns_schema_for_every_tool_builtin() {
     // over a homogeneous collection.
     EchoBuiltin.mint(
         &factory,
-        &PluginId { name: "echo".into(), version: "0.1.0".into() },
+        &PluginId {
+            name: "echo".into(),
+            version: "0.1.0".into(),
+        },
         &EchoBuiltin.manifest().exposes[0],
         CapKind::Sync,
         CapabilityBudget::new(5000),
@@ -935,7 +963,10 @@ fn tool_descriptor_returns_schema_for_every_tool_builtin() {
     );
     ReverseBuiltin.mint(
         &factory,
-        &PluginId { name: "reverse".into(), version: "0.1.0".into() },
+        &PluginId {
+            name: "reverse".into(),
+            version: "0.1.0".into(),
+        },
         &ReverseBuiltin.manifest().exposes[0],
         CapKind::Sync,
         CapabilityBudget::new(5000),
@@ -943,7 +974,10 @@ fn tool_descriptor_returns_schema_for_every_tool_builtin() {
     );
     DatabaseBuiltin.mint(
         &factory,
-        &PluginId { name: "database".into(), version: "0.1.0".into() },
+        &PluginId {
+            name: "database".into(),
+            version: "0.1.0".into(),
+        },
         &DatabaseBuiltin.manifest().exposes[0],
         CapKind::Sync,
         CapabilityBudget::new(5000),
@@ -951,7 +985,10 @@ fn tool_descriptor_returns_schema_for_every_tool_builtin() {
     );
     StreamingEchoBuiltin.mint(
         &factory,
-        &PluginId { name: "streaming_echo".into(), version: "0.1.0".into() },
+        &PluginId {
+            name: "streaming_echo".into(),
+            version: "0.1.0".into(),
+        },
         &StreamingEchoBuiltin.manifest().exposes[0],
         CapKind::Stream,
         CapabilityBudget::new(5000),
@@ -960,7 +997,10 @@ fn tool_descriptor_returns_schema_for_every_tool_builtin() {
 
     let td_id = ToolDescriptorBuiltin.mint(
         &factory,
-        &PluginId { name: "tool_descriptor".into(), version: "0.1.0".into() },
+        &PluginId {
+            name: "tool_descriptor".into(),
+            version: "0.1.0".into(),
+        },
         &ToolDescriptorBuiltin.manifest().exposes[0],
         CapKind::Sync,
         CapabilityBudget::new(5000),
@@ -1004,7 +1044,10 @@ fn profile_inspector_returns_cap_meta_and_operations() {
 
     EchoBuiltin.mint(
         &factory,
-        &PluginId { name: "echo".into(), version: "0.1.0".into() },
+        &PluginId {
+            name: "echo".into(),
+            version: "0.1.0".into(),
+        },
         &EchoBuiltin.manifest().exposes[0],
         CapKind::Sync,
         CapabilityBudget::new(5000),
@@ -1012,7 +1055,10 @@ fn profile_inspector_returns_cap_meta_and_operations() {
     );
     let pi_id = ProfileInspectorBuiltin.mint(
         &factory,
-        &PluginId { name: "profile_inspector".into(), version: "0.1.0".into() },
+        &PluginId {
+            name: "profile_inspector".into(),
+            version: "0.1.0".into(),
+        },
         &ProfileInspectorBuiltin.manifest().exposes[0],
         CapKind::Sync,
         CapabilityBudget::new(5000),
@@ -1037,7 +1083,7 @@ fn profile_inspector_returns_cap_meta_and_operations() {
 #[test]
 fn agent_runtime_manifest_resolves_to_four_bindings() {
     use odyssey::personality::composition::resolve::resolve;
-    use odyssey_builtins::{agent_runtime, llm, memory, tool_descriptor, profile_inspector};
+    use odyssey_builtins::{agent_runtime, llm, memory, profile_inspector, tool_descriptor};
 
     let manifests = vec![
         llm::LlmBuiltin.manifest(),
@@ -1048,9 +1094,7 @@ fn agent_runtime_manifest_resolves_to_four_bindings() {
     let plan = resolve(&manifests).expect("manifests should resolve");
     let bindings = plan
         .bindings
-        .get(&agent_runtime::AgentRuntimeBuiltin
-            .manifest()
-            .plugin)
+        .get(&agent_runtime::AgentRuntimeBuiltin.manifest().plugin)
         .expect("agent_runtime should have a binding row");
     assert_eq!(
         bindings.len(),
@@ -1082,8 +1126,10 @@ fn agent_runtime_manifest_resolves_to_four_bindings() {
     // Silence the unused-import warning when only some are
     // referenced in this test (we listed all to be explicit
     // about the test's preconditions).
-    let _ = (tool_descriptor::ToolDescriptorBuiltin.manifest(),
-             profile_inspector::ProfileInspectorBuiltin.manifest());
+    let _ = (
+        tool_descriptor::ToolDescriptorBuiltin.manifest(),
+        profile_inspector::ProfileInspectorBuiltin.manifest(),
+    );
 }
 
 /// `agent_start` mints a session; `agent_resume` with `Tick`
@@ -1093,9 +1139,13 @@ fn agent_runtime_manifest_resolves_to_four_bindings() {
 #[test]
 fn agent_runtime_session_lifecycle_with_mock_llm() {
     let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-    unsafe { std::env::remove_var("OPENAI_API_BASE"); }
-    use odyssey_builtins::agent_runtime::{AgentRuntime, AgentRuntimeBuiltin, Observation, SessionId};
+    unsafe {
+        std::env::remove_var("OPENAI_API_BASE");
+    }
     use odyssey::personality::composition::resolve::resolve;
+    use odyssey_builtins::agent_runtime::{
+        AgentRuntime, AgentRuntimeBuiltin, Observation, SessionId,
+    };
     use odyssey_builtins::{llm, memory};
 
     // Mint LLM, memory, agent_runtime together so the runtime
@@ -1137,7 +1187,10 @@ fn agent_runtime_session_lifecycle_with_mock_llm() {
     }
     let echo_id = EchoBuiltin.mint(
         &factory,
-        &PluginId { name: "echo".into(), version: "0.1.0".into() },
+        &PluginId {
+            name: "echo".into(),
+            version: "0.1.0".into(),
+        },
         &EchoBuiltin.manifest().exposes[0],
         CapKind::Sync,
         CapabilityBudget::new(5000),
@@ -1238,9 +1291,7 @@ fn agent_runtime_session_lifecycle_with_mock_llm() {
             "history order should be prose < tool_call < tool_result, got kinds: {kinds:?}"
         );
     } else {
-        panic!(
-            "history must contain llm_text + tool_call + tool_result; got kinds: {kinds:?}"
-        );
+        panic!("history must contain llm_text + tool_call + tool_result; got kinds: {kinds:?}");
     }
 
     // Second advance: feed the tool result back.
@@ -1270,7 +1321,10 @@ fn agent_runtime_session_lifecycle_with_mock_llm() {
 
     // Verify session is gone.
     let result = runtime.cancel(sid.as_str(), None);
-    assert!(result.is_err(), "cancelling a non-existent session must fail");
+    assert!(
+        result.is_err(),
+        "cancelling a non-existent session must fail"
+    );
 
     let _ = agent_slot_ids; // resources are kept alive by their Arc inside the cspace
     let _: SessionId = sid; // silence unused
@@ -1282,10 +1336,12 @@ fn agent_runtime_session_lifecycle_with_mock_llm() {
 #[test]
 fn agent_plan_returns_text_step() {
     let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-    unsafe { std::env::remove_var("OPENAI_API_BASE"); }
+    unsafe {
+        std::env::remove_var("OPENAI_API_BASE");
+    }
     use odyssey::core::Resource;
-    use odyssey_builtins::agent_runtime::{AgentPlanResource, AgentRuntimeBuiltin};
     use odyssey::personality::composition::resolve::resolve;
+    use odyssey_builtins::agent_runtime::{AgentPlanResource, AgentRuntimeBuiltin};
     use odyssey_builtins::{llm, memory};
 
     let manifests = vec![
@@ -1358,13 +1414,15 @@ fn agent_plan_returns_text_step() {
 #[tokio::test(flavor = "current_thread")]
 async fn agent_stream_emits_done_after_cancel() {
     let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-    unsafe { std::env::remove_var("OPENAI_API_BASE"); }
+    unsafe {
+        std::env::remove_var("OPENAI_API_BASE");
+    }
     use odyssey::core::Resource;
     use odyssey::core::meta::chunk::CapabilityChunk;
+    use odyssey::personality::composition::resolve::resolve;
     use odyssey_builtins::agent_runtime::{
         AgentRuntime, AgentRuntimeBuiltin, AgentStreamResource, Observation,
     };
-    use odyssey::personality::composition::resolve::resolve;
     use odyssey_builtins::{llm, memory};
     use tokio_stream::StreamExt;
 
@@ -1433,10 +1491,7 @@ async fn agent_stream_emits_done_after_cancel() {
     // Cancel from another "thread" of work — we have the
     // session id, and the stream's broadcast closes when the
     // session is removed.
-    let runtime_for_cancel = Arc::new(AgentRuntime::new(
-        cspace.clone(),
-        runtime.bindings.clone(),
-    ));
+    let runtime_for_cancel = Arc::new(AgentRuntime::new(cspace.clone(), runtime.bindings.clone()));
     let sid_for_cancel = sid.clone();
     tokio::spawn(async move {
         // Give the stream a moment to subscribe.
@@ -1497,7 +1552,9 @@ fn openai_backend_from_env_reads_or_clarifies_missing() {
 
     // Missing path.
     let saved = std::env::var("OPENAI_API_BASE").ok();
-    unsafe { std::env::remove_var("OPENAI_API_BASE"); }
+    unsafe {
+        std::env::remove_var("OPENAI_API_BASE");
+    }
     let err = OpenAiBackend::from_env()
         .err()
         .expect("missing OPENAI_API_BASE must error");
@@ -1514,8 +1571,12 @@ fn openai_backend_from_env_reads_or_clarifies_missing() {
 
     // Restore.
     match saved {
-        Some(v) => unsafe { std::env::set_var("OPENAI_API_BASE", v); },
-        None => unsafe { std::env::remove_var("OPENAI_API_BASE"); },
+        Some(v) => unsafe {
+            std::env::set_var("OPENAI_API_BASE", v);
+        },
+        None => unsafe {
+            std::env::remove_var("OPENAI_API_BASE");
+        },
     }
     unsafe {
         std::env::remove_var("OPENAI_API_KEY");
@@ -1530,7 +1591,7 @@ fn openai_backend_from_env_reads_or_clarifies_missing() {
 /// that mint and invoke the LLM cap.
 #[test]
 fn backend_from_env_picks_real_or_mock() {
-    use odyssey_builtins::llm::{backend_from_env, CompleteRequest};
+    use odyssey_builtins::llm::{CompleteRequest, backend_from_env};
     let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
 
     let saved = std::env::var("OPENAI_API_BASE").ok();
@@ -1569,14 +1630,20 @@ fn backend_from_env_picks_real_or_mock() {
         max_tokens: None,
         tools: vec![],
     };
-    let resp = backend.complete(req).expect("mock should succeed without network");
+    let resp = backend
+        .complete(req)
+        .expect("mock should succeed without network");
     assert!(!resp.text.is_empty(), "mock should return non-empty text");
 
     // Restore the original value so other tests are not
     // affected by this one's env-var mutation.
     match saved {
-        Some(v) => unsafe { std::env::set_var("OPENAI_API_BASE", v); },
-        None => unsafe { std::env::remove_var("OPENAI_API_BASE"); },
+        Some(v) => unsafe {
+            std::env::set_var("OPENAI_API_BASE", v);
+        },
+        None => unsafe {
+            std::env::remove_var("OPENAI_API_BASE");
+        },
     }
 }
 
@@ -1604,13 +1671,8 @@ fn env_lock() -> &'static std::sync::Mutex<()> {
 /// env-selection logic.
 #[tokio::test(flavor = "current_thread")]
 async fn openai_backend_round_trips_through_local_http_server() {
-    use axum::{
-        Router,
-        extract::Json as AxJson,
-        response::Json,
-        routing::post,
-    };
-    use odyssey_builtins::llm::{backend_from_env, LlmBackend, OpenAiBackend};
+    use axum::{Router, extract::Json as AxJson, response::Json, routing::post};
+    use odyssey_builtins::llm::{LlmBackend, OpenAiBackend, backend_from_env};
     use serde_json::Value;
     use std::sync::{Arc, Mutex};
 
@@ -1671,8 +1733,9 @@ async fn openai_backend_round_trips_through_local_http_server() {
                     let resp = resp.clone();
                     async move {
                         *observed.body.lock().unwrap() = Some(body);
-                        *observed.auth.lock().unwrap() =
-                            headers.get("authorization").and_then(|v| v.to_str().ok().map(String::from));
+                        *observed.auth.lock().unwrap() = headers
+                            .get("authorization")
+                            .and_then(|v| v.to_str().ok().map(String::from));
                         Json(resp)
                     }
                 }
@@ -1688,8 +1751,9 @@ async fn openai_backend_round_trips_through_local_http_server() {
                     let resp = resp.clone();
                     async move {
                         *observed.body.lock().unwrap() = Some(body);
-                        *observed.auth.lock().unwrap() =
-                            headers.get("authorization").and_then(|v| v.to_str().ok().map(String::from));
+                        *observed.auth.lock().unwrap() = headers
+                            .get("authorization")
+                            .and_then(|v| v.to_str().ok().map(String::from));
                         Json(resp)
                     }
                 }
@@ -1705,8 +1769,8 @@ async fn openai_backend_round_trips_through_local_http_server() {
         // it before the server thread binds to the same
         // address. The race window is small but real; for
         // a test environment this is acceptable.
-        let probe = std::net::TcpListener::bind("127.0.0.1:0")
-            .expect("bind probe to ephemeral port");
+        let probe =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("bind probe to ephemeral port");
         let addr = probe.local_addr().expect("probe has address");
         drop(probe);
         addr
@@ -1748,8 +1812,13 @@ async fn openai_backend_round_trips_through_local_http_server() {
     let backend = backend_from_env().expect("backend init");
     // The backend is `Arc<dyn LlmBackend>`; we want the
     // concrete type for an unambiguous downcast.
-    let openai: OpenAiBackend = OpenAiBackend::new(&base_url, "sk-test-key", "gpt-4o-mini", "text-embedding-3-small")
-        .expect("explicit constructor");
+    let openai: OpenAiBackend = OpenAiBackend::new(
+        &base_url,
+        "sk-test-key",
+        "gpt-4o-mini",
+        "text-embedding-3-small",
+    )
+    .expect("explicit constructor");
     let _ = backend;
 
     // ---- complete: assert request shape + response parse ----
@@ -1814,11 +1883,11 @@ async fn openai_backend_round_trips_through_local_http_server() {
         .unwrap()
         .clone()
         .expect("server should have seen the embed body");
-    assert_eq!(embed_body["model"], serde_json::json!("text-embedding-3-small"));
     assert_eq!(
-        embed_body["input"],
-        serde_json::json!(["hello", "world"])
+        embed_body["model"],
+        serde_json::json!("text-embedding-3-small")
     );
+    assert_eq!(embed_body["input"], serde_json::json!(["hello", "world"]));
 
     // Cleanup.
     unsafe {
@@ -1907,8 +1976,8 @@ async fn openai_backend_parses_native_tool_calls() {
     );
 
     let addr = {
-        let probe = std::net::TcpListener::bind("127.0.0.1:0")
-            .expect("bind probe to ephemeral port");
+        let probe =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("bind probe to ephemeral port");
         let addr = probe.local_addr().expect("probe has address");
         drop(probe);
         addr
@@ -2019,12 +2088,7 @@ async fn openai_backend_parses_native_tool_calls() {
 /// `CompleteResponse`.
 #[tokio::test(flavor = "current_thread")]
 async fn openai_backend_streams_sse_into_complete_response() {
-    use axum::{
-        body::Body,
-        http::StatusCode,
-        response::Response,
-        routing::post,
-    };
+    use axum::{body::Body, http::StatusCode, response::Response, routing::post};
     use odyssey_builtins::llm::{
         CompleteRequest, CompleteResponse, LlmBackend, OpenAiBackend, StreamEvent,
     };
@@ -2079,8 +2143,8 @@ async fn openai_backend_streams_sse_into_complete_response() {
     // Bind + serve on a private thread (the test's
     // current_thread runtime is busy draining the mpsc).
     let addr = {
-        let probe = std::net::TcpListener::bind("127.0.0.1:0")
-            .expect("bind probe to ephemeral port");
+        let probe =
+            std::net::TcpListener::bind("127.0.0.1:0").expect("bind probe to ephemeral port");
         let addr = probe.local_addr().expect("probe has address");
         drop(probe);
         addr
@@ -2186,7 +2250,7 @@ fn llm_streaming_deltas_reach_session_broadcast() {
     use odyssey::personality::composition::resolve::resolve;
     use odyssey::personality::lifecycle::mint::CapabilityFactory;
     use odyssey_builtins::agent_runtime::{
-        subscribe_session_broadcast, AgentEvent, AgentRuntime, AgentRuntimeBuiltin,
+        AgentEvent, AgentRuntime, AgentRuntimeBuiltin, subscribe_session_broadcast,
     };
     use odyssey_builtins::llm::{
         CompleteRequest, CompleteResponse, LlmBackend, LlmCompleteResource, StreamEvent, Usage,
@@ -2205,14 +2269,20 @@ fn llm_streaming_deltas_reach_session_broadcast() {
             _req: CompleteRequest,
             tx: tokio::sync::mpsc::Sender<StreamEvent>,
         ) -> Result<(), String> {
-            tx.blocking_send(StreamEvent::Delta("Hello, ".into())).unwrap();
-            tx.blocking_send(StreamEvent::Delta("streaming ".into())).unwrap();
-            tx.blocking_send(StreamEvent::Delta("world.".into())).unwrap();
+            tx.blocking_send(StreamEvent::Delta("Hello, ".into()))
+                .unwrap();
+            tx.blocking_send(StreamEvent::Delta("streaming ".into()))
+                .unwrap();
+            tx.blocking_send(StreamEvent::Delta("world.".into()))
+                .unwrap();
             tx.blocking_send(StreamEvent::Done(CompleteResponse {
                 text: "Hello, streaming world.".into(),
                 tool_calls: vec![],
                 finish_reason: "stop".into(),
-                usage: Usage { prompt_tokens: 1, completion_tokens: 3 },
+                usage: Usage {
+                    prompt_tokens: 1,
+                    completion_tokens: 3,
+                },
             }))
             .unwrap();
             Ok(())
@@ -2265,7 +2335,9 @@ fn llm_streaming_deltas_reach_session_broadcast() {
     // Then mint a custom `llm_complete` on top to override the
     // env-driven one with our test's ThreeDeltaBackend.
     let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-    unsafe { std::env::remove_var("OPENAI_API_BASE"); }
+    unsafe {
+        std::env::remove_var("OPENAI_API_BASE");
+    }
 
     let llm_manifest = odyssey_builtins::llm::LlmBuiltin.manifest();
     for decl in &llm_manifest.exposes {
@@ -2316,8 +2388,8 @@ fn llm_streaming_deltas_reach_session_broadcast() {
         .expect("start should succeed");
 
     // Subscribe to the session's broadcast.
-    let mut session_rx = subscribe_session_broadcast(sid.as_str())
-        .expect("subscribe to a freshly-started session");
+    let mut session_rx =
+        subscribe_session_broadcast(sid.as_str()).expect("subscribe to a freshly-started session");
 
     // The session's LLM slot points at the custom
     // ThreeDeltaBackend (we overrode the env-driven cap
@@ -2349,7 +2421,11 @@ fn llm_streaming_deltas_reach_session_broadcast() {
     }
     assert_eq!(
         deltas,
-        vec!["Hello, ".to_string(), "streaming ".to_string(), "world.".to_string()],
+        vec![
+            "Hello, ".to_string(),
+            "streaming ".to_string(),
+            "world.".to_string()
+        ],
         "session broadcast should carry the three streaming deltas"
     );
 }
@@ -2369,10 +2445,7 @@ fn file_memory_backend_persists_records_across_reopen() {
 
     let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
 
-    let dir = std::env::temp_dir().join(format!(
-        "odyssey-memory-test-{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("odyssey-memory-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create temp dir");
     let path = dir.join("memory.json");
     let _ = std::fs::remove_file(&path);
@@ -2390,8 +2463,11 @@ fn file_memory_backend_persists_records_across_reopen() {
                     "tags": ["test"],
                 }))
                 .expect("insert should succeed");
-            assert!(out["id"].as_str().unwrap().starts_with("mem_"),
-                "record {i} should have a mem_ id, got: {}", out);
+            assert!(
+                out["id"].as_str().unwrap().starts_with("mem_"),
+                "record {i} should have a mem_ id, got: {}",
+                out
+            );
         }
         // File must now exist on disk with all three
         // records serialised.
@@ -2402,10 +2478,7 @@ fn file_memory_backend_persists_records_across_reopen() {
         assert_eq!(arr.len(), 3, "file should have 3 records; body: {v}");
         // The file is sorted by id — check the IDs are
         // monotonically ordered.
-        let ids: Vec<&str> = arr
-            .iter()
-            .map(|r| r["id"].as_str().unwrap())
-            .collect();
+        let ids: Vec<&str> = arr.iter().map(|r| r["id"].as_str().unwrap()).collect();
         let mut sorted = ids.clone();
         sorted.sort();
         assert_eq!(ids, sorted, "file should be sorted by id");
@@ -2468,7 +2541,9 @@ fn agent_session_can_be_paused_and_loaded() {
     use odyssey_builtins::memory::MemoryBuiltin;
 
     let _guard = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-    unsafe { std::env::remove_var("ODYSSEY_MEMORY_PATH"); }
+    unsafe {
+        std::env::remove_var("ODYSSEY_MEMORY_PATH");
+    }
 
     // Set up a real cspace + factory + AgentRuntime, the
     // same shape as `agent_runtime_session_lifecycle_with_mock_llm`.
@@ -2478,15 +2553,17 @@ fn agent_session_can_be_paused_and_loaded() {
         MemoryBuiltin.manifest(),
         AgentRuntimeBuiltin.manifest(),
     ];
-    let plan =
-        odyssey::personality::composition::resolve::resolve(&manifests).expect("resolve");
+    let plan = odyssey::personality::composition::resolve::resolve(&manifests).expect("resolve");
     let cspace = CapabilitySpace::new();
     let factory = CapabilityFactory::with_clock(cspace.clone(), Arc::new(SystemClock));
 
     // Mint echo so the tool call succeeds.
     EchoBuiltin.mint(
         &factory,
-        &PluginId { name: "echo".into(), version: "0.1.0".into() },
+        &PluginId {
+            name: "echo".into(),
+            version: "0.1.0".into(),
+        },
         &EchoBuiltin.manifest().exposes[0],
         CapKind::Sync,
         CapabilityBudget::new(5000),
@@ -2539,7 +2616,10 @@ fn agent_session_can_be_paused_and_loaded() {
         )
         .expect("start");
     let (step, _history, _status) = runtime
-        .advance(sid.as_str(), odyssey_builtins::agent_runtime::Observation::Tick)
+        .advance(
+            sid.as_str(),
+            odyssey_builtins::agent_runtime::Observation::Tick,
+        )
         .expect("advance");
     assert!(
         matches!(step, odyssey_builtins::agent_runtime::Step::ToolResult(_)),
@@ -2548,10 +2628,7 @@ fn agent_session_can_be_paused_and_loaded() {
 
     // 2. Cancel with a checkpoint path. The file should
     //    now exist on disk with the full session state.
-    let dir = std::env::temp_dir().join(format!(
-        "odyssey-session-test-{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("odyssey-session-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create temp dir");
     let path = dir.join("session.json");
     let path_str = path.to_str().expect("path utf8");
@@ -2566,7 +2643,10 @@ fn agent_session_can_be_paused_and_loaded() {
     assert_eq!(v["id"], serde_json::json!(sid.as_str()));
     assert_eq!(v["step_count"], serde_json::json!(1));
     let history = v["history"]["steps"].as_array().expect("history steps");
-    assert!(!history.is_empty(), "history should be non-empty after one advance");
+    assert!(
+        !history.is_empty(),
+        "history should be non-empty after one advance"
+    );
 
     // 3. Drop the runtime. The session is gone from the
     //    global table. Re-load from the file. The new
@@ -2574,9 +2654,7 @@ fn agent_session_can_be_paused_and_loaded() {
     //    bookkeeping survives) and the same goal.
     drop(runtime);
     let runtime2 = AgentRuntime::new(cspace.clone(), bindings.clone());
-    let new_sid = runtime2
-        .load(path_str)
-        .expect("load should succeed");
+    let new_sid = runtime2.load(path_str).expect("load should succeed");
     assert_eq!(new_sid, sid.as_str(), "loaded session keeps its id");
 
     // 4. The loaded session is in the global table. `cancel`
@@ -2595,5 +2673,9 @@ fn agent_session_can_be_paused_and_loaded() {
     // Cleanup.
     let _ = std::fs::remove_file(&path);
     let _ = std::fs::remove_dir(&dir);
-    let _ = (SessionId::new(), SessionStatus::Running, SessionLimits::default());
+    let _ = (
+        SessionId::new(),
+        SessionStatus::Running,
+        SessionLimits::default(),
+    );
 }
