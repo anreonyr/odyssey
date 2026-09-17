@@ -152,8 +152,7 @@ impl HandlerRegistry {
 /// plugin names) so loading two different plugins never
 /// collides. See the module-level "Why a global dispatch
 /// table" note for the constraint that pushed this design.
-static PLUGIN_HANDLERS: OnceLock<RwLock<HashMap<String, Arc<HandlerRegistry>>>> =
-    OnceLock::new();
+static PLUGIN_HANDLERS: OnceLock<RwLock<HashMap<String, Arc<HandlerRegistry>>>> = OnceLock::new();
 
 fn plugin_handlers() -> &'static RwLock<HashMap<String, Arc<HandlerRegistry>>> {
     PLUGIN_HANDLERS.get_or_init(|| RwLock::new(HashMap::new()))

@@ -190,9 +190,10 @@ impl CapabilityFactory {
         let mut roots: Vec<SlotId> = Vec::new();
         for meta in pc.inner().enumerate() {
             if let Some(slot_id) = pc.inner().slot_for_name(&meta.name)
-                && !roots.contains(&slot_id) {
-                    roots.push(slot_id);
-                }
+                && !roots.contains(&slot_id)
+            {
+                roots.push(slot_id);
+            }
         }
         roots
             .iter()

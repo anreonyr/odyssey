@@ -129,14 +129,7 @@ fn registered_handler_is_invoked_for_bound_capability() {
     let decl = loaded.manifest.exposes[0].clone();
     let budget = CapabilityBudget::new(5000);
 
-    let slot_id = (loaded.mint_fn)(
-        &factory,
-        &plugin,
-        &decl,
-        decl.kind,
-        budget,
-        &[],
-    );
+    let slot_id = (loaded.mint_fn)(&factory, &plugin, &decl, decl.kind, budget, &[]);
 
     // Factory's allocator starts at raw = 1; a fresh cspace
     // + first mint produces SlotId::new(1). This confirms
@@ -172,8 +165,7 @@ fn unbound_capability_panics_with_placeholder_message() {
 
     let registry = Arc::new(HandlerRegistry::new().with("demo_cap", stub_handler));
 
-    let loaded =
-        load_plugin_from_path_with_handlers(&path, registry).expect("load should succeed");
+    let loaded = load_plugin_from_path_with_handlers(&path, registry).expect("load should succeed");
 
     let cspace = CapabilitySpace::new();
     let factory = CapabilityFactory::new(cspace);

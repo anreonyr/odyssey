@@ -332,12 +332,7 @@ impl AgentListBuiltin {
             timeout_ms: budget.timeout_ms(),
         };
         pc.inner()
-            .grant_to::<AgentListResource>(
-                local_slot,
-                factory.space(),
-                rights,
-                decl.name.clone(),
-            )
+            .grant_to::<AgentListResource>(local_slot, factory.space(), rights, decl.name.clone())
             .expect("grant from plugin cspace to global should succeed")
     }
 }

@@ -208,10 +208,8 @@ fn from_path_loads_valid_manifest_file() {
     // same `/tmp/odyssey-loader-test-{pid}` directory —
     // one would `remove_dir_all` while the other is still
     // reading from it.
-    let dir = std::env::temp_dir().join(format!(
-        "odyssey-loader-test-{}-valid",
-        std::process::id()
-    ));
+    let dir =
+        std::env::temp_dir().join(format!("odyssey-loader-test-{}-valid", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create temp dir");
     let path = dir.join("valid.manifest.json");
     let mut f = std::fs::File::create(&path).expect("create file");

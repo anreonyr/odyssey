@@ -195,7 +195,12 @@ impl ToolDescriptorBuiltin {
             timeout_ms: budget.timeout_ms(),
         };
         pc.inner()
-            .grant_to::<ToolDescriptorResource>(local_slot, factory.space(), rights, decl.name.clone())
+            .grant_to::<ToolDescriptorResource>(
+                local_slot,
+                factory.space(),
+                rights,
+                decl.name.clone(),
+            )
             .expect("grant from plugin cspace to global should succeed")
     }
 

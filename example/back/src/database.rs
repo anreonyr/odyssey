@@ -201,12 +201,7 @@ impl DatabaseBuiltin {
             timeout_ms: budget.timeout_ms(),
         };
         pc.inner()
-            .grant_to::<DatabaseResource>(
-                local_slot,
-                factory.space(),
-                rights,
-                decl.name.clone(),
-            )
+            .grant_to::<DatabaseResource>(local_slot, factory.space(), rights, decl.name.clone())
             .expect("grant from plugin cspace to global should succeed")
     }
 
