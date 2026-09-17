@@ -168,6 +168,14 @@ impl BuiltinManifest for DatabaseBuiltin {
 }
 
 impl DatabaseBuiltin {
+    /// Typed mint — Slice 3 migration: the database cap now
+    /// lives in the plugin's own `PluginCspace`, then we
+    /// grant a derived slot into the orchestrator's global
+    /// cspace so the HTTP bridge can still look it up by
+    /// name. The returned `SlotId` is the GLOBAL one — the
+    /// orchestrator's existing teardown path
+    /// (`default_ruin` revoking the returned ids) works
+    /// unchanged.
     pub fn mint(
         &self,
         factory: &CapabilityFactory,
@@ -177,15 +185,29 @@ impl DatabaseBuiltin {
         budget: CapabilityBudget,
         _bindings: &[ResolvedBinding],
     ) -> SlotId {
-        factory.mint(
+        use odyssey::core::rights::rights::{CapabilityRights, OperationRights};
+
+        let pc = factory.plugin_cspace(plugin);
+        let local_slot = pc.mint(
             kind,
             decl,
-            plugin,
-            budget,
+            budget.clone(),
             Arc::new(DatabaseResource {
                 store: Arc::new(RwLock::new(HashMap::new())),
             }),
-        )
+        );
+        let rights = CapabilityRights {
+            operations: OperationRights::ALL,
+            timeout_ms: budget.timeout_ms(),
+        };
+        pc.inner()
+            .grant_to::<DatabaseResource>(
+                local_slot,
+                factory.space(),
+                rights,
+                decl.name.clone(),
+            )
+            .expect("grant from plugin cspace to global should succeed")
     }
 
     /// Phase 11: colocated registration helper. Returns the
