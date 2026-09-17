@@ -172,13 +172,19 @@ fn echo_mint_lives_in_plugin_cspace_and_exports_to_global() {
     // reachability, plus HTTP bridge).
     let plugin_view: Slot<EchoResource> = Slot::new(plugin_pc.inner().clone(), local_slot);
     let from_plugin = plugin_view
-        .invoke(OperationRights::EXECUTE, serde_json::json!({"via": "plugin"}))
+        .invoke(
+            OperationRights::EXECUTE,
+            serde_json::json!({"via": "plugin"}),
+        )
         .expect("invoking via plugin cspace should succeed");
     assert_eq!(from_plugin, serde_json::json!({"via": "plugin"}));
 
     let global_view: Slot<EchoResource> = Slot::new(global.clone(), global_slot);
     let from_global = global_view
-        .invoke(OperationRights::EXECUTE, serde_json::json!({"via": "global"}))
+        .invoke(
+            OperationRights::EXECUTE,
+            serde_json::json!({"via": "global"}),
+        )
         .expect("invoking via global cspace should succeed");
     assert_eq!(from_global, serde_json::json!({"via": "global"}));
 }

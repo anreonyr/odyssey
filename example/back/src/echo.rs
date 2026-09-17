@@ -81,12 +81,7 @@ impl EchoBuiltin {
         use odyssey::core::rights::rights::{CapabilityRights, OperationRights};
 
         let pc = factory.plugin_cspace(plugin);
-        let local_slot = pc.mint(
-            kind,
-            decl,
-            budget.clone(),
-            Arc::new(EchoResource),
-        );
+        let local_slot = pc.mint(kind, decl, budget.clone(), Arc::new(EchoResource));
         let rights = CapabilityRights {
             operations: OperationRights::ALL,
             timeout_ms: budget.timeout_ms(),
