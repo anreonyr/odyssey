@@ -543,7 +543,7 @@ impl MemoryBuiltin {
         budget: CapabilityBudget,
         _bindings: &[ResolvedBinding],
     ) -> SlotId {
-        use odyssey::core::rights::rights::{CapabilityRights, OperationRights};
+        use odyssey::core::rights::rights::{CapabilityRights, Rights};
 
         // Backend selection (extracted so we don't put a
         // macro inside a match arm):
@@ -565,7 +565,7 @@ impl MemoryBuiltin {
         // teardown of the returned ids works unchanged.
         let pc = factory.plugin_cspace(plugin);
         let rights = CapabilityRights {
-            operations: OperationRights::ALL,
+            operations: Rights::INVOKE | Rights::ASSIGN,
             timeout_ms: budget.timeout_ms(),
         };
 

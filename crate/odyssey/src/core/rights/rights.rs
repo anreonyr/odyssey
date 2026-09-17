@@ -113,10 +113,18 @@ impl Rights {
     /// slice 5 alongside `OperationRights` itself.
     pub fn from_legacy(legacy: OperationRights) -> Rights {
         let mut r = Rights::empty();
-        if legacy.contains(OperationRights::READ)    { r |= Rights::INVOKE; }
-        if legacy.contains(OperationRights::WRITE)   { r |= Rights::INVOKE; }
-        if legacy.contains(OperationRights::EXECUTE) { r |= Rights::INVOKE; }
-        if legacy.contains(OperationRights::ADMIN)   { r |= Rights::REVOKE; }
+        if legacy.contains(OperationRights::READ) {
+            r |= Rights::INVOKE;
+        }
+        if legacy.contains(OperationRights::WRITE) {
+            r |= Rights::INVOKE;
+        }
+        if legacy.contains(OperationRights::EXECUTE) {
+            r |= Rights::INVOKE;
+        }
+        if legacy.contains(OperationRights::ADMIN) {
+            r |= Rights::REVOKE;
+        }
         r
     }
 }
@@ -131,9 +139,7 @@ impl From<Rights> for OperationRights {
     fn from(r: Rights) -> Self {
         let mut o = OperationRights::empty();
         if r.contains(Rights::INVOKE) {
-            o |= OperationRights::READ
-              | OperationRights::WRITE
-              | OperationRights::EXECUTE;
+            o |= OperationRights::READ | OperationRights::WRITE | OperationRights::EXECUTE;
         }
         if r.contains(Rights::ASSIGN) {
             o |= OperationRights::ADMIN; // closest legacy analog
@@ -153,14 +159,14 @@ impl From<Rights> for OperationRights {
 /// - `timeout_ms` — wall-clock budget per call.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct CapabilityRights {
-    pub operations: OperationRights,
+    pub operations: Rights,
     pub timeout_ms: u32,
 }
 
 impl Default for CapabilityRights {
     fn default() -> Self {
         Self {
-            operations: OperationRights::ALL,
+            operations: Rights::ALL,
             timeout_ms: 5000,
         }
     }

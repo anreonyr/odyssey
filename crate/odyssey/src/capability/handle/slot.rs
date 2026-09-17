@@ -14,7 +14,7 @@ use crate::core::contract::resource::Resource;
 use crate::core::identity::ids::SlotId;
 use crate::core::meta::chunk::CapabilityChunk;
 use crate::core::meta::meta::CapabilityMeta;
-use crate::core::rights::rights::{CapabilityRights, OperationRights};
+use crate::core::rights::rights::{CapabilityRights, Rights};
 
 /// Typed, unforgeable reference to a slot.
 pub struct Slot<R: Resource> {
@@ -60,7 +60,7 @@ impl<R: Resource> Slot<R> {
     /// M3 collapses them — every external entry point has to
     /// declare intent, and the kernel decides whether the
     /// requested operation is contained in the held rights.
-    pub fn invoke(&self, op: OperationRights, input: Value) -> Result<Value, CapabilityError> {
+    pub fn invoke(&self, op: Rights, input: Value) -> Result<Value, CapabilityError> {
         let cap = self
             .capability()
             .ok_or(CapabilityError::SlotEmpty(self.id))?;

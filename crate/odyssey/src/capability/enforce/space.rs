@@ -690,13 +690,13 @@ impl PluginCspace {
         handler: Arc<R>,
     ) -> SlotId {
         use crate::capability::handle::cap::Capability;
-        use crate::core::rights::rights::{CapabilityRights, OperationRights};
+        use crate::core::rights::rights::{CapabilityRights, Rights};
 
         let id = CapabilityId(self.id_counter.fetch_add(1, Ordering::Relaxed));
         let meta =
             crate::personality::lifecycle::mint::meta_from_decl(id, decl, &self.plugin, &budget);
         let rights = CapabilityRights {
-            operations: OperationRights::ALL,
+            operations: Rights::ALL,
             timeout_ms: budget.timeout_ms(),
         };
         let cap = Capability::new(

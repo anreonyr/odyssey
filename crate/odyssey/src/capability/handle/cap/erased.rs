@@ -23,7 +23,7 @@ use crate::core::contract::resource::Resource;
 use crate::core::identity::kind::CapKind;
 use crate::core::meta::chunk::CapabilityChunk;
 use crate::core::meta::meta::CapabilityMeta;
-use crate::core::rights::rights::OperationRights;
+use crate::core::rights::rights::Rights;
 
 /// Erased capability: lets heterogeneous `Capability<R>` values
 /// coexist in a single registry. Provides `as_any` for downcasting
@@ -31,8 +31,8 @@ use crate::core::rights::rights::OperationRights;
 pub trait AnyCapability: Any + Send + Sync {
     fn meta(&self) -> &CapabilityMeta;
     fn is_streaming(&self) -> bool;
-    fn operations(&self) -> OperationRights;
-    fn invoke_dyn(&self, op: OperationRights, input: Value) -> Result<Value, String>;
+    fn operations(&self) -> Rights;
+    fn invoke_dyn(&self, op: Rights, input: Value) -> Result<Value, String>;
     fn open_dyn(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String>;
     fn as_any(&self) -> &dyn Any;
 
@@ -56,7 +56,7 @@ pub trait AnyCapability: Any + Send + Sync {
     /// declare the operation it needs, and the kernel enforces.
     fn invoke_dyn_typed(
         &self,
-        op: OperationRights,
+        op: Rights,
         input: Value,
     ) -> Result<Value, CapabilityError> {
         self.invoke_dyn(op, input)
@@ -98,15 +98,15 @@ impl<R: Resource> AnyCapability for Capability<R> {
     fn is_streaming(&self) -> bool {
         self.kind() == CapKind::Stream
     }
-    fn operations(&self) -> OperationRights {
+    fn operations(&self) -> Rights {
         Capability::operations(self)
     }
-    fn invoke_dyn(&self, op: OperationRights, input: Value) -> Result<Value, String> {
+    fn invoke_dyn(&self, op: Rights, input: Value) -> Result<Value, String> {
         self.invoke(op, input).map_err(|e| e.to_string())
     }
     fn invoke_dyn_typed(
         &self,
-        op: OperationRights,
+        op: Rights,
         input: Value,
     ) -> Result<Value, CapabilityError> {
         self.invoke(op, input)

@@ -1046,7 +1046,7 @@ impl Resource for LlmCompleteResource {
                                 "text": s,
                             });
                             let _ = bus_cap.invoke_dyn(
-                                odyssey::core::rights::rights::OperationRights::WRITE,
+                                odyssey::core::rights::rights::Rights::INVOKE,
                                 payload,
                             );
                         }
@@ -1137,7 +1137,7 @@ impl LlmBuiltin {
         budget: CapabilityBudget,
         _bindings: &[ResolvedBinding],
     ) -> SlotId {
-        use odyssey::core::rights::rights::{CapabilityRights, OperationRights};
+        use odyssey::core::rights::rights::{CapabilityRights, Rights};
 
         // Backend selection: if `OPENAI_API_BASE` is set, use
         // the real HTTP provider; otherwise the deterministic
@@ -1163,7 +1163,7 @@ impl LlmBuiltin {
         // teardown of the returned ids works unchanged.
         let pc = factory.plugin_cspace(plugin);
         let rights = CapabilityRights {
-            operations: OperationRights::ALL,
+            operations: Rights::INVOKE | Rights::ASSIGN,
             timeout_ms: budget.timeout_ms(),
         };
 

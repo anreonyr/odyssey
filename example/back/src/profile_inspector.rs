@@ -37,7 +37,7 @@ use odyssey::core::contract::builtin::BuiltinManifest;
 use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
-use odyssey::core::rights::rights::OperationRights;
+use odyssey::core::rights::rights::Rights;
 use odyssey::personality::composition::resolve::ResolvedBinding;
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
 use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
@@ -104,12 +104,11 @@ impl ProfileInspectorResource {
     }
 }
 
-fn operation_names(rights: OperationRights) -> Vec<&'static str> {
+fn operation_names(rights: Rights) -> Vec<&'static str> {
     [
-        (rights.contains(OperationRights::READ), "READ"),
-        (rights.contains(OperationRights::WRITE), "WRITE"),
-        (rights.contains(OperationRights::EXECUTE), "EXECUTE"),
-        (rights.contains(OperationRights::ADMIN), "ADMIN"),
+        (rights.contains(Rights::INVOKE), "INVOKE"),
+        (rights.contains(Rights::ASSIGN), "ASSIGN"),
+        (rights.contains(Rights::REVOKE), "REVOKE"),
     ]
     .into_iter()
     .filter_map(|(held, name)| held.then_some(name))
@@ -159,7 +158,7 @@ impl ProfileInspectorBuiltin {
         budget: CapabilityBudget,
         _bindings: &[ResolvedBinding],
     ) -> SlotId {
-        use odyssey::core::rights::rights::{CapabilityRights, OperationRights};
+        use odyssey::core::rights::rights::{CapabilityRights, Rights};
 
         let pc = factory.plugin_cspace(plugin);
         let local_slot = pc.mint(
@@ -169,7 +168,7 @@ impl ProfileInspectorBuiltin {
             Arc::new(ProfileInspectorResource::new(factory.space().clone())),
         );
         let rights = CapabilityRights {
-            operations: OperationRights::ALL,
+            operations: Rights::INVOKE | Rights::ASSIGN,
             timeout_ms: budget.timeout_ms(),
         };
         pc.inner()

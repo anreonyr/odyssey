@@ -60,7 +60,7 @@ use odyssey::core::contract::resource::Resource;
 use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::CapabilityDecl;
-use odyssey::core::rights::rights::{CapabilityRights, OperationRights};
+use odyssey::core::rights::rights::{CapabilityRights, Rights};
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
 use odyssey::personality::lifecycle::run::{RuinFn, default_ruin};
 
@@ -76,7 +76,14 @@ use odyssey::personality::lifecycle::run::{RuinFn, default_ruin};
 #[derive(Debug)]
 struct StubResource;
 
-impl Resource for StubResource {}
+impl Resource for StubResource {
+    fn invoke(
+        &self,
+        _input: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        Ok(serde_json::json!({}))
+    }
+}
 
 /// Build the fixture every test uses: an empty global cspace,
 /// a factory with a system clock, and a fresh `PluginId`.
@@ -120,7 +127,7 @@ fn mint_and_grant(
         Arc::new(StubResource),
     );
     let rights = CapabilityRights {
-        operations: OperationRights::ALL,
+        operations: Rights::ALL,
         timeout_ms: 5000,
     };
     let global = pc
@@ -204,7 +211,7 @@ fn reclaim_plugin_clears_derived_children() {
     // its root.
     let pc = factory.plugin_cspace(&plugin);
     let read_only_rights = CapabilityRights {
-        operations: OperationRights::READ,
+        operations: Rights::INVOKE,
         timeout_ms: 5000,
     };
     let read_only = pc
@@ -393,4 +400,88 @@ fn full_teardown_path_leaves_no_slots_anywhere() {
 #[test]
 fn default_ruin_signature_unchanged() {
     let _pin: RuinFn = default_ruin;
+}
+
+// ---------------------------------------------------------------------------
+// Slice 2 of the INVOKE / ASSIGN / REVOKE redesign: transitive REVOKE
+// test (Pattern References §3 in the design).
+//
+// Mirrors the seL4 CNode revocation semantics: revoking a parent cap
+// transitively kills all derived descendants. The test mints a parent
+// slot (with `Rights::REVOKE`), derives a child via `Slot::grant`,
+// then exercises `cspace.revoke_tree(parent)` and asserts the child
+// can no longer be invoked.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn revoke_tree_transitively_kills_derived_child() {
+    use odyssey::capability::handle::slot::Slot;
+
+    let (cspace, factory, plugin) = fixture();
+    let decl = make_decl("transitive_test");
+
+    // Mint a parent slot directly into the global cspace (the
+    // factory's `mint` path). `Rights::ALL` after Slice 2 is
+    // `Rights::INVOKE | Rights::ASSIGN | Rights::REVOKE`,
+    // which is what we want for the parent.
+    let parent_id = factory.mint(
+        CapKind::Sync,
+        &decl,
+        &plugin,
+        CapabilityBudget::new(5000),
+        Arc::new(StubResource),
+    );
+
+    // Derive a child via `Slot::grant` — same `seL4 CNode.Mint`
+    // shape the attenuation test uses. The child carries
+    // `Rights::INVOKE` only (a strict subset of the parent's).
+    let parent: Slot<StubResource> = Slot::new(cspace.clone(), parent_id);
+    let child_id = parent
+        .grant(
+            CapabilityRights {
+                operations: Rights::INVOKE,
+                timeout_ms: 5000,
+            },
+            "transitive_test_child".into(),
+        )
+        .expect("grant of derived child should succeed");
+
+    // Sanity: the child works before revoke.
+    let child: Slot<StubResource> = Slot::new(cspace.clone(), child_id);
+    let ok = child
+        .invoke(Rights::INVOKE, serde_json::json!({}))
+        .expect("child invoke before revoke must succeed");
+    assert_eq!(ok, serde_json::json!({}));
+
+    // Revoke the parent tree. `revoke_tree` is recursive
+    // over derived slots (per `CapabilitySpace::revoke_tree`
+    // implementation in `space.rs`). The expected return is
+    // at least 2 (parent + child).
+    let removed = cspace.revoke_tree(parent_id);
+    assert!(
+        removed >= 2,
+        "expected at least 2 slots removed (parent + child), got {removed}"
+    );
+
+    // After revoke, the child's lookup is `SlotEmpty` /
+    // `Revoked`. We don't care which; we care that invoke
+    // fails — and that it does so for a teardown reason
+    // (not, e.g., a rights regression).
+    let err = child
+        .invoke(Rights::INVOKE, serde_json::json!({}))
+        .expect_err("child invoke after parent revoke must fail");
+    let err_str = err.to_string();
+    assert!(
+        err_str.contains("revoked")
+            || err_str.contains("empty")
+            || err_str.contains("slot"),
+        "expected teardown error, got {err_str}"
+    );
+
+    // Idempotence: revoking the same parent again is a no-op.
+    let removed_again = cspace.revoke_tree(parent_id);
+    assert_eq!(
+        removed_again, 0,
+        "second revoke_tree on the same root must report 0 removed slots"
+    );
 }

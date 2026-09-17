@@ -111,11 +111,11 @@ fn capability_rights_containment_unchanged() {
     // to `Rights`. The test uses the legacy type to validate the
     // unchanged attenuation contract.
     let parent = CapabilityRights {
-        operations: OperationRights::ALL,
+        operations: OperationRights::ALL.into(),
         timeout_ms: 5000,
     };
     let child = CapabilityRights {
-        operations: OperationRights::EXECUTE,
+        operations: OperationRights::EXECUTE.into(),
         timeout_ms: 3000,
     };
     assert!(parent.contains(&child));
@@ -129,11 +129,11 @@ fn capability_rights_timeout_monotone() {
     // attenuation contract; the operations-axis half is covered
     // above.
     let parent = CapabilityRights {
-        operations: OperationRights::ALL,
+        operations: OperationRights::ALL.into(),
         timeout_ms: 1000,
     };
     let child = CapabilityRights {
-        operations: OperationRights::EXECUTE,
+        operations: OperationRights::EXECUTE.into(),
         timeout_ms: 5000, // exceeds parent's 1000ms ceiling
     };
     assert!(!parent.contains(&child));

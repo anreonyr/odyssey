@@ -60,7 +60,7 @@ use odyssey::core::identity::ids::{CapabilityId, PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::core::meta::meta::CapabilityMeta;
-use odyssey::core::rights::rights::{CapabilityRights, OperationRights};
+use odyssey::core::rights::rights::{CapabilityRights, Rights};
 use odyssey::personality::composition::resolve::ResolvedBinding;
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
 use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
@@ -708,7 +708,7 @@ fn mint_session_event_bus(
         tool_schema: None,
     };
     let rights = CapabilityRights {
-        operations: OperationRights::WRITE,
+        operations: Rights::INVOKE,
         timeout_ms: 1000,
     };
     let budget = CapabilityBudget::new(1000);
@@ -861,7 +861,7 @@ impl AgentRuntime {
         let llm_resp = session
             .slots
             .llm_complete
-            .invoke(OperationRights::EXECUTE, llm_input)
+            .invoke(Rights::INVOKE, llm_input)
             .map_err(|e| AgentError::LlmFailed(e.to_string()))?;
 
         // The LLM backend may return either:
@@ -906,7 +906,7 @@ impl AgentRuntime {
             // path, this branch is unreachable; the kernel
             // surfaces `OperationDenied` as `Handler` error.
             let outcome = cap
-                .invoke_dyn_typed(OperationRights::EXECUTE, invocation.args.clone())
+                .invoke_dyn_typed(Rights::INVOKE, invocation.args.clone())
                 .map_err(|e| AgentError::ToolFailed {
                     tool: invocation.tool.clone(),
                     error: e.to_string(),
@@ -1062,7 +1062,7 @@ impl AgentRuntime {
         let resp = slots
             .llm_complete
             .invoke(
-                OperationRights::EXECUTE,
+                Rights::INVOKE,
                 json!({
                     "prompt": goal,
                     "system": system,
@@ -1087,7 +1087,7 @@ impl AgentRuntime {
         let slots = AgentSlots::from_bindings(&self.cspace, &self.bindings);
         let embed_resp = slots
             .llm_embed
-            .invoke(OperationRights::EXECUTE, json!({ "texts": [query] }))
+            .invoke(Rights::INVOKE, json!({ "texts": [query] }))
             .map_err(|e| AgentError::LlmFailed(e.to_string()))?;
         let vector: Option<Vec<f32>> = embed_resp
             .get("vectors")
@@ -1110,7 +1110,7 @@ impl AgentRuntime {
         }
         let resp = slots
             .memory_query
-            .invoke(OperationRights::EXECUTE, input)
+            .invoke(Rights::INVOKE, input)
             .map_err(|e| AgentError::MemoryFailed(e.to_string()))?;
         Ok(resp)
     }
@@ -1120,7 +1120,7 @@ impl AgentRuntime {
         let text_repr = content.to_string();
         let embed_resp = slots
             .llm_embed
-            .invoke(OperationRights::EXECUTE, json!({ "texts": [text_repr] }))
+            .invoke(Rights::INVOKE, json!({ "texts": [text_repr] }))
             .map_err(|e| AgentError::LlmFailed(e.to_string()))?;
         let vector: Option<Vec<f32>> = embed_resp
             .get("vectors")
@@ -1139,7 +1139,7 @@ impl AgentRuntime {
         }
         let resp = slots
             .memory_insert
-            .invoke(OperationRights::EXECUTE, input)
+            .invoke(Rights::INVOKE, input)
             .map_err(|e| AgentError::MemoryFailed(e.to_string()))?;
         Ok(resp)
     }
@@ -1316,7 +1316,7 @@ fn parse_llm_reply(
             // enforces EXECUTE; this redundant plugin-side check
             // is dead. Delete.
             let outcome = cap
-                .invoke_dyn_typed(OperationRights::EXECUTE, args.clone())
+                .invoke_dyn_typed(Rights::INVOKE, args.clone())
                 .map_err(|e| AgentError::ToolFailed {
                     tool: tool.clone(),
                     error: e.to_string(),
@@ -1838,12 +1838,16 @@ fn mint_cap<R>(
 where
     R: Resource + 'static,
 {
-    use odyssey::core::rights::rights::{CapabilityRights, OperationRights};
+    use odyssey::core::rights::rights::{CapabilityRights, Rights};
 
     let pc = factory.plugin_cspace(plugin);
     let local_slot = pc.mint(kind, decl, budget.clone(), resource);
     let rights = CapabilityRights {
-        operations: OperationRights::ALL,
+        // agent_runtime is the only builtin that holds REVOKE:
+        // session lifecycle (cancel) revokes the session-bus
+        // cap so the LLM plugin's invoke_dyn no longer routes
+        // deltas to a dead session.
+        operations: Rights::INVOKE | Rights::ASSIGN | Rights::REVOKE,
         timeout_ms: budget.timeout_ms(),
     };
     pc.inner()

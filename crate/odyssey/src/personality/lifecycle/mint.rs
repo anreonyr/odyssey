@@ -26,7 +26,7 @@ use crate::core::identity::ids::{CapabilityId, PluginId, SlotId};
 use crate::core::identity::kind::CapKind;
 use crate::core::manifest::manifest::CapabilityDecl;
 use crate::core::meta::meta::CapabilityMeta;
-use crate::core::rights::rights::{CapabilityRights, OperationRights};
+use crate::core::rights::rights::{CapabilityRights, Rights};
 
 // ---------------------------------------------------------------------------
 // Mint-time helpers — turn a manifest declaration into a `CapabilityMeta`
@@ -225,7 +225,7 @@ impl CapabilityFactory {
         let id = CapabilityId(self.next_id.fetch_add(1, Ordering::Relaxed));
         let meta = meta_from_decl(id, decl, plugin, &budget);
         let rights = CapabilityRights {
-            operations: OperationRights::ALL,
+            operations: Rights::ALL,
             timeout_ms: budget.timeout_ms(),
         };
         let cap = Capability::new(meta, handler, budget, rights, kind, Arc::clone(&self.clock));

@@ -32,7 +32,7 @@ use crate::core::identity::ids::{CapabilityId, SlotId};
 use crate::core::identity::kind::CapKind;
 use crate::core::meta::chunk::CapabilityChunk;
 use crate::core::meta::meta::CapabilityMeta;
-use crate::core::rights::rights::{CapabilityRights, OperationRights};
+use crate::core::rights::rights::{CapabilityRights, Rights};
 
 /// Typed, owned handle to a single capability slot. `Arc<Capability<R>>`
 /// is what the kernel stores; `Slot<R>::capability()` returns one
@@ -57,7 +57,7 @@ pub struct Capability<R: Resource> {
     /// `SystemClock`; tests inject `MockClock` to make
     /// timeout / quota eviction deterministic.
     clock: Arc<dyn Clock>,
-    operations: OperationRights,
+    operations: Rights,
     kind: CapKind,
     revoked: Arc<AtomicBool>,
 }
@@ -135,7 +135,7 @@ impl<R: Resource> Capability<R> {
     }
 
     /// Operations currently held. Can only be a subset of the parent's.
-    pub fn operations(&self) -> OperationRights {
+    pub fn operations(&self) -> Rights {
         self.operations
     }
 
@@ -228,7 +228,7 @@ impl<R: Resource> Capability<R> {
     /// view) called the unchecked version, so the rights declared
     /// on the capability were documentary. This single entry point
     /// closes that gap — there is no shortcut.
-    pub fn invoke(&self, op: OperationRights, input: Value) -> Result<Value, CapabilityError> {
+    pub fn invoke(&self, op: Rights, input: Value) -> Result<Value, CapabilityError> {
         if self.kind != CapKind::Sync {
             return Err(CapabilityError::KindMismatch {
                 name: self.meta.name.clone(),

@@ -16,7 +16,7 @@ use std::fmt;
 
 use crate::core::identity::ids::SlotId;
 use crate::core::quota::quota::QuotaKind;
-use crate::core::rights::rights::OperationRights;
+use crate::core::rights::rights::Rights;
 
 /// Errors returned by capability operations on the CSpace.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,14 +38,14 @@ pub enum CapabilityError {
     /// This is the "you cannot amplify authority" invariant.
     AttenuationViolation {
         from: SlotId,
-        requested: OperationRights,
-        held: OperationRights,
+        requested: Rights,
+        held: Rights,
     },
     /// The capability was invoked with an operation bit it does not hold.
     OperationDenied {
         name: String,
-        requested: OperationRights,
-        held: OperationRights,
+        requested: Rights,
+        held: Rights,
     },
     /// Phase 5 M4: the requested call would mix sync / stream kinds.
     /// Phase 4 used a generic `String` error; typed variant now.

@@ -185,7 +185,7 @@ impl DatabaseBuiltin {
         budget: CapabilityBudget,
         _bindings: &[ResolvedBinding],
     ) -> SlotId {
-        use odyssey::core::rights::rights::{CapabilityRights, OperationRights};
+        use odyssey::core::rights::rights::{CapabilityRights, Rights};
 
         let pc = factory.plugin_cspace(plugin);
         let local_slot = pc.mint(
@@ -197,7 +197,7 @@ impl DatabaseBuiltin {
             }),
         );
         let rights = CapabilityRights {
-            operations: OperationRights::ALL,
+            operations: Rights::INVOKE | Rights::ASSIGN,
             timeout_ms: budget.timeout_ms(),
         };
         pc.inner()

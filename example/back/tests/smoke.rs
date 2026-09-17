@@ -55,7 +55,7 @@ use odyssey::core::identity::ids::PluginId;
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::CapabilityDecl;
 use odyssey::core::meta::chunk::CapabilityChunk;
-use odyssey::core::rights::rights::OperationRights;
+use odyssey::core::rights::rights::{OperationRights, Rights};
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
 use odyssey_builtin::echo::{EchoBuiltin, EchoResource};
 use odyssey_builtin::streaming_echo::{StreamingEchoBuiltin, StreamingEchoResource};
@@ -91,7 +91,7 @@ fn echo_builtin_round_trips_through_typed_mint() {
     let slot: Slot<EchoResource> = Slot::new(cspace, slot_id);
     let input = serde_json::json!({"hello": "world"});
     let output = slot
-        .invoke(OperationRights::EXECUTE, input.clone())
+        .invoke(Rights::INVOKE, input.clone())
         .expect("invoke should succeed");
 
     assert_eq!(
@@ -173,7 +173,7 @@ fn echo_mint_lives_in_plugin_cspace_and_exports_to_global() {
     let plugin_view: Slot<EchoResource> = Slot::new(plugin_pc.inner().clone(), local_slot);
     let from_plugin = plugin_view
         .invoke(
-            OperationRights::EXECUTE,
+            Rights::INVOKE,
             serde_json::json!({"via": "plugin"}),
         )
         .expect("invoking via plugin cspace should succeed");
@@ -182,7 +182,7 @@ fn echo_mint_lives_in_plugin_cspace_and_exports_to_global() {
     let global_view: Slot<EchoResource> = Slot::new(global.clone(), global_slot);
     let from_global = global_view
         .invoke(
-            OperationRights::EXECUTE,
+            Rights::INVOKE,
             serde_json::json!({"via": "global"}),
         )
         .expect("invoking via global cspace should succeed");
@@ -224,50 +224,55 @@ fn attenuated_capability_denies_unheld_op() {
         &[],
     );
 
-    // Source slot has ALL rights (factory default). Derive
-    // a READ-only child via `grant` — seL4 CNode.Mint, the
-    // standard attenuation primitive.
+    // Source slot has all rights (factory default). Derive
+    // an empty-rights child via `grant` — seL4 CNode.Mint,
+    // the standard attenuation primitive.
+    //
+    // Slice 2 redesign: under the INVOKE / ASSIGN / REVOKE
+    // schema, `READ` no longer exists. The lossy projection
+    // (READ → INVOKE) collapses the original test's "child
+    // has READ, parent has EXECUTE" contrast — both project
+    // to INVOKE and `contains` passes. The attenuation check
+    // is now exercised by giving the child `Rights::empty()`
+    // (full attenuation; no INVOKE bit) and requesting
+    // `Rights::INVOKE` — `empty.contains(INVOKE) == false`
+    // so the kernel surfaces OperationDenied.
     let source: Slot<EchoResource> = Slot::new(cspace.clone(), slot_id);
-    let read_only_id = source
+    let empty_id = source
         .grant(
             CapabilityRights {
-                operations: OperationRights::READ,
+                operations: Rights::empty(),
                 timeout_ms: 5000,
             },
-            "echo_readonly".into(),
+            "echo_empty".into(),
         )
-        .expect("grant should succeed when attenuating only");
+        .expect("grant should succeed when attenuating fully to empty");
 
-    let read_only: Slot<EchoResource> = Slot::new(cspace.clone(), read_only_id);
+    let empty: Slot<EchoResource> = Slot::new(cspace.clone(), empty_id);
 
     // The source still works — rights haven't been
     // attenuated on the source, only the derived child.
     let ok = source
-        .invoke(OperationRights::EXECUTE, serde_json::json!({"x": 1}))
-        .expect("source slot still has ALL rights, must accept EXECUTE");
+        .invoke(Rights::INVOKE, serde_json::json!({"x": 1}))
+        .expect("source slot still has all rights, must accept INVOKE");
     assert_eq!(ok, serde_json::json!({"x": 1}));
 
-    // The child denies EXECUTE — the held rights are READ.
-    let denied = read_only
-        .invoke(OperationRights::EXECUTE, serde_json::json!({"x": 1}))
-        .expect_err("attenuated child must reject EXECUTE");
+    // The child denies INVOKE — the held rights are empty.
+    // (The site uses `Rights::INVOKE` directly; the original
+    // test's `OperationRights::EXECUTE` would auto-convert via
+    // `From<OperationRights> for Rights` to the same value.)
+    let denied = empty
+        .invoke(Rights::INVOKE, serde_json::json!({"x": 1}))
+        .expect_err("attenuated child must reject INVOKE");
     match denied {
         CapabilityError::OperationDenied {
             requested, held, ..
         } => {
-            assert_eq!(requested, OperationRights::EXECUTE);
-            assert_eq!(held, OperationRights::READ);
+            assert_eq!(requested, Rights::INVOKE);
+            assert_eq!(held, Rights::empty());
         }
         other => panic!("expected OperationDenied, got {other:?}"),
     }
-
-    // And the child accepts the op it was attenuated to —
-    // READ. The handler still runs; rights are an envelope
-    // on the call, not a rewrite of the handler.
-    let read_ok = read_only
-        .invoke(OperationRights::READ, serde_json::json!({"x": 1}))
-        .expect("READ is in the held rights, must be accepted");
-    assert_eq!(read_ok, serde_json::json!({"x": 1}));
 }
 
 /// Phase 4 (Slice 2 of Direction A): per-plugin cspaces
@@ -388,7 +393,7 @@ fn plugin_cspaces_are_isolated_until_explicit_transfer() {
     // underlying handler is shared across the transfer.
     let typed_slot: Slot<EchoResource> = Slot::new(agent_pc.inner().clone(), transferred);
     let out = typed_slot
-        .invoke(OperationRights::EXECUTE, serde_json::json!({"hi": "agent"}))
+        .invoke(Rights::INVOKE, serde_json::json!({"hi": "agent"}))
         .expect("invoking transferred cap should succeed");
     assert_eq!(out, serde_json::json!({"hi": "agent"}));
 }
@@ -498,7 +503,7 @@ fn streaming_echo_kind_mismatch_on_invoke() {
     let slot: Slot<StreamingEchoResource> = Slot::new(cspace, slot_id);
     let err = slot
         .invoke(
-            OperationRights::EXECUTE,
+            Rights::INVOKE,
             serde_json::json!({"text": "hi", "count": 3}),
         )
         .expect_err("invoke on streaming cap must fail");
@@ -697,7 +702,7 @@ fn agent_reaches_only_its_bindings_and_reports_revocation() {
     let described = core.describe("echo").expect("describe a live handle");
     assert_eq!(described["live"], serde_json::json!(true));
     assert_eq!(described["kind"], serde_json::json!("sync"));
-    assert_eq!(described["operations"].as_array().map(Vec::len), Some(4));
+    assert_eq!(described["operations"].as_array().map(Vec::len), Some(2));
 
     cspace.revoke_tree(slot);
 
@@ -1068,7 +1073,7 @@ fn llm_complete_builtin_round_trips_through_typed_mint() {
     let slot: Slot<LlmCompleteResource> = Slot::new(cspace, slot_id);
     let out = slot
         .invoke(
-            OperationRights::EXECUTE,
+            Rights::INVOKE,
             serde_json::json!({"prompt": "hello"}),
         )
         .expect("llm_complete invoke should succeed");
@@ -1106,7 +1111,7 @@ fn llm_embed_builtin_round_trips_through_typed_mint() {
     let slot: Slot<LlmEmbedResource> = Slot::new(cspace, slot_id);
     let out = slot
         .invoke(
-            OperationRights::EXECUTE,
+            Rights::INVOKE,
             serde_json::json!({"texts": ["alpha", "beta"]}),
         )
         .expect("llm_embed invoke should succeed");
@@ -1161,7 +1166,7 @@ fn memory_query_finds_inserted_record_by_substring() {
     for content in ["the quick brown fox", "jumps over", "the lazy dog"] {
         insert_slot
             .invoke(
-                OperationRights::EXECUTE,
+                Rights::INVOKE,
                 serde_json::json!({"content": content, "tags": ["test"]}),
             )
             .expect("insert should succeed");
@@ -1169,7 +1174,7 @@ fn memory_query_finds_inserted_record_by_substring() {
 
     let out = query_slot
         .invoke(
-            OperationRights::EXECUTE,
+            Rights::INVOKE,
             serde_json::json!({"query": "fox", "top_k": 5}),
         )
         .expect("query should succeed");
@@ -1226,7 +1231,7 @@ fn tool_descriptor_reports_schema_missing_for_unschemaed_caps() {
     let slot: Slot<ToolDescriptorResource> = Slot::new(cspace, td_id);
     let err = slot
         .invoke(
-            OperationRights::EXECUTE,
+            Rights::INVOKE,
             serde_json::json!({"tool": "agent_list"}),
         )
         .expect_err("agent_list has no tool_schema, must fail");
@@ -1320,7 +1325,7 @@ fn tool_descriptor_returns_schema_for_every_tool_builtin() {
 
     for tool in ["echo", "reverse", "database", "streaming_echo"] {
         let out = slot
-            .invoke(OperationRights::EXECUTE, serde_json::json!({"tool": tool}))
+            .invoke(Rights::INVOKE, serde_json::json!({"tool": tool}))
             .unwrap_or_else(|e| panic!("describe {tool} failed: {e}"));
         assert_eq!(out["name"], serde_json::json!(tool));
         assert!(
@@ -1337,7 +1342,7 @@ fn tool_descriptor_returns_schema_for_every_tool_builtin() {
         );
         let ops = out["operations"].as_array().expect("operations array");
         assert!(
-            ops.iter().any(|v| v == "EXECUTE"),
+            ops.iter().any(|v| v == "INVOKE"),
             "{tool}: operations should include EXECUTE; got {ops:?}"
         );
     }
@@ -1377,14 +1382,14 @@ fn profile_inspector_returns_cap_meta_and_operations() {
     let slot: Slot<ProfileInspectorResource> = Slot::new(cspace, pi_id);
     let out = slot
         .invoke(
-            OperationRights::EXECUTE,
+            Rights::INVOKE,
             serde_json::json!({"subject": "echo"}),
         )
         .expect("inspect echo should succeed");
     assert_eq!(out["meta"]["name"], serde_json::json!("echo"));
     assert_eq!(out["meta"]["plugin"]["name"], serde_json::json!("echo"));
     assert!(
-        out["operations"].as_array().unwrap().len() == 4,
+        out["operations"].as_array().unwrap().len() == 2,
         "echo's operations should be the four rights: {}",
         out["operations"]
     );
@@ -2726,7 +2731,7 @@ fn llm_streaming_deltas_reach_session_broadcast() {
         .expect("session must have an event bus");
     let out = slot
         .invoke(
-            OperationRights::EXECUTE,
+            Rights::INVOKE,
             serde_json::json!({
                 "prompt": "hi",
                 "event_bus_slot_id": bus_slot_id.raw(),

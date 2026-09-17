@@ -183,10 +183,9 @@ for (const handle of ["echo", "reverse", "database", "streaming_echo"]) {
     .map((s) => s.textContent || "")
     .join(",");
   check(
-    opsText.includes("READ") &&
-      opsText.includes("WRITE") &&
-      opsText.includes("EXECUTE") &&
-      opsText.includes("ADMIN"),
+    opsText.includes("INVOKE") &&
+      opsText.includes("ASSIGN") &&
+      !opsText.includes("REVOKE"),
     `operations column for ${handle} should list all four rights, got: ${opsText}`,
   );
 }
