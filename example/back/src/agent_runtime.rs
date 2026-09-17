@@ -1705,6 +1705,14 @@ impl BuiltinManifest for AgentRuntimeBuiltin {
 }
 
 impl AgentRuntimeBuiltin {
+    /// Typed mint — Slice 3 migration: the eight agent_runtime
+    /// caps now live in the plugin's own `PluginCspace`; each
+    /// arm mints its concrete resource locally, then grants a
+    /// derived slot into the orchestrator's global cspace so
+    /// the HTTP bridge can still look it up by name. The
+    /// returned `SlotId` is the GLOBAL one — the orchestrator's
+    /// existing teardown path (`default_ruin` revoking the
+    /// returned ids) works unchanged.
     pub fn mint(
         factory: &CapabilityFactory,
         plugin: &PluginId,
@@ -1718,61 +1726,85 @@ impl AgentRuntimeBuiltin {
             bindings.to_vec(),
         ));
         match decl.name.as_str() {
-            NAME_START => factory.mint(
+            NAME_START => mint_cap(
+                factory,
+                plugin,
                 kind,
                 decl,
-                plugin,
                 budget,
-                Arc::new(AgentStartResource { runtime }),
+                Arc::new(AgentStartResource {
+                    runtime: runtime.clone(),
+                }),
             ),
-            NAME_RESUME => factory.mint(
+            NAME_RESUME => mint_cap(
+                factory,
+                plugin,
                 kind,
                 decl,
-                plugin,
                 budget,
-                Arc::new(AgentResumeResource { runtime }),
+                Arc::new(AgentResumeResource {
+                    runtime: runtime.clone(),
+                }),
             ),
-            NAME_CANCEL => factory.mint(
+            NAME_CANCEL => mint_cap(
+                factory,
+                plugin,
                 kind,
                 decl,
-                plugin,
                 budget,
-                Arc::new(AgentCancelResource { runtime }),
+                Arc::new(AgentCancelResource {
+                    runtime: runtime.clone(),
+                }),
             ),
-            NAME_PLAN => factory.mint(
+            NAME_PLAN => mint_cap(
+                factory,
+                plugin,
                 kind,
                 decl,
-                plugin,
                 budget,
-                Arc::new(AgentPlanResource { runtime }),
+                Arc::new(AgentPlanResource {
+                    runtime: runtime.clone(),
+                }),
             ),
-            NAME_STREAM => factory.mint(
+            NAME_STREAM => mint_cap(
+                factory,
+                plugin,
                 kind,
                 decl,
-                plugin,
                 budget,
-                Arc::new(AgentStreamResource { runtime }),
+                Arc::new(AgentStreamResource {
+                    runtime: runtime.clone(),
+                }),
             ),
-            NAME_RECALL => factory.mint(
+            NAME_RECALL => mint_cap(
+                factory,
+                plugin,
                 kind,
                 decl,
-                plugin,
                 budget,
-                Arc::new(AgentMemoryRecallResource { runtime }),
+                Arc::new(AgentMemoryRecallResource {
+                    runtime: runtime.clone(),
+                }),
             ),
-            NAME_RECORD => factory.mint(
+            NAME_RECORD => mint_cap(
+                factory,
+                plugin,
                 kind,
                 decl,
-                plugin,
                 budget,
-                Arc::new(AgentMemoryRecordResource { runtime }),
+                Arc::new(AgentMemoryRecordResource {
+                    runtime: runtime.clone(),
+                }),
             ),
-            NAME_LOAD => factory.mint(
+            NAME_LOAD => mint_cap(
+                factory,
+                plugin,
                 kind,
                 decl,
-                plugin,
                 budget,
-                Arc::new(AgentLoadResource { runtime }),
+                Arc::new(AgentLoadResource {
+                    runtime: runtime.clone(),
+                }),
             ),
             other => panic!("agent_runtime: unexpected capability name `{other}`"),
         }
@@ -1787,4 +1819,34 @@ impl AgentRuntimeBuiltin {
             default_ruin,
         )
     }
+}
+
+/// Slice 3 helper: mint a single resource into the plugin's
+/// own cspace, then grant a derived slot into the
+/// orchestrator's global cspace. Generic over `R: Resource`
+/// so each agent_runtime cap can hand in its concrete
+/// resource type while sharing the cspace dance. The
+/// returned `SlotId` is the global one.
+fn mint_cap<R>(
+    factory: &CapabilityFactory,
+    plugin: &PluginId,
+    kind: CapKind,
+    decl: &CapabilityDecl,
+    budget: CapabilityBudget,
+    resource: Arc<R>,
+) -> SlotId
+where
+    R: Resource + 'static,
+{
+    use odyssey::core::rights::rights::{CapabilityRights, OperationRights};
+
+    let pc = factory.plugin_cspace(plugin);
+    let local_slot = pc.mint(kind, decl, budget.clone(), resource);
+    let rights = CapabilityRights {
+        operations: OperationRights::ALL,
+        timeout_ms: budget.timeout_ms(),
+    };
+    pc.inner()
+        .grant_to::<R>(local_slot, factory.space(), rights, decl.name.clone())
+        .expect("grant from plugin cspace to global should succeed")
 }
