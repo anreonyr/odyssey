@@ -54,11 +54,7 @@ pub trait AnyCapability: Any + Send + Sync {
     /// the entire erased view bypassed the rights check. M3
     /// collapses the two views into one: every caller must
     /// declare the operation it needs, and the kernel enforces.
-    fn invoke_dyn_typed(
-        &self,
-        op: Rights,
-        input: Value,
-    ) -> Result<Value, CapabilityError> {
+    fn invoke_dyn_typed(&self, op: Rights, input: Value) -> Result<Value, CapabilityError> {
         self.invoke_dyn(op, input)
             .map_err(|message| CapabilityError::Handler {
                 name: self.meta().name.clone(),
@@ -104,11 +100,7 @@ impl<R: Resource> AnyCapability for Capability<R> {
     fn invoke_dyn(&self, op: Rights, input: Value) -> Result<Value, String> {
         self.invoke(op, input).map_err(|e| e.to_string())
     }
-    fn invoke_dyn_typed(
-        &self,
-        op: Rights,
-        input: Value,
-    ) -> Result<Value, CapabilityError> {
+    fn invoke_dyn_typed(&self, op: Rights, input: Value) -> Result<Value, CapabilityError> {
         self.invoke(op, input)
     }
     fn open_dyn(&self, input: Value) -> Result<mpsc::Receiver<CapabilityChunk>, String> {

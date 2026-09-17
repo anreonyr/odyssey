@@ -77,10 +77,7 @@ use odyssey::personality::lifecycle::run::{RuinFn, default_ruin};
 struct StubResource;
 
 impl Resource for StubResource {
-    fn invoke(
-        &self,
-        _input: serde_json::Value,
-    ) -> Result<serde_json::Value, String> {
+    fn invoke(&self, _input: serde_json::Value) -> Result<serde_json::Value, String> {
         Ok(serde_json::json!({}))
     }
 }
@@ -472,9 +469,7 @@ fn revoke_tree_transitively_kills_derived_child() {
         .expect_err("child invoke after parent revoke must fail");
     let err_str = err.to_string();
     assert!(
-        err_str.contains("revoked")
-            || err_str.contains("empty")
-            || err_str.contains("slot"),
+        err_str.contains("revoked") || err_str.contains("empty") || err_str.contains("slot"),
         "expected teardown error, got {err_str}"
     );
 

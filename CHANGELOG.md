@@ -25,6 +25,7 @@ encoded in `Rights`. They live in the Protocol layer; `Rights`
 only authorises traversal, not what the traversal does.
 
 Five slices, all committed:
+
 - `874f543` — `Rights` added alongside legacy `OperationRights` (additive,
   no breakage; `From<OperationRights> for Rights` bridge).
 - `89012c2` — kernel-side `OperationRights` migration window opened.

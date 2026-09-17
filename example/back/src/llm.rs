@@ -1045,10 +1045,8 @@ impl Resource for LlmCompleteResource {
                                 "kind": "llm_delta",
                                 "text": s,
                             });
-                            let _ = bus_cap.invoke_dyn(
-                                odyssey::core::rights::rights::Rights::INVOKE,
-                                payload,
-                            );
+                            let _ = bus_cap
+                                .invoke_dyn(odyssey::core::rights::rights::Rights::INVOKE, payload);
                         }
                         continue;
                     }
