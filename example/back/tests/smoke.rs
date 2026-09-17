@@ -172,19 +172,13 @@ fn echo_mint_lives_in_plugin_cspace_and_exports_to_global() {
     // reachability, plus HTTP bridge).
     let plugin_view: Slot<EchoResource> = Slot::new(plugin_pc.inner().clone(), local_slot);
     let from_plugin = plugin_view
-        .invoke(
-            Rights::INVOKE,
-            serde_json::json!({"via": "plugin"}),
-        )
+        .invoke(Rights::INVOKE, serde_json::json!({"via": "plugin"}))
         .expect("invoking via plugin cspace should succeed");
     assert_eq!(from_plugin, serde_json::json!({"via": "plugin"}));
 
     let global_view: Slot<EchoResource> = Slot::new(global.clone(), global_slot);
     let from_global = global_view
-        .invoke(
-            Rights::INVOKE,
-            serde_json::json!({"via": "global"}),
-        )
+        .invoke(Rights::INVOKE, serde_json::json!({"via": "global"}))
         .expect("invoking via global cspace should succeed");
     assert_eq!(from_global, serde_json::json!({"via": "global"}));
 }
@@ -1074,10 +1068,7 @@ fn llm_complete_builtin_round_trips_through_typed_mint() {
 
     let slot: Slot<LlmCompleteResource> = Slot::new(cspace, slot_id);
     let out = slot
-        .invoke(
-            Rights::INVOKE,
-            serde_json::json!({"prompt": "hello"}),
-        )
+        .invoke(Rights::INVOKE, serde_json::json!({"prompt": "hello"}))
         .expect("llm_complete invoke should succeed");
     assert!(out.get("text").is_some(), "missing `text` in response");
     assert_eq!(out["finish_reason"], serde_json::json!("stop"));
@@ -1232,10 +1223,7 @@ fn tool_descriptor_reports_schema_missing_for_unschemaed_caps() {
     );
     let slot: Slot<ToolDescriptorResource> = Slot::new(cspace, td_id);
     let err = slot
-        .invoke(
-            Rights::INVOKE,
-            serde_json::json!({"tool": "agent_list"}),
-        )
+        .invoke(Rights::INVOKE, serde_json::json!({"tool": "agent_list"}))
         .expect_err("agent_list has no tool_schema, must fail");
     let err_str = err.to_string();
     assert!(
@@ -1383,10 +1371,7 @@ fn profile_inspector_returns_cap_meta_and_operations() {
     );
     let slot: Slot<ProfileInspectorResource> = Slot::new(cspace, pi_id);
     let out = slot
-        .invoke(
-            Rights::INVOKE,
-            serde_json::json!({"subject": "echo"}),
-        )
+        .invoke(Rights::INVOKE, serde_json::json!({"subject": "echo"}))
         .expect("inspect echo should succeed");
     assert_eq!(out["meta"]["name"], serde_json::json!("echo"));
     assert_eq!(out["meta"]["plugin"]["name"], serde_json::json!("echo"));
@@ -3009,4 +2994,68 @@ fn agent_session_can_be_paused_and_loaded() {
         SessionStatus::Running,
         SessionLimits::default(),
     );
+}
+
+#[test]
+fn agent_runtime_caps_hold_all_three_role_bits() {
+    use odyssey_builtin::agent_runtime::{AgentRuntimeBuiltin, NAME_START};
+
+    let cspace = CapabilitySpace::new();
+    let factory = CapabilityFactory::with_clock(cspace.clone(), Arc::new(SystemClock));
+
+    let plugin = PluginId {
+        name: "agent_runtime".into(),
+        version: "0.1.0".into(),
+    };
+    let (manifest, mint_fn, _ruin_fn) = AgentRuntimeBuiltin::register();
+    let _ = (manifest, _ruin_fn);
+
+    for decl in &[
+        odyssey_builtin::agent_runtime::NAME_START,
+        odyssey_builtin::agent_runtime::NAME_RESUME,
+        odyssey_builtin::agent_runtime::NAME_CANCEL,
+        odyssey_builtin::agent_runtime::NAME_PLAN,
+        odyssey_builtin::agent_runtime::NAME_STREAM,
+        odyssey_builtin::agent_runtime::NAME_RECALL,
+        odyssey_builtin::agent_runtime::NAME_RECORD,
+        odyssey_builtin::agent_runtime::NAME_LOAD,
+    ] {
+        let decl_obj = odyssey::core::manifest::manifest::CapabilityDecl {
+            name: decl.to_string(),
+            kind: CapKind::Sync,
+            contract_name: decl.to_string(),
+            tool_schema: None,
+        };
+        let _ = mint_fn(
+            &factory,
+            &plugin,
+            &decl_obj,
+            CapKind::Sync,
+            CapabilityBudget::new(5000),
+            &[],
+        );
+    }
+
+    for name in [
+        NAME_START,
+        odyssey_builtin::agent_runtime::NAME_RESUME,
+        odyssey_builtin::agent_runtime::NAME_CANCEL,
+    ] {
+        let cap = cspace
+            .lookup_by_name(name)
+            .unwrap_or_else(|| panic!("{name} should be minted"));
+        let ops = cap.operations();
+        assert!(
+            ops.contains(Rights::INVOKE),
+            "{name} must contain INVOKE; got {ops:?}"
+        );
+        assert!(
+            ops.contains(Rights::ASSIGN),
+            "{name} must contain ASSIGN; got {ops:?}"
+        );
+        assert!(
+            ops.contains(Rights::REVOKE),
+            "{name} must contain REVOKE; got {ops:?}"
+        );
+    }
 }
