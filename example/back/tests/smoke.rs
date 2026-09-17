@@ -288,7 +288,10 @@ fn plugin_cspaces_are_isolated_until_explicit_transfer() {
 
     // The LLM's cspace no longer resolves the source slot.
     assert!(
-        llm_pc.inner().lookup_typed::<EchoResource>(llm_echo_id).is_none(),
+        llm_pc
+            .inner()
+            .lookup_typed::<EchoResource>(llm_echo_id)
+            .is_none(),
         "transferred-from slot must be revoked in source cspace"
     );
 

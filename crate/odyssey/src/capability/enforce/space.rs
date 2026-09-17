@@ -480,11 +480,13 @@ impl CapabilitySpace {
         self.revoke(from);
 
         // Kernel-level event: the cap crossed cspaces.
-        self.publish_event(crate::capability::enforce::space::CapabilityEvent::Derived {
-            parent: from,
-            child: new_slot,
-            kind: crate::capability::enforce::space::DeriveKind::Transfer,
-        });
+        self.publish_event(
+            crate::capability::enforce::space::CapabilityEvent::Derived {
+                parent: from,
+                child: new_slot,
+                kind: crate::capability::enforce::space::DeriveKind::Transfer,
+            },
+        );
 
         Ok(new_slot)
     }
@@ -647,12 +649,8 @@ impl PluginCspace {
         use crate::core::rights::rights::{CapabilityRights, OperationRights};
 
         let id = CapabilityId(self.id_counter.fetch_add(1, Ordering::Relaxed));
-        let meta = crate::personality::lifecycle::mint::meta_from_decl(
-            id,
-            decl,
-            &self.plugin,
-            &budget,
-        );
+        let meta =
+            crate::personality::lifecycle::mint::meta_from_decl(id, decl, &self.plugin, &budget);
         let rights = CapabilityRights {
             operations: OperationRights::ALL,
             timeout_ms: budget.timeout_ms(),
