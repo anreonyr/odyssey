@@ -74,6 +74,14 @@ impl BuiltinManifest for ReverseBuiltin {
 }
 
 impl ReverseBuiltin {
+    /// Typed mint — Slice 3 demonstration: reverse's only cap
+    /// lives in the plugin's own `PluginCspace`. We then
+    /// grant a derived slot into the orchestrator's global
+    /// cspace so the HTTP bridge can still look it up by
+    /// name. The returned `SlotId` is the GLOBAL one — the
+    /// orchestrator's existing teardown path
+    /// (`default_ruin` revoking the returned ids) works
+    /// unchanged.
     pub fn mint(
         &self,
         factory: &CapabilityFactory,
@@ -83,7 +91,17 @@ impl ReverseBuiltin {
         budget: CapabilityBudget,
         _bindings: &[ResolvedBinding],
     ) -> SlotId {
-        factory.mint(kind, decl, plugin, budget, Arc::new(ReverseResource))
+        use odyssey::core::rights::rights::{CapabilityRights, OperationRights};
+
+        let pc = factory.plugin_cspace(plugin);
+        let local_slot = pc.mint(kind, decl, budget.clone(), Arc::new(ReverseResource));
+        let rights = CapabilityRights {
+            operations: OperationRights::ALL,
+            timeout_ms: budget.timeout_ms(),
+        };
+        pc.inner()
+            .grant_to::<ReverseResource>(local_slot, factory.space(), rights, decl.name.clone())
+            .expect("grant from plugin cspace to global should succeed")
     }
 
     /// Phase 11: colocated registration helper. Returns the
