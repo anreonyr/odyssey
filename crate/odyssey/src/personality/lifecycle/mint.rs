@@ -12,11 +12,13 @@
 //! The `kind` (sync / stream) is supplied by the caller since the
 //! host knows from the manifest whether the capability is streaming.
 
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::capability::enforce::quota::CapabilityBudget;
-use crate::capability::enforce::space::CapabilitySpace;
+use crate::capability::enforce::space::{CapabilitySpace, PluginCspace};
 use crate::capability::handle::cap::Capability;
 use crate::core::clock::clock::{Clock, SystemClock};
 use crate::core::contract::resource::Resource;
@@ -88,11 +90,21 @@ pub fn namespace_for(plugin: &PluginId, cap_name: &str) -> String {
 /// `snapshots()` / `clock()` accessors (zero production callers).
 /// `cspace.enumerate()` is the single source of truth for
 /// metadata; the clock is internal to the factory.
+///
+/// Slice 3 of Direction A: the factory now also tracks per-plugin
+/// `PluginCspace`s. Each plugin that wants per-plugin isolation
+/// reads its `PluginCspace` via `factory.plugin_cspace(plugin)`,
+/// mints into it, and grants a derived slot into the global
+/// cspace for cross-plugin / HTTP-bridge visibility. Plugins
+/// that haven't migrated yet continue to mint directly into
+/// the global cspace via `factory.space()` — the factory
+/// still supports that path.
 #[derive(Clone)]
 pub struct CapabilityFactory {
     next_id: Arc<AtomicU64>,
     space: CapabilitySpace,
     clock: Arc<dyn Clock>,
+    plugin_cspaces: Arc<Mutex<HashMap<PluginId, Arc<PluginCspace>>>>,
 }
 
 impl CapabilityFactory {
@@ -108,12 +120,31 @@ impl CapabilityFactory {
             next_id: Arc::new(AtomicU64::new(0)),
             space,
             clock,
+            plugin_cspaces: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
-    /// The space this factory mints into.
+    /// The space this factory mints into. This is the
+    /// orchestrator's global cspace — the HTTP bridge and
+    /// cross-plugin lookups by name land here. Plugins that
+    /// want per-plugin isolation use `plugin_cspace` instead
+    /// and grant a derived slot back into this space.
     pub fn space(&self) -> &CapabilitySpace {
         &self.space
+    }
+
+    /// The plugin's per-plugin `PluginCspace`. Created on
+    /// first access; subsequent calls for the same `PluginId`
+    /// return the same instance. Plugins that have migrated
+    /// to per-plugin isolation mint their caps into this
+    /// cspace and grant a derived slot into the global
+    /// cspace; plugins that haven't migrated don't call
+    /// this and continue to use `space()`.
+    pub fn plugin_cspace(&self, plugin: &PluginId) -> Arc<PluginCspace> {
+        let mut pcs = self.plugin_cspaces.lock().expect("plugin_cspaces poisoned");
+        pcs.entry(plugin.clone())
+            .or_insert_with(|| Arc::new(PluginCspace::new(plugin.clone())))
+            .clone()
     }
 
     /// Mint a typed token wrapping the resource, allocate a slot, install.
@@ -123,6 +154,12 @@ impl CapabilityFactory {
     /// The factory's `clock` is threaded into the capability so `invoke`
     /// / `invoke_op` can record elapsed wall-clock without calling
     /// `Instant::now()` directly (Phase 5 P1-C fix).
+    ///
+    /// Slice 3: this path is unchanged. Plugins that want
+    /// per-plugin isolation call `plugin_cspace(plugin).mint(...)`
+    /// directly (and grant to global themselves); plugins that
+    /// haven't migrated continue to call this and end up in
+    /// the global cspace. Both paths coexist.
     pub fn mint<R: Resource>(
         &self,
         kind: CapKind,

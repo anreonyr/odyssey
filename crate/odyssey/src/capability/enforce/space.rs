@@ -392,6 +392,48 @@ impl CapabilitySpace {
         grant::<R>(self, from, rights, new_name)
     }
 
+    /// Like `grant`, but the derived cap is installed in
+    /// `target` instead of `self`. The source cap is
+    /// preserved (different from `transfer_to`, which
+    /// revokes the source). Returns the new slot id in
+    /// `target`. Slice 3: this is the cross-cspace primitive
+    /// plugins use to export their caps to the orchestrator's
+    /// global cspace for HTTP-bridge visibility without
+    /// losing their local reference.
+    pub fn grant_to<R: Resource>(
+        &self,
+        from: SlotId,
+        target: &CapabilitySpace,
+        rights: CapabilityRights,
+        new_name: String,
+    ) -> Result<SlotId, crate::capability::error::CapabilityError> {
+        let source: Arc<Capability<R>> = self
+            .lookup_typed::<R>(from)
+            .ok_or(crate::capability::error::CapabilityError::SlotEmpty(from))?;
+        let held = source.rights();
+        if !held.contains(&rights) {
+            return Err(
+                crate::capability::error::CapabilityError::AttenuationViolation {
+                    from,
+                    requested: rights.operations,
+                    held: held.operations,
+                },
+            );
+        }
+        let new_id = target.next_derived_id();
+        let derived = source.derive(rights, new_id);
+        let new_slot = target.allocate();
+        let mut derived = derived;
+        derived.bind_slot(new_slot);
+        target.install(new_slot, Arc::new(derived));
+        self.publish_event(crate::capability::enforce::space::CapabilityEvent::Derived {
+            parent: from,
+            child: new_slot,
+            kind: crate::capability::enforce::space::DeriveKind::Grant,
+        });
+        Ok(new_slot)
+    }
+
     pub fn transfer<R: Resource>(
         &self,
         from: SlotId,

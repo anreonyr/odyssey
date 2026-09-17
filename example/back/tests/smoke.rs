@@ -100,6 +100,89 @@ fn echo_builtin_round_trips_through_typed_mint() {
     );
 }
 
+/// Slice 3 of Direction A: echo's `mint` path lives the
+/// cap in the plugin's own `PluginCspace` and grants a
+/// derived slot into the orchestrator's global cspace.
+/// The HTTP bridge looks up by name in the global cspace
+/// (which has the derived slot); the plugin looks up by
+/// name in its own `PluginCspace` (which has the
+/// original). The handler is shared, so both invocations
+/// work.
+#[test]
+fn echo_mint_lives_in_plugin_cspace_and_exports_to_global() {
+    let global = CapabilitySpace::new();
+    let factory = CapabilityFactory::with_clock(global.clone(), Arc::new(SystemClock));
+
+    let builtin = EchoBuiltin;
+    let manifest = builtin.manifest();
+    let decl = &manifest.exposes[0];
+    let plugin_id = PluginId {
+        name: "echo".into(),
+        version: "0.1.0".into(),
+    };
+
+    // Mint through the plugin's mint path (the same one
+    // the orchestrator's `MintFn` closure calls). The
+    // returned slot id is the GLOBAL one (the grant's
+    // slot) — the existing teardown path
+    // (`default_ruin` revoking returned slot ids) works
+    // unchanged.
+    let global_slot = builtin.mint(
+        &factory,
+        &plugin_id,
+        decl,
+        CapKind::Sync,
+        CapabilityBudget::new(5000),
+        &[],
+    );
+
+    // The global cspace has the cap under the declared
+    // name. HTTP bridge and cross-plugin lookups land here.
+    assert_eq!(
+        global.slot_for_name("echo"),
+        Some(global_slot),
+        "global cspace must hold echo under its declared name"
+    );
+
+    // The plugin's own `PluginCspace` (lazy-created by
+    // the factory on first access) holds the ORIGINAL
+    // slot — the cap's home. Slice 2 proved isolation;
+    // Slice 3 proves the migration pattern leaves the
+    // plugin in control of its own slot.
+    //
+    // The local and global slot ids may or may not be equal
+    // (each cspace has its own id allocator; both start
+    // from 0+1=1 for the first slot they allocate). The
+    // isolation property is that the two cspaces hold the
+    // cap under the same name, not that the slot ids
+    // differ. The lookup-based assertions below carry that
+    // property.
+    let plugin_pc = factory.plugin_cspace(&plugin_id);
+    let local_lookup = plugin_pc.inner().slot_for_name("echo");
+    assert!(
+        local_lookup.is_some(),
+        "echo's PluginCspace must hold the cap under its declared name"
+    );
+    let local_slot = local_lookup.unwrap();
+
+    // Both slots can invoke — the handler is shared. The
+    // plugin invokes through its PluginCspace (no cross-
+    // plugin reachability needed); the global slot lets
+    // anyone with the id invoke (cross-plugin
+    // reachability, plus HTTP bridge).
+    let plugin_view: Slot<EchoResource> = Slot::new(plugin_pc.inner().clone(), local_slot);
+    let from_plugin = plugin_view
+        .invoke(OperationRights::EXECUTE, serde_json::json!({"via": "plugin"}))
+        .expect("invoking via plugin cspace should succeed");
+    assert_eq!(from_plugin, serde_json::json!({"via": "plugin"}));
+
+    let global_view: Slot<EchoResource> = Slot::new(global.clone(), global_slot);
+    let from_global = global_view
+        .invoke(OperationRights::EXECUTE, serde_json::json!({"via": "global"}))
+        .expect("invoking via global cspace should succeed");
+    assert_eq!(from_global, serde_json::json!({"via": "global"}));
+}
+
 /// Phase M3: the rights declared on a capability are
 /// actually enforced on invoke. Pre-M3, every entry point
 /// called a no-rights `Capability::invoke` and the
