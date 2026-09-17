@@ -405,7 +405,7 @@ impl CapabilitySpace {
         from: SlotId,
         target: &CapabilitySpace,
         rights: CapabilityRights,
-        new_name: String,
+        _new_name: String,
     ) -> Result<SlotId, crate::capability::error::CapabilityError> {
         let source: Arc<Capability<R>> = self
             .lookup_typed::<R>(from)
@@ -426,11 +426,13 @@ impl CapabilitySpace {
         let mut derived = derived;
         derived.bind_slot(new_slot);
         target.install(new_slot, Arc::new(derived));
-        self.publish_event(crate::capability::enforce::space::CapabilityEvent::Derived {
-            parent: from,
-            child: new_slot,
-            kind: crate::capability::enforce::space::DeriveKind::Grant,
-        });
+        self.publish_event(
+            crate::capability::enforce::space::CapabilityEvent::Derived {
+                parent: from,
+                child: new_slot,
+                kind: crate::capability::enforce::space::DeriveKind::Grant,
+            },
+        );
         Ok(new_slot)
     }
 

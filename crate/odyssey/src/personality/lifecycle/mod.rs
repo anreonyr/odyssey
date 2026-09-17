@@ -10,6 +10,7 @@
 
 pub mod boot;
 pub mod lifecycle_event;
+pub mod loader;
 pub mod mint;
 pub mod ruin;
 pub mod run;

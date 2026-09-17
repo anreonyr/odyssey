@@ -18,6 +18,8 @@
 //! Manifests describe plugin identity, the exposed capability
 //! surface, and dependencies on other plugins' capabilities.
 
+use std::path::Path;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -268,5 +270,147 @@ impl ManifestBuilder {
             requires,
             timeout_ms,
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Runtime loader (Slice 5 of Direction A)
+// ---------------------------------------------------------------------------
+
+/// Errors produced by the runtime manifest loader.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ManifestLoadError {
+    /// JSON parse failure (caller passed invalid JSON).
+    Parse(String),
+    /// Field-level validation failure (parse succeeded but
+    /// the manifest doesn't satisfy the loader's invariants).
+    Invalid(String),
+    /// I/O failure (file read, missing path, etc.).
+    Io(String),
+}
+
+impl std::fmt::Display for ManifestLoadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Parse(msg) => write!(f, "manifest parse: {msg}"),
+            Self::Invalid(msg) => write!(f, "manifest invalid: {msg}"),
+            Self::Io(msg) => write!(f, "manifest io: {msg}"),
+        }
+    }
+}
+
+impl std::error::Error for ManifestLoadError {}
+
+/// Outcome of `validate` — what the manifest is missing,
+/// suitable for surfacing in error messages or operator UIs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ManifestInvalid {
+    EmptyPluginName,
+    EmptyPluginVersion,
+    NoExposes,
+    EmptyExposeName { index: usize },
+    EmptyExposeContract { index: usize },
+    DuplicateExposeName { name: String },
+    EmptyRequireHandle { index: usize },
+    EmptyRequireContract { index: usize },
+}
+
+impl std::fmt::Display for ManifestInvalid {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::EmptyPluginName => write!(f, "plugin.name is empty"),
+            Self::EmptyPluginVersion => write!(f, "plugin.version is empty"),
+            Self::NoExposes => write!(f, "plugin exposes no capabilities"),
+            Self::EmptyExposeName { index } => {
+                write!(f, "exposes[{index}].name is empty")
+            }
+            Self::EmptyExposeContract { index } => {
+                write!(f, "exposes[{index}].contract_name is empty")
+            }
+            Self::DuplicateExposeName { name } => {
+                write!(f, "exposes contains duplicate name `{name}`")
+            }
+            Self::EmptyRequireHandle { index } => {
+                write!(f, "requires[{index}].name is empty")
+            }
+            Self::EmptyRequireContract { index } => {
+                write!(f, "requires[{index}].contract is empty")
+            }
+        }
+    }
+}
+
+impl PluginManifest {
+    /// Parse a manifest from a JSON string. Performs the
+    /// same field validation as the builder path — a
+    /// manifest that round-trips through this function
+    /// would build to the same value via `ManifestBuilder`.
+    ///
+    /// Slice 5: the JSON format is the canonical
+    /// serialization of `PluginManifest`. The previous
+    /// TOML loader (`from_toml_str`) was removed in Phase 9;
+    /// a future WASM / cdylib loader could re-attach TOML
+    /// by adding the `toml` dep and calling `serde::Deserialize`
+    /// on the same struct shape — the schema is decoupled
+    /// from the on-disk format.
+    pub fn from_json_str(s: &str) -> Result<Self, ManifestLoadError> {
+        let m: PluginManifest = serde_json::from_str(s)
+            .map_err(|e| ManifestLoadError::Parse(e.to_string()))?;
+        m.validate().map_err(|e| ManifestLoadError::Invalid(e.to_string()))?;
+        Ok(m)
+    }
+
+    /// Load a manifest from a file path. Reads as UTF-8 and
+    /// delegates to `from_json_str`. The file extension is
+    /// not consulted — the parser is JSON either way. A
+    /// future change can dispatch on extension to support
+    /// multiple formats.
+    pub fn from_path(path: &Path) -> Result<Self, ManifestLoadError> {
+        let bytes = std::fs::read(path)
+            .map_err(|e| ManifestLoadError::Io(e.to_string()))?;
+        let s = std::str::from_utf8(&bytes)
+            .map_err(|e| ManifestLoadError::Io(format!("not utf-8: {e}")))?;
+        Self::from_json_str(s)
+    }
+
+    /// Validate the manifest's invariants. Returns the
+    /// first violation as a `ManifestInvalid`; subsequent
+    /// violations are not enumerated (the loader fails
+    /// fast on the first problem).
+    pub fn validate(&self) -> Result<(), ManifestInvalid> {
+        if self.plugin.name.is_empty() {
+            return Err(ManifestInvalid::EmptyPluginName);
+        }
+        if self.plugin.version.is_empty() {
+            return Err(ManifestInvalid::EmptyPluginVersion);
+        }
+        if self.exposes.is_empty() {
+            return Err(ManifestInvalid::NoExposes);
+        }
+        // Track seen expose names for duplicate detection.
+        // A duplicate would silently shadow itself at lookup
+        // time (the second install replaces the first in
+        // the cspace's `names` map).
+        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        for (i, e) in self.exposes.iter().enumerate() {
+            if e.name.is_empty() {
+                return Err(ManifestInvalid::EmptyExposeName { index: i });
+            }
+            if e.contract_name.is_empty() {
+                return Err(ManifestInvalid::EmptyExposeContract { index: i });
+            }
+            if !seen.insert(e.name.as_str()) {
+                return Err(ManifestInvalid::DuplicateExposeName { name: e.name.clone() });
+            }
+        }
+        for (i, r) in self.requires.iter().enumerate() {
+            if r.name.is_empty() {
+                return Err(ManifestInvalid::EmptyRequireHandle { index: i });
+            }
+            if r.contract.is_empty() {
+                return Err(ManifestInvalid::EmptyRequireContract { index: i });
+            }
+        }
+        Ok(())
     }
 }
