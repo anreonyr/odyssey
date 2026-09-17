@@ -82,8 +82,7 @@ impl Resource for StubResource {}
 /// a factory with a system clock, and a fresh `PluginId`.
 fn fixture() -> (CapabilitySpace, CapabilityFactory, PluginId) {
     let global = CapabilitySpace::new();
-    let factory =
-        CapabilityFactory::with_clock(global.clone(), Arc::new(SystemClock));
+    let factory = CapabilityFactory::with_clock(global.clone(), Arc::new(SystemClock));
     let plugin = PluginId {
         name: "teardown_probe".into(),
         version: "0.1.0".into(),
@@ -114,7 +113,12 @@ fn mint_and_grant(
     decl: &CapabilityDecl,
 ) -> (SlotId, SlotId) {
     let pc = factory.plugin_cspace(plugin);
-    let local = pc.mint(CapKind::Sync, decl, CapabilityBudget::new(5000), Arc::new(StubResource));
+    let local = pc.mint(
+        CapKind::Sync,
+        decl,
+        CapabilityBudget::new(5000),
+        Arc::new(StubResource),
+    );
     let rights = CapabilityRights {
         operations: OperationRights::ALL,
         timeout_ms: 5000,
@@ -211,7 +215,11 @@ fn reclaim_plugin_clears_derived_children() {
     // Sanity: the local cspace now has two roots (the
     // original plus the derived child surfaces its own
     // `slot_for_name` entry).
-    assert_eq!(pc.inner().len(), 2, "local cspace must hold root + derived child");
+    assert_eq!(
+        pc.inner().len(),
+        2,
+        "local cspace must hold root + derived child"
+    );
     assert_eq!(
         pc.inner().slot_for_name("echo_readonly"),
         Some(read_only),
@@ -329,7 +337,10 @@ fn full_teardown_path_leaves_no_slots_anywhere() {
     // `register()` helpers reference.
     let global_revoked =
         default_ruin(&global, std::slice::from_ref(&global_slot)).expect("default_ruin ok");
-    assert_eq!(global_revoked, 1, "default_ruin must revoke the granted slot");
+    assert_eq!(
+        global_revoked, 1,
+        "default_ruin must revoke the granted slot"
+    );
 
     let local_revoked = factory.reclaim_plugin(&plugin);
     assert_eq!(local_revoked, 1, "reclaim must drain the local slot");
