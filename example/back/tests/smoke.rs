@@ -55,7 +55,7 @@ use odyssey::core::identity::ids::PluginId;
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::CapabilityDecl;
 use odyssey::core::meta::chunk::CapabilityChunk;
-use odyssey::core::rights::rights::{OperationRights, Rights};
+use odyssey::core::rights::rights::Rights;
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
 use odyssey_builtin::echo::{EchoBuiltin, EchoResource};
 use odyssey_builtin::streaming_echo::{StreamingEchoBuiltin, StreamingEchoResource};
@@ -192,7 +192,7 @@ fn echo_mint_lives_in_plugin_cspace_and_exports_to_global() {
 /// Phase M3: the rights declared on a capability are
 /// actually enforced on invoke. Pre-M3, every entry point
 /// called a no-rights `Capability::invoke` and the
-/// `OperationRights` on the cap was documentary; this test
+/// `Rights` on the cap was documentary; this test
 /// proves the new mandatory-op API rejects an op the held
 /// rights don't contain.
 ///
@@ -259,8 +259,10 @@ fn attenuated_capability_denies_unheld_op() {
 
     // The child denies INVOKE — the held rights are empty.
     // (The site uses `Rights::INVOKE` directly; the original
-    // test's `OperationRights::EXECUTE` would auto-convert via
-    // `From<OperationRights> for Rights` to the same value.)
+    // (The original test's `OperationRights::EXECUTE` would auto-
+    // convert via `From<OperationRights> for Rights` to the same
+    // value, but `OperationRights` is now deleted at Phase 5;
+    // `Rights::INVOKE` is the direct form.)
     let denied = empty
         .invoke(Rights::INVOKE, serde_json::json!({"x": 1}))
         .expect_err("attenuated child must reject INVOKE");

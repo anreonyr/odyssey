@@ -34,8 +34,8 @@
 //! Read-only by decision: the agent observes capabilities and never
 //! invokes one. `describe` reports a capability's `kind` and
 //! `operations` without exercising either. Erased *invocation*
-//! (`AnyCapability::invoke_dyn`) skips the `OperationRights` check
-//! that the typed `invoke_op` performs — the HTTP bridge has the
+//! (`AnyCapability::invoke_dyn`) skips the `Rights` check
+//! that the typed `invoke` performs — the HTTP bridge has the
 //! same gap — so an agent that dispatched would inherit it. Closing
 //! that gap is a separate line of work; this builtin stays on the
 //! observing side of it.

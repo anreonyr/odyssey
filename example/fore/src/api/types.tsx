@@ -47,7 +47,7 @@ export interface AgentHandleDescribeLive {
   streaming: boolean;
   timeout_ms: number;
   calls_per_minute: number;
-  operations: Array<"READ" | "WRITE" | "EXECUTE" | "ADMIN">;
+  operations: Array<"INVOKE" | "ASSIGN" | "REVOKE">;
 }
 
 /** A handle whose capability was revoked / never installed. */

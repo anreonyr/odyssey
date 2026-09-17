@@ -11,8 +11,7 @@
 //! - `identity` — `CapabilityId`, `SlotId`, `PluginId`, `CapKind`.
 //! - `clock` — `Clock` trait + `SystemClock` + `MockClock`.
 //! - `meta` — `CapabilityMeta`, `CapabilityChunk`.
-//! - `rights` — `OperationRights`, `CapabilityRights`,
-//!   `parse_operation`.
+//! - `rights` — `Rights`, `CapabilityRights`.
 //! - `manifest` — `PluginManifest`, `ManifestBuilder`,
 //!   `CapabilityDecl`, `CapabilityRequirement`.
 //! - `contract` — abstract traits: `Resource`, `BuiltinManifest`.
@@ -40,4 +39,4 @@ pub use manifest::manifest::{
 pub use meta::chunk::CapabilityChunk;
 pub use meta::meta::CapabilityMeta;
 pub use quota::quota::{QuotaKind, QuotaSnapshot, QuotaSpec};
-pub use rights::rights::{CapabilityRights, OperationRights, parse_operation};
+pub use rights::rights::{CapabilityRights, Rights};

@@ -6,6 +6,60 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed — Phase 17: INVOKE / ASSIGN / REVOKE capability rights
+
+The kernel's authority type is now the role-typed
+`Rights { INVOKE, ASSIGN, REVOKE }` (3 bits) instead of
+the operation-typed `OperationRights { READ, WRITE,
+EXECUTE, ADMIN }` (4 bits). Capability = Plugin-to-Plugin
+Authority; the bit semantics are role-typed, not operation-typed:
+
+- `INVOKE` — traverse an authority edge into the underlying Protocol.
+- `ASSIGN` — propagate the capability to other plugins (kernel
+  enforces `child ⊆ parent` via `CapabilityRights::contains`).
+- `REVOKE` — retract the capability, scoped to edges the holder
+  created, transitive over descendants (seL4 CNode revocation).
+
+Protocol operations (query / insert / start / ...) are NOT
+encoded in `Rights`. They live in the Protocol layer; `Rights`
+only authorises traversal, not what the traversal does.
+
+Five slices, all committed:
+- `874f543` — `Rights` added alongside legacy `OperationRights` (additive,
+  no breakage; `From<OperationRights> for Rights` bridge).
+- `89012c2` — kernel-side `OperationRights` migration window opened.
+- `7a7eb7d` — `HandlerRegistry` + static `PLUGIN_HANDLERS` dispatch table
+  for the loader path.
+- `69dae67` — `docs/deferred/wasm-loader-scope.md` (WASM / cdylib
+  scope doc for the deferred dynamic-loader slot).
+- `08465fb` — kernel hot-path flipped to `Rights`; builtin mints
+  declare explicit role-typed roots; invoke call sites use
+  `Rights::INVOKE`; `attenuated_capability_denies_unheld_op` test
+  redesigned (uses `Rights::empty()` for the held vs
+  `Rights::INVOKE` for the request — the lossy projection
+  collapsed the original `READ` vs `EXECUTE` contrast).
+- This commit — `OperationRights` + `parse_operation` hard
+  deleted; `core::rights::rights` re-exports only `Rights` +
+  `CapabilityRights`; `docs/deferred/wasm-loader-scope.md` was
+  updated at slice 5; `example/fore/src/api/types.tsx`'s
+  `operations: Array<...>` now takes `"INVOKE" | "ASSIGN" | "REVOKE"`.
+
+Builtin mint root rights after the migration:
+
+| Builtin              | Root rights                            |
+| -------------------- | -------------------------------------- |
+| `echo`, `reverse`, `database`, `streaming_echo`, `agent`, `tool_descriptor`, `profile_inspector`, `llm`, `memory` | `INVOKE \| ASSIGN` |
+| `agent_runtime`      | `INVOKE \| ASSIGN \| REVOKE` (session lifecycle revokes session-bus caps) |
+
+The four operation verbs (READ / WRITE / EXECUTE / ADMIN) are
+gone; builtin authors must use the role-typed bits. No
+deprecation warnings emitted — the kernel has no external
+consumers and slice 5 was a hard break.
+
+Historical `CHANGELOG` entries that referenced the deleted
+shapes are preserved verbatim (per design Verification
+Notes §5 — they describe shapes that existed at the time).
+
 ### Changed — Phase 12: manifest field subtraction cascade
 
 A single-commit cleanup that prunes write-only and

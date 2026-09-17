@@ -1,16 +1,17 @@
-//! Rights attenuation invariants (slice 1 of the INVOKE/ASSIGN/REVOKE
-//! redesign). Locks down:
+//! Rights attenuation invariants (Phase 17: INVOKE / ASSIGN / REVOKE
+//! capability rights redesign).
+//!
+//! Locks down the post-Phase-5 contract:
 //!   - `Rights::contains` is monotone and exact (the bitflags-
 //!     generated `contains` is the role-typed attenuation check).
 //!   - `Rights::intersect` is the meet.
-//!   - `From<OperationRights>` collapses the legacy four-bit space
-//!     into the new three-bit role space (conservative mapping).
-//!   - `From<Rights>` projects back to the legacy space (only used
-//!     during the migration window).
-//!   - `CapabilityRights::contains` semantics are preserved across
-//!     the migration.
+//!   - `Rights::default` is `Rights::ALL` (root-cap convention).
+//!   - The 2^3 - 1 non-empty role subsets each map to a
+//!     meaningful role (consumer / forwarder / revoker / ...).
+//!   - `CapabilityRights::contains` enforces both axes:
+//!     operations ⊇ operations' AND timeout_ms ≥ timeout_ms'.
 
-use odyssey::core::rights::rights::{CapabilityRights, OperationRights, Rights};
+use odyssey::core::rights::rights::{CapabilityRights, Rights};
 
 #[test]
 fn rights_contains_is_exact_superset() {
@@ -66,56 +67,16 @@ fn rights_three_bits_match_role_axes() {
 }
 
 #[test]
-fn legacy_operation_rights_fold_into_invoke_or_revoke() {
-    // READ | WRITE | EXECUTE all map to INVOKE (operation-typed
-    // verbs collapse into the role-typed traversal authority).
-    assert_eq!(Rights::from(OperationRights::READ), Rights::INVOKE);
-    assert_eq!(Rights::from(OperationRights::WRITE), Rights::INVOKE);
-    assert_eq!(Rights::from(OperationRights::EXECUTE), Rights::INVOKE);
-    // ADMIN maps to REVOKE (lifecycle authority is the closest
-    // legacy analog under the role-typed schema).
-    assert_eq!(Rights::from(OperationRights::ADMIN), Rights::REVOKE);
-    // ALL = READ | WRITE | EXECUTE | ADMIN. Three of those bits
-    // fold into INVOKE; ADMIN folds into REVOKE. The legacy schema
-    // has no ASSIGN analog, so the projection is INVOKE | REVOKE
-    // (NOT Rights::ALL — that's documented in design R1.1 as
-    // the lossy collapse across the migration window).
-    assert_eq!(
-        Rights::from(OperationRights::ALL),
-        Rights::INVOKE | Rights::REVOKE
-    );
-}
-
-#[test]
-fn legacy_projection_round_trips_through_assign_and_revoke() {
-    // INVOKE → READ | WRITE | EXECUTE (the closest legacy analog:
-    // all three operation verbs that the old schema distinguished
-    // collapse into one role-typed bit).
-    let projected: OperationRights = Rights::INVOKE.into();
-    assert!(projected.contains(OperationRights::READ));
-    assert!(projected.contains(OperationRights::WRITE));
-    assert!(projected.contains(OperationRights::EXECUTE));
-    // ASSIGN → ADMIN (legacy closest analog; conservative).
-    let projected: OperationRights = Rights::ASSIGN.into();
-    assert!(projected.contains(OperationRights::ADMIN));
-    // REVOKE → ADMIN.
-    let projected: OperationRights = Rights::REVOKE.into();
-    assert!(projected.contains(OperationRights::ADMIN));
-}
-
-#[test]
 fn capability_rights_containment_unchanged() {
-    // CapabilityRights::contains semantics preserved across the
-    // migration: operations ⊇ operations' AND timeout_ms ≥ timeout_ms'.
-    // Slice 1 keeps `operations: OperationRights`; slice 2 flips it
-    // to `Rights`. The test uses the legacy type to validate the
-    // unchanged attenuation contract.
+    // CapabilityRights::contains semantics: operations ⊇
+    // operations' AND timeout_ms ≥ timeout_ms'. The operations
+    // axis uses `Rights` directly post-Phase-5.
     let parent = CapabilityRights {
-        operations: OperationRights::ALL.into(),
+        operations: Rights::INVOKE | Rights::ASSIGN,
         timeout_ms: 5000,
     };
     let child = CapabilityRights {
-        operations: OperationRights::EXECUTE.into(),
+        operations: Rights::INVOKE,
         timeout_ms: 3000,
     };
     assert!(parent.contains(&child));
@@ -125,15 +86,14 @@ fn capability_rights_containment_unchanged() {
 #[test]
 fn capability_rights_timeout_monotone() {
     // A child with a LARGER timeout than its parent must NOT
-    // satisfy `contains`. This is the budget-axis half of the
-    // attenuation contract; the operations-axis half is covered
-    // above.
+    // satisfy `contains`. Budget-axis half of the attenuation
+    // contract; operations-axis covered above.
     let parent = CapabilityRights {
-        operations: OperationRights::ALL.into(),
+        operations: Rights::ALL,
         timeout_ms: 1000,
     };
     let child = CapabilityRights {
-        operations: OperationRights::EXECUTE.into(),
+        operations: Rights::INVOKE,
         timeout_ms: 5000, // exceeds parent's 1000ms ceiling
     };
     assert!(!parent.contains(&child));
