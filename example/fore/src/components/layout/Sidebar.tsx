@@ -4,6 +4,13 @@
 // Counts (caps, sessions, checkpoints) come from the same
 // hooks the pages use, so the sidebar's badges always reflect
 // the same source of truth as the page content.
+//
+// Receives arbitrary HTMLAttributes so AppShell can pass
+// `data-stagger-item` + style for the entrance choreography
+// (DESIGN.md "动作"). Props.className is intentionally ignored:
+// the sidebar's chrome is fixed, callers shouldn't override it.
+
+import type { HTMLAttributes } from "react";
 
 import {
   LayoutDashboard,
@@ -30,7 +37,7 @@ interface NavItem {
   badge?: () => number | null;
 }
 
-export function Sidebar() {
+export function Sidebar(props: HTMLAttributes<HTMLElement>) {
   const { caps, reachable, ready, agentError } = useCaps();
   const { sessions } = useAgentSession();
   const { checkpoints } = useCheckpoints();
@@ -61,7 +68,10 @@ export function Sidebar() {
   ];
 
   return (
-    <aside className="border-border bg-card flex h-screen w-56 shrink-0 flex-col border-r">
+    <aside
+      {...props}
+      className="border-border bg-card flex h-screen w-56 shrink-0 flex-col border-r"
+    >
       <div className="border-border flex h-12 items-center gap-2 border-b px-4">
         <CircleDot className="text-success h-3.5 w-3.5" />
         <span className="font-mono text-sm font-semibold tracking-tight">odyssey</span>

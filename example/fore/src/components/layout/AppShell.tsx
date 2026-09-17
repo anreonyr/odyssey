@@ -8,6 +8,16 @@
 // Uses an `<Outlet />` from react-router so each route page
 // renders into the right pane without re-mounting the sidebar
 // (sidebar stays mounted → its state survives navigation).
+//
+// Entrance choreography (DESIGN.md "动作"): the root div is
+// `data-stagger`; Sidebar, Header, and <main> are
+// `data-stagger-item` with --stagger-index 1/2/3 so they
+// resolve in sequence (rail → top bar → content). Total
+// entrance ≤ 600ms (sidebar 110–430ms, header 180–500ms,
+// main 250–570ms). Honors prefers-reduced-motion via the
+// CSS rules in src/index.css.
+
+import type { CSSProperties } from "react";
 
 import { Outlet } from "react-router-dom";
 
@@ -20,11 +30,18 @@ export function AppShell() {
   return (
     <TooltipProvider delayDuration={150}>
       <SessionProvider>
-        <div className="bg-background text-foreground flex h-screen w-full overflow-hidden">
-          <Sidebar />
+        <div
+          className="bg-background text-foreground flex h-screen w-full overflow-hidden"
+          data-stagger
+        >
+          <Sidebar data-stagger-item="" style={{ "--stagger-index": 1 } as CSSProperties} />
           <div className="flex flex-1 flex-col overflow-hidden">
-            <Header />
-            <main className="flex-1 overflow-auto">
+            <Header data-stagger-item="" style={{ "--stagger-index": 2 } as CSSProperties} />
+            <main
+              className="flex-1 overflow-auto"
+              data-stagger-item=""
+              style={{ "--stagger-index": 3 } as CSSProperties}
+            >
               <div className="mx-auto h-full w-full max-w-6xl px-8 py-6">
                 <Outlet />
               </div>

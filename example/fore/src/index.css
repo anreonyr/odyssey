@@ -130,3 +130,41 @@ body::before {
 ::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--muted-foreground) / 0.4);
 }
+
+/* Entrance choreography — orchestrated page-load reveal.
+   Single curve across all items, CSS-only, honors
+   prefers-reduced-motion. See DESIGN.md "动作". */
+@layer base {
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  [data-stagger] {
+    --stagger-base: 40ms;
+    --stagger-step: 70ms;
+    --stagger-duration: 320ms;
+    --stagger-ease: cubic-bezier(0.16, 1, 0.3, 1); /* expo-out */
+  }
+
+  [data-stagger-item] {
+    opacity: 0;
+    animation: rise-in var(--stagger-duration) var(--stagger-ease) forwards;
+    animation-delay: calc(var(--stagger-base) + (var(--stagger-index, 0) * var(--stagger-step)));
+  }
+
+  /* Reduced-motion: snap to final state, no animation. */
+  @media (prefers-reduced-motion: reduce) {
+    [data-stagger-item] {
+      animation: none;
+      opacity: 1;
+      transform: none;
+    }
+  }
+}
