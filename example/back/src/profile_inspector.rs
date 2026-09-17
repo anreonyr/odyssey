@@ -159,8 +159,27 @@ impl ProfileInspectorBuiltin {
         budget: CapabilityBudget,
         _bindings: &[ResolvedBinding],
     ) -> SlotId {
-        let resource = Arc::new(ProfileInspectorResource::new(factory.space().clone()));
-        factory.mint(kind, decl, plugin, budget, resource)
+        use odyssey::core::rights::rights::{CapabilityRights, OperationRights};
+
+        let pc = factory.plugin_cspace(plugin);
+        let local_slot = pc.mint(
+            kind,
+            decl,
+            budget.clone(),
+            Arc::new(ProfileInspectorResource::new(factory.space().clone())),
+        );
+        let rights = CapabilityRights {
+            operations: OperationRights::ALL,
+            timeout_ms: budget.timeout_ms(),
+        };
+        pc.inner()
+            .grant_to::<ProfileInspectorResource>(
+                local_slot,
+                factory.space(),
+                rights,
+                decl.name.clone(),
+            )
+            .expect("grant from plugin cspace to global should succeed")
     }
 
     pub fn register() -> (PluginManifest, MintFn, RuinFn) {
