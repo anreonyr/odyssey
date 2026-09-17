@@ -543,6 +543,8 @@ impl MemoryBuiltin {
         budget: CapabilityBudget,
         _bindings: &[ResolvedBinding],
     ) -> SlotId {
+        use odyssey::core::rights::rights::{CapabilityRights, OperationRights};
+
         // Backend selection (extracted so we don't put a
         // macro inside a match arm):
         // - `ODYSSEY_MEMORY_PATH` set → `FileMemoryBackend`,
@@ -555,23 +557,53 @@ impl MemoryBuiltin {
         //   that would pollute tests.
         let backend: Arc<dyn MemoryBackend> = pick_backend();
 
+        // Slice 3 PluginCspace pattern: each cap mints into
+        // the plugin's own cspace, then `grant_to` exports
+        // the slot into the orchestrator's global cspace so
+        // the HTTP bridge can still look it up by name. The
+        // returned `SlotId` is the GLOBAL one — `default_ruin`'s
+        // teardown of the returned ids works unchanged.
+        let pc = factory.plugin_cspace(plugin);
+        let rights = CapabilityRights {
+            operations: OperationRights::ALL,
+            timeout_ms: budget.timeout_ms(),
+        };
+
         match decl.name.as_str() {
-            NAME_QUERY => factory.mint(
-                kind,
-                decl,
-                plugin,
-                budget,
-                Arc::new(MemoryQueryResource {
-                    backend: backend.clone(),
-                }),
-            ),
-            NAME_INSERT => factory.mint(
-                kind,
-                decl,
-                plugin,
-                budget,
-                Arc::new(MemoryInsertResource { backend }),
-            ),
+            NAME_QUERY => {
+                let local_slot = pc.mint(
+                    kind,
+                    decl,
+                    budget.clone(),
+                    Arc::new(MemoryQueryResource {
+                        backend: backend.clone(),
+                    }),
+                );
+                pc.inner()
+                    .grant_to::<MemoryQueryResource>(
+                        local_slot,
+                        factory.space(),
+                        rights,
+                        decl.name.clone(),
+                    )
+                    .expect("grant from plugin cspace to global should succeed")
+            }
+            NAME_INSERT => {
+                let local_slot = pc.mint(
+                    kind,
+                    decl,
+                    budget.clone(),
+                    Arc::new(MemoryInsertResource { backend }),
+                );
+                pc.inner()
+                    .grant_to::<MemoryInsertResource>(
+                        local_slot,
+                        factory.space(),
+                        rights,
+                        decl.name.clone(),
+                    )
+                    .expect("grant from plugin cspace to global should succeed")
+            }
             other => panic!("memory: unexpected capability name `{other}`"),
         }
     }
