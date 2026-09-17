@@ -163,9 +163,21 @@ pub async fn run_on(
     // sees live slots. Catch_unwind protects the orchestrator
     // from a panicking builtin; the cspace revoke still runs
     // afterwards so we don't leak slots.
+    //
+    // Slice 3 PluginCspace cleanup: after the `RuinFn` fires
+    // against the global cspace, the orchestrator drains the
+    // plugin's own `PluginCspace` via
+    // `factory.reclaim_plugin`. A builtin that mints into its
+    // per-plugin cspace and grants a derived slot into the
+    // global cspace has TWO live slots — the global one (in
+    // `minted`, revoked by `default_ruin`) and the local one
+    // (only in the plugin's `PluginCspace`, previously leaked).
+    // `RuinFn` keeps its signature untouched; the cleanup runs
+    // here at the call site, keyed off the resolved plugin
+    // id and the factory's `plugin_cspaces` map.
     let lifecycle = LifecycleEventBus::new();
     let _ = lifecycle.publish(LifecycleEvent::ShutdownStarted);
-    ruin_via_registry(&cspace, &plan, &minted, plugins);
+    ruin_via_registry(&factory, &cspace, &plan, &minted, plugins);
     let _ = lifecycle.publish(LifecycleEvent::ShutdownCompleted {
         remaining_slots: cspace.len(),
     });
@@ -240,6 +252,7 @@ async fn mint_from_registry(
 }
 
 fn ruin_via_registry(
+    factory: &CapabilityFactory,
     cspace: &CapabilitySpace,
     plan: &ResolvedPlan,
     minted: &HashMap<PluginId, Vec<SlotId>>,
@@ -267,7 +280,7 @@ fn ruin_via_registry(
         let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             (entry.ruin_fn)(cspace, slot_ids)
         }));
-        let total_revoked = match outcome {
+        let global_revoked = match outcome {
             Ok(Ok(revoked)) => revoked,
             Ok(Err(message)) => {
                 eprintln!("[shutdown] {} RuinFn failed: {message}", plugin_id.name);
@@ -284,6 +297,17 @@ fn ruin_via_registry(
                     .sum()
             }
         };
+        // Slice 3 PluginCspace cleanup: drain the plugin's
+        // own `PluginCspace` after the global revoke ran. A
+        // builtin that minted into its per-plugin cspace and
+        // granted a derived slot into the global cspace left
+        // the local slot live (grant preserves the source).
+        // The `RuinFn` signature stays untouched, so the
+        // orchestrator has to drive the per-plugin reclaim
+        // itself. `reclaim_plugin` is a no-op for plugins
+        // that haven't migrated to per-plugin isolation.
+        let local_revoked = factory.reclaim_plugin(plugin_id);
+        let total_revoked = global_revoked + local_revoked;
         if total_revoked > 0 || !slot_ids.is_empty() {
             println!(
                 "  ✓ {}@{}  revoked {} slot(s)",

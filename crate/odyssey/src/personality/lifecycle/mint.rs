@@ -147,6 +147,59 @@ impl CapabilityFactory {
             .clone()
     }
 
+    /// Drain every slot still live in the plugin's per-plugin
+    /// `PluginCspace`. The orchestrator's teardown calls this
+    /// for every plugin after its `RuinFn` has run, so a
+    /// Slice 3 builtin that mints into its own `PluginCspace`
+    /// and grants a derived slot into the global cspace does
+    /// not leak the original local slot across restarts.
+    ///
+    /// Returns the number of slots removed (sum of
+    /// `revoke_tree` reports). Returns `0` for a plugin that
+    /// never created a `PluginCspace` — i.e. a builtin that
+    /// hasn't migrated to per-plugin isolation and therefore
+    /// has nothing to leak. Slot ids are resolved from the
+    /// cspace's own name table at call time; the reclaim is
+    /// idempotent against an already-drained plugin
+    /// (`enumerate()` returns `[]`).
+    ///
+    /// The `RuinFn` signature stays untouched: this is an
+    /// orchestrator-side cleanup that the hook does not see.
+    /// `default_ruin` continues to revoke only the global
+    /// slot ids returned by the matching `MintFn`; the
+    /// reclaim happens immediately after, against the
+    /// factory's `plugin_cspaces` map.
+    pub fn reclaim_plugin(&self, plugin: &PluginId) -> usize {
+        let pc = {
+            let pcs = self.plugin_cspaces.lock().expect("plugin_cspaces poisoned");
+            match pcs.get(plugin) {
+                Some(pc) => pc.clone(),
+                None => return 0,
+            }
+        };
+        // Snapshot the names under the cspace's locks before
+        // we start revoking — `enumerate()` reads the slot
+        // table; resolving each name back to a `SlotId` via
+        // `slot_for_name` reads the name table. Both read
+        // locks; doing the resolve before the revoke loop
+        // keeps the iteration independent of any concurrent
+        // mutations. A slot id is collected once per name;
+        // duplicates (shouldn't happen — cspace names are
+        // unique — but the kernel doesn't enforce it) are
+        // deduped so the sum is faithful to actual removal.
+        let mut roots: Vec<SlotId> = Vec::new();
+        for meta in pc.inner().enumerate() {
+            if let Some(slot_id) = pc.inner().slot_for_name(&meta.name)
+                && !roots.contains(&slot_id) {
+                    roots.push(slot_id);
+                }
+        }
+        roots
+            .iter()
+            .map(|slot_id| pc.inner().revoke_tree(*slot_id))
+            .sum()
+    }
+
     /// Mint a typed token wrapping the resource, allocate a slot, install.
     /// Returns the freshly minted `SlotId` so the caller can construct a
     /// typed `Slot<R>` reference to it.
