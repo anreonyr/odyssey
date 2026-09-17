@@ -22,9 +22,7 @@
 use std::path::Path;
 
 use crate::core::identity::ids::SlotId;
-use crate::core::manifest::manifest::{
-    ManifestLoadError, PluginManifest,
-};
+use crate::core::manifest::manifest::{ManifestLoadError, PluginManifest};
 use crate::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
 
 /// A plugin loaded from an on-disk manifest. The

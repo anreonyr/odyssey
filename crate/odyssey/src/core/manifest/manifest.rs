@@ -354,9 +354,10 @@ impl PluginManifest {
     /// on the same struct shape — the schema is decoupled
     /// from the on-disk format.
     pub fn from_json_str(s: &str) -> Result<Self, ManifestLoadError> {
-        let m: PluginManifest = serde_json::from_str(s)
-            .map_err(|e| ManifestLoadError::Parse(e.to_string()))?;
-        m.validate().map_err(|e| ManifestLoadError::Invalid(e.to_string()))?;
+        let m: PluginManifest =
+            serde_json::from_str(s).map_err(|e| ManifestLoadError::Parse(e.to_string()))?;
+        m.validate()
+            .map_err(|e| ManifestLoadError::Invalid(e.to_string()))?;
         Ok(m)
     }
 
@@ -366,8 +367,7 @@ impl PluginManifest {
     /// future change can dispatch on extension to support
     /// multiple formats.
     pub fn from_path(path: &Path) -> Result<Self, ManifestLoadError> {
-        let bytes = std::fs::read(path)
-            .map_err(|e| ManifestLoadError::Io(e.to_string()))?;
+        let bytes = std::fs::read(path).map_err(|e| ManifestLoadError::Io(e.to_string()))?;
         let s = std::str::from_utf8(&bytes)
             .map_err(|e| ManifestLoadError::Io(format!("not utf-8: {e}")))?;
         Self::from_json_str(s)
@@ -400,7 +400,9 @@ impl PluginManifest {
                 return Err(ManifestInvalid::EmptyExposeContract { index: i });
             }
             if !seen.insert(e.name.as_str()) {
-                return Err(ManifestInvalid::DuplicateExposeName { name: e.name.clone() });
+                return Err(ManifestInvalid::DuplicateExposeName {
+                    name: e.name.clone(),
+                });
             }
         }
         for (i, r) in self.requires.iter().enumerate() {

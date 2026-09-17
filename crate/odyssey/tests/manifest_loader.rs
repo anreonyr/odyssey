@@ -8,9 +8,7 @@
 
 use std::io::Write;
 
-use odyssey::core::manifest::manifest::{
-    ManifestInvalid, ManifestLoadError, PluginManifest,
-};
+use odyssey::core::manifest::manifest::{ManifestInvalid, ManifestLoadError, PluginManifest};
 
 const VALID_JSON: &str = r#"{
     "plugin": {
@@ -132,10 +130,9 @@ fn validate_rejects_empty_plugin_version() {
 
 #[test]
 fn validate_rejects_no_exposes() {
-    let err = PluginManifest::from_json_str(
-        r#"{"plugin":{"name":"p","version":"0.1.0"},"exposes":[]}"#,
-    )
-    .expect_err("empty exposes should fail validation");
+    let err =
+        PluginManifest::from_json_str(r#"{"plugin":{"name":"p","version":"0.1.0"},"exposes":[]}"#)
+            .expect_err("empty exposes should fail validation");
     assert!(
         matches!(err, ManifestLoadError::Invalid(ref msg) if msg.contains("exposes no capabilities")),
         "expected no-exposes validation error, got {err:?}"
@@ -206,10 +203,7 @@ fn validate_rejects_empty_require_handle() {
 
 #[test]
 fn from_path_loads_valid_manifest_file() {
-    let dir = std::env::temp_dir().join(format!(
-        "odyssey-loader-test-{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("odyssey-loader-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create temp dir");
     let path = dir.join("valid.manifest.json");
     let mut f = std::fs::File::create(&path).expect("create file");
@@ -237,10 +231,7 @@ fn from_path_validates_after_parsing() {
     // Write a syntactically valid JSON file that fails
     // validation (empty plugin name). The file should load
     // and parse, then validation should reject it.
-    let dir = std::env::temp_dir().join(format!(
-        "odyssey-loader-test-{}",
-        std::process::id()
-    ));
+    let dir = std::env::temp_dir().join(format!("odyssey-loader-test-{}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("create temp dir");
     let path = dir.join("invalid.manifest.json");
     let mut f = std::fs::File::create(&path).expect("create file");
