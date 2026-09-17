@@ -2590,9 +2590,13 @@ fn llm_streaming_deltas_reach_session_broadcast() {
 
     // Override the `llm_complete` mint with our custom
     // streaming backend. The second mint replaces the
-    // first in the cspace's `names` map.
+    // first in the cspace's `names` map. The custom
+    // resource needs a cspace reference so the worker
+    // thread can look up the per-session event bus by
+    // slot id (Slice 4).
     let custom_llm = LlmCompleteResource {
         backend: Arc::new(ThreeDeltaBackend),
+        space: cspace.clone(),
     };
     factory.mint(
         CapKind::Sync,
@@ -2603,7 +2607,7 @@ fn llm_streaming_deltas_reach_session_broadcast() {
     );
 
     // Start a session. The session's broadcast sender is
-    // what `push_event_to_session` writes to.
+    // what the typed `SessionEventBus` cap publishes into.
     let sid = runtime
         .start(
             "test".into(),
@@ -2627,12 +2631,20 @@ fn llm_streaming_deltas_reach_session_broadcast() {
             .slot_for_name("llm_complete")
             .expect("llm_complete must be in cspace"),
     );
+
+    // Resolve the session's event bus slot id directly
+    // through the agent_runtime API — that's the same
+    // slot id the runtime put in `session.event_bus_slot_id`,
+    // so the LLM plugin can look the bus up and invoke it.
+    let bus_slot_id = runtime
+        .session_event_bus_slot_id(sid.as_str())
+        .expect("session must have an event bus");
     let out = slot
         .invoke(
             OperationRights::EXECUTE,
             serde_json::json!({
                 "prompt": "hi",
-                "session_id": sid.as_str(),
+                "event_bus_slot_id": bus_slot_id.raw(),
             }),
         )
         .expect("invoke should succeed");

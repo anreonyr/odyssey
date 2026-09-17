@@ -43,6 +43,7 @@
 //! drops the session, closing the broadcast).
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -50,13 +51,16 @@ use crate::llm::{LlmCompleteResource, LlmEmbedResource};
 use crate::memory::{MemoryInsertResource, MemoryQueryResource};
 use odyssey::capability::enforce::quota::CapabilityBudget;
 use odyssey::capability::enforce::space::CapabilitySpace;
+use odyssey::capability::handle::cap::Capability;
 use odyssey::capability::handle::slot::Slot;
 use odyssey::core::Resource;
+use odyssey::core::clock::clock::SystemClock;
 use odyssey::core::contract::builtin::BuiltinManifest;
-use odyssey::core::identity::ids::{PluginId, SlotId};
+use odyssey::core::identity::ids::{CapabilityId, PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
-use odyssey::core::rights::rights::OperationRights;
+use odyssey::core::meta::meta::CapabilityMeta;
+use odyssey::core::rights::rights::{CapabilityRights, OperationRights};
 use odyssey::personality::composition::resolve::ResolvedBinding;
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
 use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
@@ -491,6 +495,16 @@ impl SessionCheckpoint {
 /// handle `agent_stream` subscribers read from; the
 /// `AgentSlots` are typed slot refs to the LLM and memory
 /// caps the agent uses during a step.
+///
+/// `event_bus_slot_id` is the slot id of this session's
+/// `SessionEventBusResource` in the global cspace. The
+/// `agent_stream` cap and the LLM plugin reach the
+/// session's broadcast via this typed capability, not via
+/// the static `SESSIONS` table. The slot id is the only
+/// reachability handle the plugins see — they never learn
+/// the session id directly, and the static SESSIONS table
+/// is now an internal implementation detail of the
+/// agent_runtime module.
 pub struct Session {
     pub id: SessionId,
     pub goal: String,
@@ -504,6 +518,7 @@ pub struct Session {
     pub last_advance_ms: u64,
     pub slots: AgentSlots,
     pub sender: broadcast::Sender<AgentEvent>,
+    pub event_bus_slot_id: SlotId,
 }
 
 impl Session {
@@ -513,6 +528,7 @@ impl Session {
         allowed_tools: Vec<String>,
         limits: SessionLimits,
         slots: AgentSlots,
+        cspace: &CapabilitySpace,
     ) -> Self {
         let id = SessionId::new();
         let now = SystemTime::now()
@@ -520,6 +536,12 @@ impl Session {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
         let (sender, _rx) = broadcast::channel(64);
+        // Mint the per-session event bus cap into the global
+        // cspace. The slot id is the only handle external
+        // plugins see; they reach the session's broadcast
+        // through this typed cap, not via the static
+        // SESSIONS table.
+        let event_bus_slot_id = mint_session_event_bus(cspace, sender.clone());
         Self {
             id,
             goal,
@@ -533,6 +555,7 @@ impl Session {
             last_advance_ms: now,
             slots,
             sender,
+            event_bus_slot_id,
         }
     }
 
@@ -578,6 +601,130 @@ impl Session {
 }
 
 // ---------------------------------------------------------------------------
+// SessionEventBusResource — per-session typed event publisher
+// ---------------------------------------------------------------------------
+
+/// Typed capability that publishes `AgentEvent`s to a session's
+/// broadcast. The LLM plugin (and future streaming tools) invoke
+/// this resource to push per-token deltas, replacing the old
+/// `pub fn push_event_to_session(sid, event)` cross-call into
+/// `agent_runtime`'s static `SESSIONS` table.
+///
+/// Slice 4: the LLM plugin reaches the bus by slot id (the
+/// agent_runtime hands it the slot id in the LLM input). The
+/// plugin looks the slot up via the cspace and invokes through
+/// the typed cap. The static `SESSIONS` table is no longer
+/// reachable from the LLM plugin; `push_event_to_session` is
+/// deleted in this commit.
+pub struct SessionEventBusResource {
+    sender: broadcast::Sender<AgentEvent>,
+}
+
+impl Resource for SessionEventBusResource {
+    fn invoke(&self, input: Value) -> Result<Value, String> {
+        // The bus accepts the same JSON envelope that
+        // `AgentEvent::to_value` produces. Round-tripping through
+        // JSON keeps the cap boundary typed: the producer (LLM
+        // plugin) constructs the JSON from a typed `AgentEvent`
+        // value via `to_value`; the bus parses it back. We
+        // dispatch on `kind` so the JSON shape stays
+        // forward-compatible (unknown kinds surface as
+        // `AgentEvent::Error`, never as silent drops).
+        let kind = input
+            .get("kind")
+            .and_then(Value::as_str)
+            .ok_or_else(|| "session_event_bus: missing `kind`".to_string())?;
+        let event = match kind {
+            "llm_delta" => AgentEvent::LlmDelta(
+                input
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "session_event_bus(llm_delta): missing `text`".to_string())?
+                    .to_string(),
+            ),
+            "llm_reply_text" => AgentEvent::LlmReplyText(
+                input
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "session_event_bus(llm_reply_text): missing `text`".to_string())?
+                    .to_string(),
+            ),
+            "error" => AgentEvent::Error(
+                input
+                    .get("message")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| "session_event_bus(error): missing `message`".to_string())?
+                    .to_string(),
+            ),
+            // `tool_call` and `tool_result` are produced by
+            // the agent_runtime itself (not the LLM), so the
+            // bus doesn't currently need to handle them. They
+            // would route to the session via `session.push_event`
+            // directly. Surfacing unknown kinds explicitly so
+            // a future variant doesn't silently drop.
+            other => {
+                return Err(format!(
+                    "session_event_bus: unhandled kind `{other}` (LLM should only emit llm_delta / llm_reply_text / error)"
+                ));
+            }
+        };
+        // `send` returns Err only when there are no receivers.
+        // The bus is a best-effort publisher; events with no
+        // listener are dropped silently.
+        let _ = self.sender.send(event);
+        Ok(Value::Null)
+    }
+}
+
+/// Mint a fresh `CapabilityId` for a session event bus. The
+/// agent_runtime mints these at runtime (per-session), so they
+/// don't share the factory's id counter.
+fn next_bus_capability_id() -> CapabilityId {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    CapabilityId(NEXT.fetch_add(1, Ordering::Relaxed))
+}
+
+/// Mint a `SessionEventBusResource` into `cspace` and return its
+/// slot id. The cap's name is opaque — callers use the returned
+/// slot id directly, never the name — but it's unique in the
+/// cspace so it doesn't collide with user-facing caps.
+fn mint_session_event_bus(
+    cspace: &CapabilitySpace,
+    sender: broadcast::Sender<AgentEvent>,
+) -> SlotId {
+    let slot_id = cspace.allocate();
+    let meta = CapabilityMeta {
+        id: next_bus_capability_id(),
+        name: format!("__session_event_bus_{}", slot_id.raw()),
+        namespace: "agent_runtime".into(),
+        contract_name: "session_event_bus".into(),
+        plugin: PluginId {
+            name: "agent_runtime".into(),
+            version: "0.1.0".into(),
+        },
+        kind: CapKind::Sync,
+        timeout_ms: 1000,
+        quota: Default::default(),
+        tool_schema: None,
+    };
+    let rights = CapabilityRights {
+        operations: OperationRights::WRITE,
+        timeout_ms: 1000,
+    };
+    let budget = CapabilityBudget::new(1000);
+    let cap = Capability::new(
+        meta,
+        Arc::new(SessionEventBusResource { sender }),
+        budget,
+        rights,
+        CapKind::Sync,
+        Arc::new(SystemClock),
+    );
+    cspace.install(slot_id, Arc::new(cap));
+    slot_id
+}
+
+// ---------------------------------------------------------------------------
 // Global sessions table — shared across all agent_runtime caps
 // ---------------------------------------------------------------------------
 
@@ -588,21 +735,6 @@ fn global_sessions() -> Sessions {
     SESSIONS
         .get_or_init(|| Arc::new(Mutex::new(HashMap::new())))
         .clone()
-}
-
-/// Push an event to a session's broadcast sender by
-/// session id. Used by the `LlmCompleteResource` to forward
-/// per-token `Delta`s from a streaming LLM call to the
-/// session's `agent_stream` subscribers. No-op if the
-/// session is unknown (it has been cancelled or the call
-/// raced with a cancel). A failure to push (channel closed)
-/// is also a no-op — the consumer has gone away.
-pub fn push_event_to_session(session_id: &str, event: AgentEvent) {
-    let sessions_arc = global_sessions();
-    let sessions = sessions_arc.lock().expect("sessions poisoned");
-    if let Some(session) = sessions.get(&SessionId(session_id.to_string())) {
-        let _ = session.sender.send(event);
-    }
 }
 
 /// Subscribe to a session's event broadcast by id. Used by
@@ -650,7 +782,7 @@ impl AgentRuntime {
             }
         }
         let slots = AgentSlots::from_bindings(&self.cspace, &self.bindings);
-        let session = Session::new(goal, context, allowed_tools, limits, slots);
+        let session = Session::new(goal, context, allowed_tools, limits, slots, &self.cspace);
         let id = session.id.clone();
         self.sessions
             .lock()
@@ -674,6 +806,16 @@ impl AgentRuntime {
             }
             _ => Ok(sid),
         }
+    }
+
+    /// Slot id of the per-session `SessionEventBus` cap in
+    /// the global cspace. Other plugins (the LLM plugin in
+    /// particular) reach the session's broadcast via this
+    /// slot id. Returns `None` if the session is unknown.
+    pub fn session_event_bus_slot_id(&self, id: &str) -> Option<SlotId> {
+        let sid = SessionId(id.to_string());
+        let sessions = self.sessions.lock().expect("sessions poisoned");
+        sessions.get(&sid).map(|s| s.event_bus_slot_id)
     }
 
     pub fn advance(
@@ -708,12 +850,13 @@ impl AgentRuntime {
             "temperature": 0.7,
             "tools": tool_schemas,
             // Route per-token `Delta` events to this session's
-            // broadcast sender so `agent_stream` subscribers
-            // see the LLM thinking in real time. The
-            // LlmCompleteResource looks this up in
-            // `global_sessions()`; an unknown id is a no-op
-            // (the call raced with a `cancel`).
-            "session_id": session.id.as_str(),
+            // broadcast via the session's `SessionEventBus`
+            // capability. The LLM plugin holds a reference to
+            // the cspace, looks up the bus by slot id, and
+            // invokes through the typed cap (WRITE). The
+            // bus pushes to the broadcast sender internally.
+            // No `pub fn` cross-call into agent_runtime.
+            "event_bus_slot_id": session.event_bus_slot_id.raw(),
         });
         let llm_resp = session
             .slots
@@ -846,6 +989,16 @@ impl AgentRuntime {
             .remove(&sid)
             .ok_or_else(|| AgentError::UnknownSession(id.to_string()))?;
         session.status = SessionStatus::Cancelled;
+        // Slice 4: revoke the per-session event bus cap so
+        // its cloned `broadcast::Sender` drops. Without this
+        // the bus keeps the broadcast alive past cancel
+        // and `agent_stream` subscribers never see the
+        // channel close. We revoke (single) — the bus has
+        // no derived caps, only the LLM plugin holds the
+        // slot id and uses it for invoke (not derivation).
+        let bus_slot_id = session.event_bus_slot_id;
+        drop(sessions);
+        self.cspace.revoke(bus_slot_id);
         if let Some(p) = path {
             let checkpoint = SessionCheckpoint::from_session(&session, &sid);
             if let Some(parent) = std::path::Path::new(p).parent()
@@ -876,6 +1029,7 @@ impl AgentRuntime {
         let sid = SessionId(checkpoint.id.0.clone());
         let slots = AgentSlots::from_bindings(&self.cspace, &self.bindings);
         let (sender, _rx) = broadcast::channel(64);
+        let event_bus_slot_id = mint_session_event_bus(&self.cspace, sender.clone());
         let now = Session::now_ms();
         let session = Session {
             id: sid.clone(),
@@ -890,6 +1044,7 @@ impl AgentRuntime {
             last_advance_ms: checkpoint.last_advance_ms.max(now),
             slots,
             sender,
+            event_bus_slot_id,
         };
         let mut sessions = self.sessions.lock().expect("sessions poisoned");
         if sessions.contains_key(&sid) {

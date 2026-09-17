@@ -901,8 +901,21 @@ pub fn backend_from_env() -> Result<Arc<dyn LlmBackend>, String> {
 // Resources — one per cap
 // ---------------------------------------------------------------------------
 
+/// Sync `llm_complete` capability. The backend produces
+/// the final response; per-token deltas are routed through
+/// the agent runtime's typed `SessionEventBus` capability
+/// (looked up by slot id from `space`) so `agent_stream`
+/// subscribers see the LLM thinking in real time.
+///
+/// Pre-Slice-4 this struct had only `backend`; deltas were
+/// pushed via the `pub fn push_event_to_session(sid, event)`
+/// cross-call into `agent_runtime`'s static `SESSIONS`
+/// table. The slot id of the per-session bus is now passed
+/// in the LLM input, and this struct holds a cspace
+/// reference so it can look the bus up and invoke it.
 pub struct LlmCompleteResource {
     pub backend: Arc<dyn LlmBackend>,
+    pub space: odyssey::capability::enforce::space::CapabilitySpace,
 }
 
 impl Resource for LlmCompleteResource {
@@ -994,18 +1007,21 @@ impl Resource for LlmCompleteResource {
         // is sync).
         //
         // Per-token `Delta`s are routed to the session's
-        // broadcast sender (`agent_stream` subscribers) from
-        // inside the worker thread — `push_event_to_session`
-        // takes a global `Mutex` and the broadcast `Sender`
-        // is `Send`, so it crosses the thread boundary fine.
-        // The agent's `advance` puts its `session_id` in the
-        // input; a missing session is a no-op (the call raced
-        // with a `cancel` or the test didn't register one).
-        let session_id = input
-            .get("session_id")
-            .and_then(Value::as_str)
-            .map(String::from);
+        // broadcast via the typed `SessionEventBus`
+        // capability. The agent's `advance` puts the bus
+        // slot id in the input as `event_bus_slot_id`;
+        // we look the cap up via the cspace and invoke
+        // through it (WRITE). The LLM no longer reaches
+        // into `agent_runtime`'s static `SESSIONS` table.
+        // A missing / unknown slot id is a no-op (the
+        // session was cancelled, or a test constructed the
+        // resource without a real bus).
+        let event_bus_slot_id = input
+            .get("event_bus_slot_id")
+            .and_then(Value::as_u64)
+            .map(odyssey::core::identity::ids::SlotId::new);
         let backend = self.backend.clone();
+        let space = self.space.clone();
         let join = std::thread::spawn(move || -> Result<CompleteResponse, String> {
             let (tx, mut rx) = tokio::sync::mpsc::channel::<StreamEvent>(64);
             backend.complete_stream(req, tx)?;
@@ -1014,10 +1030,24 @@ impl Resource for LlmCompleteResource {
                     Some(StreamEvent::Done(r)) => break Ok(r),
                     Some(StreamEvent::Error(e)) => break Err(e),
                     Some(StreamEvent::Delta(s)) => {
-                        if let Some(sid) = session_id.as_deref() {
-                            crate::agent_runtime::push_event_to_session(
-                                sid,
-                                crate::agent_runtime::AgentEvent::LlmDelta(s),
+                        if let Some(bus_slot_id) = event_bus_slot_id
+                            && let Some(bus_cap) = space.lookup_erased(bus_slot_id)
+                        {
+                            // The bus parses the JSON envelope
+                            // and pushes to the session's
+                            // broadcast sender. Unknown kinds
+                            // (this delta kind is "llm_delta")
+                            // surface as a logged error inside
+                            // the bus; here we ignore the
+                            // Result since the bus is
+                            // best-effort.
+                            let payload = serde_json::json!({
+                                "kind": "llm_delta",
+                                "text": s,
+                            });
+                            let _ = bus_cap.invoke_dyn(
+                                odyssey::core::rights::rights::OperationRights::WRITE,
+                                payload,
                             );
                         }
                         continue;
@@ -1136,6 +1166,7 @@ impl LlmBuiltin {
                 budget,
                 Arc::new(LlmCompleteResource {
                     backend: backend.clone(),
+                    space: factory.space().clone(),
                 }),
             ),
             NAME_EMBED => factory.mint(
