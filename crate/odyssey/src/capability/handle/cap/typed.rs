@@ -146,6 +146,20 @@ impl<R: Resource> Capability<R> {
         }
     }
 
+    /// Arc-cloned handler reference. Kernel-only — used by
+    /// `CapabilitySpace::transfer_to` to install the same
+    /// handler into a different cspace without going through
+    /// the public mint path.
+    pub(crate) fn handler_arc(&self) -> Arc<R> {
+        Arc::clone(&self.handler)
+    }
+
+    /// Arc-cloned clock reference. Kernel-only — see
+    /// `handler_arc` for the rationale.
+    pub(crate) fn clock_arc(&self) -> Arc<dyn Clock> {
+        Arc::clone(&self.clock)
+    }
+
     /// Set the revocation marker. Called by the cspace on
     /// `install` (with `false`, so a re-installed cap starts
     /// fresh) and on `revoke` (with `true`). Internal kernel

@@ -47,11 +47,13 @@ use std::time::Duration;
 
 use odyssey::capability::enforce::quota::CapabilityBudget;
 use odyssey::capability::enforce::space::CapabilitySpace;
+use odyssey::capability::enforce::space::PluginCspace;
 use odyssey::capability::handle::slot::Slot;
 use odyssey::core::clock::clock::SystemClock;
 use odyssey::core::contract::builtin::BuiltinManifest;
 use odyssey::core::identity::ids::PluginId;
 use odyssey::core::identity::kind::CapKind;
+use odyssey::core::manifest::manifest::CapabilityDecl;
 use odyssey::core::meta::chunk::CapabilityChunk;
 use odyssey::core::rights::rights::OperationRights;
 use odyssey::personality::lifecycle::mint::CapabilityFactory;
@@ -177,6 +179,126 @@ fn attenuated_capability_denies_unheld_op() {
         .invoke(OperationRights::READ, serde_json::json!({"x": 1}))
         .expect("READ is in the held rights, must be accepted");
     assert_eq!(read_ok, serde_json::json!({"x": 1}));
+}
+
+/// Phase 4 (Slice 2 of Direction A): per-plugin cspaces
+/// isolate plugin ownership at the kernel level.
+///
+/// Two plugins get two `PluginCspace`s. Each mints its own
+/// echo cap. Plugin A cannot see plugin B's cap by name;
+/// plugin B cannot see plugin A's. The cross-plugin
+/// transfer primitive (`CapabilitySpace::transfer_to`) is
+/// the only path that crosses the boundary — and it
+/// revokes the source so the sender can't keep using
+/// "their own" copy after handing it over.
+#[test]
+fn plugin_cspaces_are_isolated_until_explicit_transfer() {
+    let llm_plugin = PluginId {
+        name: "llm".into(),
+        version: "0.1.0".into(),
+    };
+    let agent_plugin = PluginId {
+        name: "agent".into(),
+        version: "0.1.0".into(),
+    };
+
+    let llm_pc = PluginCspace::new(llm_plugin.clone());
+    let agent_pc = PluginCspace::new(agent_plugin.clone());
+
+    let echo_decl = CapabilityDecl {
+        name: "echo".into(),
+        kind: CapKind::Sync,
+        contract_name: "echo".into(),
+        tool_schema: None,
+    };
+
+    // Each plugin mints its own echo cap into its own cspace.
+    let llm_echo_id = llm_pc.mint(
+        CapKind::Sync,
+        &echo_decl,
+        CapabilityBudget::new(5000),
+        Arc::new(EchoResource),
+    );
+    let agent_echo_id = agent_pc.mint(
+        CapKind::Sync,
+        &echo_decl,
+        CapabilityBudget::new(5000),
+        Arc::new(EchoResource),
+    );
+
+    // Each plugin can see its own cap by name.
+    assert!(agent_pc.inner().lookup_by_name("echo").is_some());
+    assert!(llm_pc.inner().lookup_by_name("echo").is_some());
+
+    // The agent's lookup_by_name resolves to its own slot id
+    // (proving the LLM's same-named cap is invisible).
+    assert_eq!(
+        agent_pc.inner().slot_for_name("echo"),
+        Some(agent_echo_id),
+        "agent's lookup_by_name must resolve to its own slot, not the LLM's"
+    );
+
+    // The LLM's lookup_by_name resolves to its own slot id,
+    // not the agent's.
+    assert_eq!(
+        llm_pc.inner().slot_for_name("echo"),
+        Some(llm_echo_id),
+        "LLM's lookup_by_name must resolve only to LLM's own echo"
+    );
+
+    // The two slot ids are local to their own cspace — each
+    // PluginCspace has its own id allocator, so both can be
+    // `SlotId(1)` and still refer to different capabilities.
+    // Isolation is verified through the lookup boundaries
+    // (assertions above), not through slot id comparison.
+
+    // Cross-plugin reachability: transfer the LLM's echo into
+    // the agent's cspace. After the transfer:
+    //   - the agent's cspace holds the transferred cap under
+    //     a fresh slot id and the new name,
+    //   - the LLM's cspace no longer holds the source slot.
+    let transferred = llm_pc
+        .inner()
+        .transfer_to::<EchoResource>(llm_echo_id, agent_pc.inner(), "llm_echo".into())
+        .expect("transfer to agent's cspace should succeed");
+
+    // `transferred` is fresh and local to the agent's cspace.
+    // The agent's cspace allocator is independent, so it
+    // starts from its own 0 — the new slot id is whatever
+    // `target.allocate()` returns next. After the transfer,
+    // the agent holds 2 caps: its own echo + the transferred
+    // LLM echo. The LLM holds 0 (the source was revoked).
+    assert_eq!(
+        agent_pc.inner().enumerate().len(),
+        2,
+        "agent's cspace should hold its own echo + the transferred cap"
+    );
+    assert_eq!(
+        llm_pc.inner().enumerate().len(),
+        0,
+        "LLM's cspace should be empty after the transfer (source revoked)"
+    );
+
+    // The agent's cspace holds the transferred cap under the new name.
+    assert_eq!(
+        agent_pc.inner().slot_for_name("llm_echo"),
+        Some(transferred),
+        "agent's cspace must hold the transferred cap under the new name"
+    );
+
+    // The LLM's cspace no longer resolves the source slot.
+    assert!(
+        llm_pc.inner().lookup_typed::<EchoResource>(llm_echo_id).is_none(),
+        "transferred-from slot must be revoked in source cspace"
+    );
+
+    // Invoking through the agent's cspace works — the
+    // underlying handler is shared across the transfer.
+    let typed_slot: Slot<EchoResource> = Slot::new(agent_pc.inner().clone(), transferred);
+    let out = typed_slot
+        .invoke(OperationRights::EXECUTE, serde_json::json!({"hi": "agent"}))
+        .expect("invoking transferred cap should succeed");
+    assert_eq!(out, serde_json::json!({"hi": "agent"}));
 }
 
 /// Phase 11 streaming smoke test. Exercises the full

@@ -25,7 +25,7 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock, RwLockWriteGuard};
 
-use crate::core::identity::ids::{PluginId, SlotId};
+use crate::core::identity::ids::{CapabilityId, PluginId, SlotId};
 use crate::core::meta::meta::CapabilityMeta;
 use crate::core::rights::rights::CapabilityRights;
 
@@ -417,6 +417,78 @@ impl CapabilitySpace {
         revoke_tree(self, root)
     }
 
+    /// Transfer a cap from this cspace to `target`. The source
+    /// slot is revoked; the target receives a freshly-installed
+    /// slot with the same handler, budget, rights, kind, and
+    /// clock.
+    ///
+    /// This is the kernel primitive that makes per-plugin
+    /// cspaces real. A plugin mints its caps into its own
+    /// cspace; to reach another plugin's cap, it must call
+    /// `target.transfer_to(source_slot, ...)` against the
+    /// other plugin's cspace. The slot reference moves
+    /// across — once transferred, only the target holds it.
+    ///
+    /// The shared budget keeps the per-minute call accounting
+    /// coherent across the transfer: a single underlying
+    /// `QuotaState` is referenced by both ends (via
+    /// `CapabilityBudget::share_with`), so debits on the
+    /// transferred cap still count against the original
+    /// quota bucket.
+    pub fn transfer_to<R: Resource>(
+        &self,
+        from: SlotId,
+        target: &CapabilitySpace,
+        target_name: String,
+    ) -> Result<SlotId, crate::capability::error::CapabilityError> {
+        let source: Arc<Capability<R>> = self
+            .lookup_typed::<R>(from)
+            .ok_or(crate::capability::error::CapabilityError::SlotEmpty(from))?;
+
+        let rights = source.rights();
+        let new_meta = source.meta().clone();
+        let new_budget = crate::capability::enforce::quota::CapabilityBudget::share_with(
+            source.budget(),
+            rights.timeout_ms,
+        );
+
+        // Fresh slot in the target.
+        let new_slot = target.allocate();
+
+        // Build the target capability. Same handler + clock;
+        // budget is shared (Arc<QuotaState> under the hood);
+        // meta carries the new slot id and the new name.
+        let mut new_meta = new_meta;
+        new_meta.id = target.next_derived_id();
+        new_meta.name = target_name;
+        new_meta.timeout_ms = rights.timeout_ms;
+        let new_cap = Capability::new(
+            new_meta,
+            source.handler_arc(),
+            new_budget,
+            rights,
+            source.kind(),
+            source.clock_arc(),
+        );
+        let mut new_cap = new_cap;
+        new_cap.bind_slot(new_slot);
+        target.install(new_slot, Arc::new(new_cap));
+
+        // Source slot is revoked. After this, the source slot
+        // id is empty; only the target's `new_slot` can find
+        // this capability.
+        self.revoke(from);
+
+        // Kernel-level event: the cap crossed cspaces.
+        self.publish_event(crate::capability::enforce::space::CapabilityEvent::Derived {
+            parent: from,
+            child: new_slot,
+            kind: crate::capability::enforce::space::DeriveKind::Transfer,
+        });
+
+        Ok(new_slot)
+    }
+
     pub fn publish_event(&self, ev: CapabilityEvent) {
         let _ = self.inner.events.publish(ev);
     }
@@ -481,6 +553,130 @@ impl CapabilitySpace {
 impl Default for CapabilitySpace {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PluginCspace — per-plugin capability namespace
+// ---------------------------------------------------------------------------
+
+/// Per-plugin capability namespace. Each plugin gets one of these;
+/// caps minted by the plugin live in its local `CapabilitySpace`,
+/// invisible to other plugins' lookups.
+///
+/// `PluginCspace` is a thin wrapper around `CapabilitySpace` plus
+/// the plugin's `PluginId`. The plugin id auto-tags every minted
+/// cap's namespace (`odyssey.model.llama3.generate` etc.) so the
+/// existing metadata-driven introspection (HTTP bridge, profile
+/// inspector) keeps working without re-routing through the
+/// plugin's cspace.
+///
+/// Plugin isolation comes from `CapabilitySpace`'s lookup being
+/// local to its own table — a plugin holding only its own
+/// `PluginCspace` cannot resolve another plugin's cap by name.
+/// That's the kernel-level property that makes "everything is a
+/// plugin" real, not just stylistic: a plugin can't reach what
+/// it doesn't hold.
+///
+/// Cross-plugin reachability is explicit: a cap can be
+/// transferred from one plugin's cspace to another via
+/// `CapabilitySpace::transfer_to`. The slot reference moves
+/// across — once transferred, only the target holds it. The
+/// source's cspace revokes the slot, so the source can no
+/// longer invoke (a misbehaving plugin cannot keep using its
+/// "own" copy after handing it over).
+#[derive(Clone)]
+pub struct PluginCspace {
+    inner: CapabilitySpace,
+    plugin: PluginId,
+    /// Capability-id allocator. Independent from any
+    /// `CapabilitySpace` id counter so two plugins can mint
+    /// caps without colliding on `CapabilityId`.
+    id_counter: Arc<AtomicU64>,
+}
+
+impl PluginCspace {
+    /// Construct a fresh per-plugin cspace. The plugin's cap
+    /// table starts empty.
+    pub fn new(plugin: PluginId) -> Self {
+        Self {
+            inner: CapabilitySpace::new(),
+            plugin,
+            id_counter: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    /// Construct a per-plugin cspace rooted in an existing
+    /// event bus. Used by tests and by the orchestrator when
+    /// every plugin's mutations should land on the same bus
+    /// for observability.
+    pub fn with_bus(plugin: PluginId, bus: GraphEventBus) -> Self {
+        Self {
+            inner: CapabilitySpace::with_bus(bus),
+            plugin,
+            id_counter: Arc::new(AtomicU64::new(0)),
+        }
+    }
+
+    /// The plugin this cspace belongs to.
+    pub fn plugin(&self) -> &PluginId {
+        &self.plugin
+    }
+
+    /// Borrow the local cspace for direct lookups and
+    /// derivation. Plugin code that wants to mint into its
+    /// own cspace uses `mint` below; this accessor is for
+    /// advanced cases (slot lookup, grant, revoke).
+    pub fn inner(&self) -> &CapabilitySpace {
+        &self.inner
+    }
+
+    /// Mint a cap into this plugin's cspace. The cap's
+    /// `plugin` and `namespace` fields are auto-tagged with
+    /// this plugin's identity; the caller supplies the
+    /// declaration's name (used as the cap's short name and
+    /// as the lookup key).
+    pub fn mint<R: Resource>(
+        &self,
+        kind: crate::core::identity::kind::CapKind,
+        decl: &crate::core::manifest::manifest::CapabilityDecl,
+        budget: crate::capability::enforce::quota::CapabilityBudget,
+        handler: Arc<R>,
+    ) -> SlotId {
+        use crate::capability::handle::cap::Capability;
+        use crate::core::rights::rights::{CapabilityRights, OperationRights};
+
+        let id = CapabilityId(self.id_counter.fetch_add(1, Ordering::Relaxed));
+        let meta = crate::personality::lifecycle::mint::meta_from_decl(
+            id,
+            decl,
+            &self.plugin,
+            &budget,
+        );
+        let rights = CapabilityRights {
+            operations: OperationRights::ALL,
+            timeout_ms: budget.timeout_ms(),
+        };
+        let cap = Capability::new(
+            meta,
+            handler,
+            budget,
+            rights,
+            kind,
+            Arc::new(crate::core::clock::clock::SystemClock),
+        );
+        let slot_id = self.inner.allocate();
+        self.inner.install(slot_id, Arc::new(cap));
+        slot_id
+    }
+}
+
+impl std::fmt::Debug for PluginCspace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PluginCspace")
+            .field("plugin", &self.plugin)
+            .field("slots", &self.inner.len())
+            .finish()
     }
 }
 
