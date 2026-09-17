@@ -1192,7 +1192,6 @@ fn memory_query_finds_inserted_record_by_substring() {
 /// the LLM would ever call.
 #[test]
 fn tool_descriptor_reports_schema_missing_for_unschemaed_caps() {
-    use odyssey::core::contract::resource::Resource;
     use odyssey_builtin::agent::AgentListBuiltin;
     use odyssey_builtin::tool_descriptor::{ToolDescriptorBuiltin, ToolDescriptorResource};
 
@@ -1249,7 +1248,6 @@ fn tool_descriptor_reports_schema_missing_for_unschemaed_caps() {
 /// full tool surface.
 #[test]
 fn tool_descriptor_returns_schema_for_every_tool_builtin() {
-    use odyssey::core::contract::resource::Resource;
     use odyssey_builtin::database::DatabaseBuiltin;
     use odyssey_builtin::echo::EchoBuiltin;
     use odyssey_builtin::reverse::ReverseBuiltin;
@@ -2559,8 +2557,6 @@ fn llm_streaming_deltas_reach_session_broadcast() {
     use odyssey::capability::enforce::quota::CapabilityBudget;
     use odyssey::capability::enforce::space::CapabilitySpace;
     use odyssey::capability::handle::slot::Slot;
-    use odyssey::core::Resource;
-    use odyssey::core::identity::ids::PluginId;
     use odyssey::core::identity::kind::CapKind;
     use odyssey::personality::composition::resolve::resolve;
     use odyssey::personality::lifecycle::mint::CapabilityFactory;
@@ -2821,7 +2817,6 @@ fn file_memory_backend_persists_records_across_reopen() {
         // The Record struct is private; we re-derive the
         // snapshot via the in-memory store.
         let store_size = {
-            use std::collections::HashMap;
             // The file is the source of truth; we read it
             // back and count records.
             let bytes = std::fs::read_to_string(&path).expect("read");
@@ -2863,9 +2858,8 @@ fn file_memory_backend_persists_records_across_reopen() {
 /// pointing at the same cspace caps.
 #[test]
 fn agent_session_can_be_paused_and_loaded() {
-    use odyssey::core::Resource;
     use odyssey_builtin::agent_runtime::{
-        AgentRuntime, AgentRuntimeBuiltin, Session, SessionId, SessionLimits, SessionStatus,
+        AgentRuntime, AgentRuntimeBuiltin, SessionId, SessionLimits, SessionStatus,
     };
     use odyssey_builtin::llm::LlmBuiltin;
     use odyssey_builtin::memory::MemoryBuiltin;
