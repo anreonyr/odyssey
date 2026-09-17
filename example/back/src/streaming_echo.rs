@@ -147,10 +147,14 @@ impl BuiltinManifest for StreamingEchoBuiltin {
 }
 
 impl StreamingEchoBuiltin {
-    /// Typed mint — calls the factory's generic
-    /// `mint<StreamingEchoResource>`. The kind comes from the
-    /// manifest (`CapKind::Stream`) and the factory stamps it
-    /// on the capability so `Capability::open` accepts the slot.
+    /// Typed mint — Slice 3 demonstration: streaming_echo's
+    /// only cap lives in the plugin's own `PluginCspace`. We
+    /// then grant a derived slot into the orchestrator's
+    /// global cspace so the HTTP bridge can still look it up
+    /// by name. The returned `SlotId` is the GLOBAL one — the
+    /// orchestrator's existing teardown path
+    /// (`default_ruin` revoking the returned ids) works
+    /// unchanged.
     pub fn mint(
         &self,
         factory: &CapabilityFactory,
@@ -160,7 +164,17 @@ impl StreamingEchoBuiltin {
         budget: CapabilityBudget,
         _bindings: &[ResolvedBinding],
     ) -> SlotId {
-        factory.mint(kind, decl, plugin, budget, Arc::new(StreamingEchoResource))
+        use odyssey::core::rights::rights::{CapabilityRights, OperationRights};
+
+        let pc = factory.plugin_cspace(plugin);
+        let local_slot = pc.mint(kind, decl, budget.clone(), Arc::new(StreamingEchoResource));
+        let rights = CapabilityRights {
+            operations: OperationRights::ALL,
+            timeout_ms: budget.timeout_ms(),
+        };
+        pc.inner()
+            .grant_to::<StreamingEchoResource>(local_slot, factory.space(), rights, decl.name.clone())
+            .expect("grant from plugin cspace to global should succeed")
     }
 
     /// Phase 11: colocated registration helper. Returns the

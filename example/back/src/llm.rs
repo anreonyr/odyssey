@@ -1137,6 +1137,8 @@ impl LlmBuiltin {
         budget: CapabilityBudget,
         _bindings: &[ResolvedBinding],
     ) -> SlotId {
+        use odyssey::core::rights::rights::{CapabilityRights, OperationRights};
+
         // Backend selection: if `OPENAI_API_BASE` is set, use
         // the real HTTP provider; otherwise the deterministic
         // mock. Either way the two caps share the same backend
@@ -1153,29 +1155,59 @@ impl LlmBuiltin {
             Err(e) => panic!("llm: backend init: {e}"),
         };
 
-        // `factory.mint` is generic over `R: Resource`, so we
-        // dispatch on the cap name and call the concrete
-        // instantiation. Each arm produces a different `R` type,
-        // but each is concrete — there's no `Arc<dyn Resource>`
-        // path through the factory.
+        // Slice 3 PluginCspace pattern: each cap mints into the
+        // plugin's own cspace, then `grant_to` exports the slot
+        // into the orchestrator's global cspace so the HTTP
+        // bridge can still look it up by name. The returned
+        // `SlotId` is the GLOBAL one — `default_ruin`'s
+        // teardown of the returned ids works unchanged.
+        let pc = factory.plugin_cspace(plugin);
+        let rights = CapabilityRights {
+            operations: OperationRights::ALL,
+            timeout_ms: budget.timeout_ms(),
+        };
+
+        // `pc.mint` is generic over `R: Resource`, so we dispatch
+        // on the cap name and instantiate the concrete type.
+        // Each arm produces a different `R` type, but each is
+        // concrete — there's no `Arc<dyn Resource>` path through
+        // the factory.
         match decl.name.as_str() {
-            NAME_COMPLETE => factory.mint(
-                kind,
-                decl,
-                plugin,
-                budget,
-                Arc::new(LlmCompleteResource {
-                    backend: backend.clone(),
-                    space: factory.space().clone(),
-                }),
-            ),
-            NAME_EMBED => factory.mint(
-                kind,
-                decl,
-                plugin,
-                budget,
-                Arc::new(LlmEmbedResource { backend }),
-            ),
+            NAME_COMPLETE => {
+                let local_slot = pc.mint(
+                    kind,
+                    decl,
+                    budget.clone(),
+                    Arc::new(LlmCompleteResource {
+                        backend: backend.clone(),
+                        space: factory.space().clone(),
+                    }),
+                );
+                pc.inner()
+                    .grant_to::<LlmCompleteResource>(
+                        local_slot,
+                        factory.space(),
+                        rights,
+                        decl.name.clone(),
+                    )
+                    .expect("grant from plugin cspace to global should succeed")
+            }
+            NAME_EMBED => {
+                let local_slot = pc.mint(
+                    kind,
+                    decl,
+                    budget.clone(),
+                    Arc::new(LlmEmbedResource { backend }),
+                );
+                pc.inner()
+                    .grant_to::<LlmEmbedResource>(
+                        local_slot,
+                        factory.space(),
+                        rights,
+                        decl.name.clone(),
+                    )
+                    .expect("grant from plugin cspace to global should succeed")
+            }
             other => panic!("llm: unexpected capability name `{other}`"),
         }
     }

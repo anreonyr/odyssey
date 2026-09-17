@@ -315,11 +315,30 @@ impl AgentListBuiltin {
         budget: CapabilityBudget,
         bindings: &[ResolvedBinding],
     ) -> SlotId {
-        let resource = Arc::new(AgentListResource::new(
-            factory.space().clone(),
-            bindings.to_vec(),
-        ));
-        factory.mint(kind, decl, plugin, budget, resource)
+        use odyssey::core::rights::rights::{CapabilityRights, OperationRights};
+
+        let pc = factory.plugin_cspace(plugin);
+        let local_slot = pc.mint(
+            kind,
+            decl,
+            budget.clone(),
+            Arc::new(AgentListResource::new(
+                factory.space().clone(),
+                bindings.to_vec(),
+            )),
+        );
+        let rights = CapabilityRights {
+            operations: OperationRights::ALL,
+            timeout_ms: budget.timeout_ms(),
+        };
+        pc.inner()
+            .grant_to::<AgentListResource>(
+                local_slot,
+                factory.space(),
+                rights,
+                decl.name.clone(),
+            )
+            .expect("grant from plugin cspace to global should succeed")
     }
 }
 
@@ -359,10 +378,29 @@ impl AgentDescribeBuiltin {
         budget: CapabilityBudget,
         bindings: &[ResolvedBinding],
     ) -> SlotId {
-        let resource = Arc::new(AgentDescribeResource::new(
-            factory.space().clone(),
-            bindings.to_vec(),
-        ));
-        factory.mint(kind, decl, plugin, budget, resource)
+        use odyssey::core::rights::rights::{CapabilityRights, OperationRights};
+
+        let pc = factory.plugin_cspace(plugin);
+        let local_slot = pc.mint(
+            kind,
+            decl,
+            budget.clone(),
+            Arc::new(AgentDescribeResource::new(
+                factory.space().clone(),
+                bindings.to_vec(),
+            )),
+        );
+        let rights = CapabilityRights {
+            operations: OperationRights::ALL,
+            timeout_ms: budget.timeout_ms(),
+        };
+        pc.inner()
+            .grant_to::<AgentDescribeResource>(
+                local_slot,
+                factory.space(),
+                rights,
+                decl.name.clone(),
+            )
+            .expect("grant from plugin cspace to global should succeed")
     }
 }
