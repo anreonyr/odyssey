@@ -6,6 +6,24 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Phase 6: Plugin Authority Graph verification
+
+- **New tests** in `crate/odyssey/tests/`:
+  - `plugin_authority_graph.rs` — 5 happy-path tests
+    (INVOKE baseline, ASSIGN delegation, REVOKE scope,
+    transitive REVOKE) over a 4-plugin graph (A, B, C, D).
+  - `plugin_authority_misuse.rs` — 4 malicious-plugin
+    tests pinning the kernel's current behaviour against
+    forged SlotIds, cross-plugin name lookups, cross-type
+    downcasts, and revoke-without-`REVOKE`-bit.
+- **New doc**: `docs/model.md` — the Authority Graph model,
+  the three role bits, the enforcement surface, and the
+  known gaps (Phase 7 hardening opportunities).
+- **No kernel change.** Phase 6 is verification + model.
+  Three kernel gaps are documented and pinned by tests;
+  hardening (caller-identity check, `parents`-across-cspaces)
+  is Phase 7 work.
+
 ### Changed — Phase 17: INVOKE / ASSIGN / REVOKE capability rights
 
 The kernel's authority type is now the role-typed
