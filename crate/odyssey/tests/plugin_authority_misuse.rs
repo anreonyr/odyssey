@@ -89,10 +89,7 @@ fn forged_slot_id_is_rejected() {
 
     // Even the erased path rejects.
     let erased = attacker.inner().lookup_erased(forged);
-    assert!(
-        erased.is_none(),
-        "forged slot id must not resolve at all"
-    );
+    assert!(erased.is_none(), "forged slot id must not resolve at all");
 }
 
 // =============================================================================
@@ -129,8 +126,9 @@ fn cross_plugin_name_lookup_is_rejected() {
     );
 
     // Attacker also cannot resolve via slot id it didn't receive.
-    let typed: Option<Arc<Capability<StubResource>>> =
-        attacker.inner().lookup_typed::<StubResource>(SlotId::new(1));
+    let typed: Option<Arc<Capability<StubResource>>> = attacker
+        .inner()
+        .lookup_typed::<StubResource>(SlotId::new(1));
     assert!(
         typed.is_none(),
         "attacker cannot resolve victim's slot by id"
@@ -163,10 +161,7 @@ fn cross_type_downcast_is_rejected() {
     // Correct downcast succeeds.
     let correct: Option<Arc<Capability<StubResource>>> =
         victim.inner().lookup_typed::<StubResource>(slot);
-    assert!(
-        correct.is_some(),
-        "correct-type downcast must succeed"
-    );
+    assert!(correct.is_some(), "correct-type downcast must succeed");
 
     // Wrong downcast fails.
     let wrong: Option<Arc<Capability<OtherResource>>> =
@@ -222,10 +217,11 @@ fn revoke_without_revoke_bit_is_currently_allowed_known_gap() {
         .expect("grant_to must succeed");
 
     // Attacker holds INVOKE-only (no REVOKE).
-    let attacker_view =
-        Slot::<StubResource>::new(attacker.inner().clone(), attacker_slot);
+    let attacker_view = Slot::<StubResource>::new(attacker.inner().clone(), attacker_slot);
     assert!(
-        attacker_view.invoke(Rights::INVOKE, serde_json::json!({})).is_ok(),
+        attacker_view
+            .invoke(Rights::INVOKE, serde_json::json!({}))
+            .is_ok(),
         "sanity: attacker can invoke before revocation"
     );
 
@@ -241,10 +237,11 @@ fn revoke_without_revoke_bit_is_currently_allowed_known_gap() {
 
     // Victim's slot is unaffected: revoke cleared the
     // attacker's cross-cspace copy, not the source.
-    let victim_view =
-        Slot::<StubResource>::new(victim.inner().clone(), victim_slot);
+    let victim_view = Slot::<StubResource>::new(victim.inner().clone(), victim_slot);
     assert!(
-        victim_view.invoke(Rights::INVOKE, serde_json::json!({})).is_ok(),
+        victim_view
+            .invoke(Rights::INVOKE, serde_json::json!({}))
+            .is_ok(),
         "victim's slot survives — attacker revoked its own copy, \
          not the source"
     );

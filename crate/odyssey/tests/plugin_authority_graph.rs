@@ -124,20 +124,11 @@ fn invoke_baseline_a_can_invoke_b() {
     let b_slot = g.b_mint("echo");
 
     // A holds INVOKE only.
-    let a_slot = g.grant_to::<StubResource>(
-        &g.b,
-        b_slot,
-        &g.a,
-        Rights::INVOKE,
-        "echo_for_a",
-    );
+    let a_slot = g.grant_to::<StubResource>(&g.b, b_slot, &g.a, Rights::INVOKE, "echo_for_a");
 
     let slot = Slot::<StubResource>::new(g.a.inner().clone(), a_slot);
     let result = slot.invoke(Rights::INVOKE, serde_json::json!({}));
-    assert!(
-        result.is_ok(),
-        "INVOKE-only holder must invoke: {result:?}"
-    );
+    assert!(result.is_ok(), "INVOKE-only holder must invoke: {result:?}");
 }
 
 /// Plugin A holds only `Rights::INVOKE`. A tries to invoke
@@ -148,13 +139,7 @@ fn invoke_baseline_a_can_invoke_b() {
 fn invoke_baseline_a_denied_assign_op() {
     let g = four_plugin_graph();
     let b_slot = g.b_mint("echo");
-    let a_slot = g.grant_to::<StubResource>(
-        &g.b,
-        b_slot,
-        &g.a,
-        Rights::INVOKE,
-        "echo_for_a",
-    );
+    let a_slot = g.grant_to::<StubResource>(&g.b, b_slot, &g.a, Rights::INVOKE, "echo_for_a");
 
     let slot = Slot::<StubResource>::new(g.a.inner().clone(), a_slot);
     let result = slot.invoke(Rights::ASSIGN, serde_json::json!({}));
@@ -254,8 +239,10 @@ fn assign_delegation_a_to_c_can_invoke_and_regrant() {
             },
             "echo_for_peer".into(),
         )
-        .expect("D's INVOKE-only grant to a peer must succeed \
-                 (attenuation passes — no caller-identity check)");
+        .expect(
+            "D's INVOKE-only grant to a peer must succeed \
+                 (attenuation passes — no caller-identity check)",
+        );
 }
 
 // =============================================================================
@@ -277,17 +264,15 @@ fn revoke_kills_delegation_not_target() {
         Rights::INVOKE | Rights::ASSIGN,
         "echo_for_a",
     );
-    let c_slot = g.grant_to::<StubResource>(
-        &g.a,
-        a_slot,
-        &g.c,
-        Rights::INVOKE,
-        "echo_for_c",
-    );
+    let c_slot = g.grant_to::<StubResource>(&g.a, a_slot, &g.c, Rights::INVOKE, "echo_for_c");
 
     // Sanity: C can invoke before revoke.
     let c_before = Slot::<StubResource>::new(g.c.inner().clone(), c_slot);
-    assert!(c_before.invoke(Rights::INVOKE, serde_json::json!({})).is_ok());
+    assert!(
+        c_before
+            .invoke(Rights::INVOKE, serde_json::json!({}))
+            .is_ok()
+    );
 
     // Cross-cspace revocation. `grant_to` does NOT populate
     // the `parents` map, so the kernel cannot reach C's slot
@@ -334,21 +319,9 @@ fn revoke_tree_kills_grandchildren_in_same_cspace() {
     let b_slot = g.b_mint("echo");
 
     // A holds all three bits.
-    let a_slot = g.grant_to::<StubResource>(
-        &g.b,
-        b_slot,
-        &g.a,
-        Rights::ALL,
-        "echo_for_a",
-    );
+    let a_slot = g.grant_to::<StubResource>(&g.b, b_slot, &g.a, Rights::ALL, "echo_for_a");
     // A grants INVOKE-only to C (cross-cspace).
-    let c_slot = g.grant_to::<StubResource>(
-        &g.a,
-        a_slot,
-        &g.c,
-        Rights::INVOKE,
-        "echo_for_c",
-    );
+    let c_slot = g.grant_to::<StubResource>(&g.a, a_slot, &g.c, Rights::INVOKE, "echo_for_c");
 
     // Within A's cspace, A further grants INVOKE-only to a child.
     let a = Slot::<StubResource>::new(g.a.inner().clone(), a_slot);
@@ -396,7 +369,9 @@ fn revoke_tree_kills_grandchildren_in_same_cspace() {
     // untouched.
     let c_still = Slot::<StubResource>::new(g.c.inner().clone(), c_slot);
     assert!(
-        c_still.invoke(Rights::INVOKE, serde_json::json!({})).is_ok(),
+        c_still
+            .invoke(Rights::INVOKE, serde_json::json!({}))
+            .is_ok(),
         "C's slot survives A's revoke_tree (kernel gap: grant_to \
          does not populate parents across cspaces — Phase 7 \
          hardening opportunity)"
