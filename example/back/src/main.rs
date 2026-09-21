@@ -7,14 +7,15 @@
 //! (the library); the example depends on both. The library itself
 //! stays plugin-free.
 //!
-//! The example assembles its plugins via 5 named bundles
+//! The example assembles its plugins via 6 named bundles
 //! (see `odyssey_builtin::bundles`):
 //!
-//! 1. `tool_caps()`       — `echo`, `database`
-//! 2. `observers()`       — `agent_list`, `agent_describe`
-//! 3. `inspectors_bundle()`— `inspector`, `schema_inspector`
-//! 4. `model_providers()` — `generator`, `embedder`, `reranker`
-//! 5. `agent_bundle()`    — `agent`
+//! 1. `tool_caps()`        — `echo`, `database`
+//! 2. `observers()`        — `agent_list`, `agent_describe`
+//! 3. `inspectors_bundle()` — `inspector`, `schema_inspector`
+//! 4. `model_providers()`  — `generator`, `embedder`, `reranker`
+//! 5. `agent_bundle()`     — `agent`
+//! 6. `bridge_bundle()`    — `http_bridge`
 //!
 //! Each bundle stamps its member manifests with a `BundleId`;
 //! the kernel's resolver groups the boot diagram's mint order by
@@ -29,25 +30,29 @@
 //! the union of every bundle's manifests and produces a single
 //! topological order. `agent_describe` (in `observers`) requires
 //! `echo` and `database` (in `tool_caps`); `agent` (in `agent`)
-//! requires `generator` and `embedder` (in `model_providers`).
-
-use std::path::PathBuf;
+//! requires `generator` and `embedder` (in `model-providers`).
+//!
+//! The HTTP bridge (`bridge_bundle`) is itself a regular plugin;
+//! its mint reads `ODYSSEY_ADDR` / `ODYSSEY_NO_FRONTEND` /
+//! `ODYSSEY_FRONTEND_DIST` from the environment (see
+//! `example/back/src/bridge.rs`).
 
 use odyssey::personality::lifecycle::run::{DEFAULT_BRIDGE_ADDR, run_on};
 use odyssey_builtin::bundles;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Assemble the 10 builtin manifests via 5 named bundles.
+    // Assemble the 11 builtin manifests via 6 named bundles.
     // The flatten is `Vec<Vec<(PluginManifest, MintFn, RuinFn)>>`
     // → `Vec<(PluginManifest, MintFn, RuinFn)>` — the slice
-    // type `run_on` expects (unchanged).
+    // type `run_on` expects.
     let plugins = vec![
         bundles::tool_caps(),
         bundles::observers(),
         bundles::inspectors_bundle(),
         bundles::model_providers(),
         bundles::agent_bundle(),
+        bundles::bridge_bundle(),
     ]
     .into_iter()
     .flatten()
@@ -57,25 +62,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // its own; without it the smoke test competes for the fixed one.
     let addr = std::env::var("ODYSSEY_ADDR").unwrap_or_else(|_| DEFAULT_BRIDGE_ADDR.to_string());
 
-    // Frontend dist is one level up from the binary's manifest
-    // dir: `example/back/` → `example/fore/dist`. The library's
-    // serve reads from disk so we don't embed HTML; we just
-    // point it at the build artefact.
-    let frontend_dist: Option<PathBuf> = std::env::var("ODYSSEY_NO_FRONTEND")
-        .ok()
-        .map(|_| None)
-        .unwrap_or_else(|| {
-            Some(
-                PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                    .parent()
-                    .expect("example/backend has a parent")
-                    .join("fore/dist"),
-            )
-        });
-
     run_on(
         addr.parse().expect("ODYSSEY_ADDR must be host:port"),
-        frontend_dist.as_deref(),
         &plugins,
     )
     .await

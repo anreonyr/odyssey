@@ -55,7 +55,7 @@ use odyssey::core::manifest::manifest::PluginManifest;
 // crate's root because `bundles/` is a submodule of
 // `src/lib.rs`.
 use crate::model::{embedder, generator, reranker};
-use crate::{agent, database, echo, inspectors};
+use crate::{agent, bridge, database, echo, inspectors};
 
 /// Stamp every member manifest in `entries` with `id` and
 /// return the stamped slice. The orchestrator consumes the
@@ -162,6 +162,21 @@ pub fn agent_bundle() -> Vec<(PluginManifest, MintFn, RuinFn)> {
     )
 }
 
+/// HTTP bridge plugin — exposes the `http_bridge`
+/// capability whose Resource holds the spawned axum
+/// server. Single member, no `requires`.
+///
+/// The bundle exists for grouping + error attribution
+/// (`ResolvedPlan::render` groups mint order by
+/// `BundleId`). The bridge mints among the leaves in
+/// topological lex order.
+pub fn bridge_bundle() -> Vec<(PluginManifest, MintFn, RuinFn)> {
+    stamp(
+        BundleId::with_default_version("bridge"),
+        vec![bridge::HttpBridgeBuiltin::register()],
+    )
+}
+
 #[cfg(test)]
 mod tests {
     //! The bundle functions stamp every member manifest with
@@ -245,15 +260,23 @@ mod tests {
     }
 
     #[test]
-    fn all_bundles_total_ten_builtins() {
+    fn all_bundles_total_eleven_builtins() {
         let total = tool_caps().len()
             + observers().len()
             + inspectors_bundle().len()
             + model_providers().len()
-            + agent_bundle().len();
-        // Matches the 10 manifests shipped by the example
-        // (verified by the boot diagnostic: "loaded 10
-        // builtin(s)").
-        assert_eq!(total, 10);
+            + agent_bundle().len()
+            + bridge_bundle().len();
+        // Matches the 11 manifests shipped by the example
+        // after the bridge plugin lands (10 builtins + 1 bridge).
+        assert_eq!(total, 11);
+    }
+
+    #[test]
+    fn bridge_bundle_stamps_http_bridge() {
+        let entries = bridge_bundle();
+        assert_eq!(entries.len(), 1);
+        assert_all_stamped(&entries, "bridge");
+        assert_eq!(entries[0].0.plugin.name, "http_bridge");
     }
 }
