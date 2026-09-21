@@ -2,6 +2,7 @@
 // prod; the `index.html` shipped at the project root references
 // `/src/main.tsx` directly.
 
+import "@fontsource-variable/inter";
 import "@fontsource-variable/jetbrains-mono";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";

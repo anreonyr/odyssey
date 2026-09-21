@@ -1,5 +1,5 @@
-// Mono composer for sending UserReply observations into a
-// running session. Submitting triggers `agent_resume` with
+// Composer for sending UserReply observations into a running
+// session. Submitting triggers `agent_resume` with
 // `{ kind: "UserReply", text }`; the kernel processes the
 // observation and emits the resulting steps through the same
 // `agent_stream` broadcast this page is already subscribed to.
@@ -15,14 +15,14 @@
 // mid-turn. Stop / cancel lives in the page header, not here,
 // to keep this surface focused on "send a message".
 
-import type { StreamPhase } from "../hooks/useAgentStream";
+import type { StreamPhase } from "@/hooks/useAgentStream";
 
 import { Loader2, Send } from "lucide-react";
 import { useRef, useState } from "react";
 
-import { agent } from "../api/client";
-import { cn } from "../lib/utils";
-import { Button } from "./ui/button";
+import { agent } from "@/api/client";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 
 export function ChatComposer({
   sessionId,
@@ -59,8 +59,8 @@ export function ChatComposer({
   }
 
   return (
-    <div className="border-border bg-card border-2">
-      <textarea
+    <div className="bg-background rounded-md border">
+      <Textarea
         ref={ref}
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -70,38 +70,25 @@ export function ChatComposer({
             submit();
           }
         }}
-        placeholder={disabled ? "wait for the agent to settle…" : "type a message… (⌘↵ to send)"}
+        placeholder={disabled ? "Waiting for the agent to settle…" : "Type a message… (⌘↵ to send)"}
         rows={2}
         disabled={disabled}
         data-input="composer-text"
-        className={cn(
-          "text-foreground w-full resize-none bg-transparent px-3 py-3 font-mono text-xs leading-relaxed",
-          "placeholder:text-muted-foreground focus:outline-none",
-          "disabled:opacity-50",
-        )}
+        className="resize-none border-0 focus-visible:ring-0"
       />
-      {err && (
-        <div className="border-destructive/40 text-destructive border-t-2 px-3 py-2 font-mono text-[11px]">
-          × {err}
-        </div>
-      )}
-      <div className="border-border flex items-center justify-between border-t-2 px-3 py-2">
-        <span className="text-muted-foreground font-mono text-[10px]">
-          {disabled ? "agent busy…" : "⌘↵ to send"}
+      {err && <div className="text-destructive border-t px-3 py-2 text-xs">× {err}</div>}
+      <div className="flex items-center justify-between border-t px-3 py-2">
+        <span className="text-muted-foreground text-xs">
+          {disabled ? "Agent busy…" : "⌘↵ to send"}
         </span>
         <Button
           size="sm"
-          variant="success"
           onClick={submit}
           disabled={!text.trim() || disabled}
           data-action="send-reply"
         >
-          {sending ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Send className="h-3.5 w-3.5" />
-          )}
-          send
+          {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+          Send
         </Button>
       </div>
     </div>

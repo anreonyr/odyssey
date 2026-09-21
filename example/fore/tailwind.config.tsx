@@ -1,10 +1,11 @@
-// Tailwind config — GitHub Dark palette as CSS variables so a
-// future re-theme only changes `src/index.css`. shadcn/ui
-// requires this layout: every token is a HSL channel triplet
-// (`<channel> <channel> <channel> / <alpha>`), so the components
-// can apply opacity via `bg-primary/50` etc.
+// Tailwind config — Inter body sans + JetBrains Mono code (loaded as
+// CSS variables via `@fontsource-variable/*`). shadcn/ui requires
+// HSL channel triplets (`<channel> <channel> <channel> / <alpha>`)
+// so the components can apply opacity via `bg-primary/50` etc.
 
 import type { Config } from "tailwindcss";
+
+import tailwindcssAnimate from "tailwindcss-animate";
 
 const config: Config = {
   darkMode: ["class"],
@@ -69,7 +70,7 @@ const config: Config = {
       },
     },
   },
-  plugins: [],
+  plugins: [tailwindcssAnimate],
 };
 
 export default config;

@@ -1,3 +1,5 @@
+import path from "node:path";
+
 import react from "@vitejs/plugin-react";
 import autoprefixer from "autoprefixer";
 import tailwindcss from "tailwindcss";
@@ -24,6 +26,12 @@ import tailwindConfig from "./tailwind.config.tsx";
 // default config-file search lists, so a separate `postcss.config.tsx`
 // would never be picked up. Inlining here keeps the file count
 // down and the build self-contained.
+//
+// `resolve.alias` mirrors the `@/*` → `./src/*` mapping declared in
+// tsconfig.json (Slice 1). Vite does not read tsconfig paths by
+// default; without this alias, every `import { cn } from "@/lib/utils"`
+// in the 12 regenerated primitives (and later in pages that follow
+// the same convention) fails to resolve at bundle time.
 function stripModuleScriptType(): Plugin {
   return {
     name: "strip-module-script-type",
@@ -39,6 +47,18 @@ function stripModuleScriptType(): Plugin {
 
 export default defineConfig({
   plugins: [react(), stripModuleScriptType()],
+  resolve: {
+    alias: {
+      // path.resolve(process.cwd(), "./src") — `import.meta.url` is the
+      // ESM-canonical idiom but Vite's onLoad filter for config-file
+      // injection doesn't match `.tsx`, leaving the injected variable
+      // undefined. process.cwd() is reliably correct here because Vite
+      // runs config from the project root regardless of where you launch
+      // it from (unless you cd elsewhere — which you shouldn't, given the
+      // pnpm scripts pin the cwd to example/fore/).
+      "@": path.resolve(process.cwd(), "./src"),
+    },
+  },
   css: {
     postcss: {
       // The config object is imported directly rather than

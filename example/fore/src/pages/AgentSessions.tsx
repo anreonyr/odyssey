@@ -1,29 +1,28 @@
-// Agent page (`/agent`). Two columns:
+// Agent sessions page (`/agent/sessions`). Two columns:
 //   - Left: session list (existing) + start form
 //   - Right: contextual panel — empty state until a session is selected,
-//            then it links to /agent/:sessionId
+//            then it links to /agent/sessions/:sessionId
 //
 // The full timeline lives on the dedicated session route so it has room
 // to breathe; this page is the launchpad.
 
-import type { SessionStatus } from "../api/types";
-import type { SessionEntry } from "../hooks/useAgentSession";
+import type { SessionStatus } from "@/api/types";
+import type { SessionEntry } from "@/hooks/useAgentSession";
 
-import { ArrowRight, Play, Loader2, X, Save, FolderOpen } from "lucide-react";
+import { ArrowRight, FolderOpen, Loader2, Play, Save, X } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
-import { Badge } from "../components/ui/badge";
-import { Button } from "../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { Input } from "../components/ui/input";
-import { Separator } from "../components/ui/separator";
-import { Textarea } from "../components/ui/textarea";
-import { useAgentSession } from "../hooks/useAgentSession";
-import { useCaps } from "../hooks/useCaps";
-import { cn } from "../lib/utils";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { useAgentSession } from "@/hooks/useAgentSession";
+import { useCaps } from "@/hooks/useCaps";
 
-export function Agent() {
+export function AgentSessions() {
   const { reachable } = useCaps();
   const sessionStore = useAgentSession();
   const navigate = useNavigate();
@@ -38,12 +37,10 @@ export function Agent() {
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[360px,1fr]">
-      {/* Left: sessions list + start form */}
       <div className="space-y-4">
-        {/* Start form */}
         <Card>
           <CardHeader>
-            <CardTitle>New session</CardTitle>
+            <CardTitle className="text-base">New session</CardTitle>
           </CardHeader>
           <CardContent>
             <StartForm
@@ -52,23 +49,17 @@ export function Agent() {
               onStart={async (input) => {
                 const id = await sessionStore.start(input);
                 setSelectedId(id);
-                navigate(`/agent/${id}`);
+                navigate(`/agent/sessions/${id}`);
               }}
             />
           </CardContent>
         </Card>
 
-        {/* Sessions list */}
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0">
-            <CardTitle>Sessions ({sessions.length})</CardTitle>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowLoad((v) => !v)}
-              data-action="toggle-load"
-            >
-              <FolderOpen className="h-3.5 w-3.5" />
+            <CardTitle className="text-base">Sessions ({sessions.length})</CardTitle>
+            <Button variant="outline" size="sm" onClick={() => setShowLoad((v) => !v)}>
+              <FolderOpen className="h-4 w-4" />
               Load checkpoint
             </Button>
           </CardHeader>
@@ -82,7 +73,6 @@ export function Agent() {
               />
               <Button
                 size="sm"
-                variant="default"
                 disabled={!loadPath || sessionStore.busy}
                 onClick={() => {
                   sessionStore.load(loadPath);
@@ -90,34 +80,35 @@ export function Agent() {
                 }}
                 data-action="load-checkpoint"
               >
-                load
+                Load
               </Button>
             </CardContent>
           )}
           <CardContent className="p-0">
             {sessions.length === 0 ? (
-              <p className="text-muted-foreground px-4 pb-4 text-xs">
-                no sessions yet — start one above.
+              <p className="text-muted-foreground px-4 pb-4 text-sm">
+                No sessions yet — start one above.
               </p>
             ) : (
-              <ul className="divide-border/50 divide-y">
+              <ul className="divide-y">
                 {sessions.map((s) => (
                   <li key={s.session_id}>
                     <button
                       type="button"
                       data-session-id={s.session_id}
                       onClick={() => setSelectedId(s.session_id)}
-                      className={cn(
-                        "hover:bg-accent/50 flex w-full items-center gap-2 px-4 py-3 text-left text-xs transition-colors",
-                        selectedId === s.session_id && "bg-accent",
-                      )}
+                      className={
+                        selectedId === s.session_id
+                          ? "bg-accent flex w-full items-center gap-2 px-4 py-3 text-left text-sm"
+                          : "hover:bg-accent/50 flex w-full items-center gap-2 px-4 py-3 text-left text-sm transition-colors"
+                      }
                     >
                       <StatusPill status={s.status} />
-                      <code className="text-muted-foreground font-mono text-[10px]">
+                      <code className="text-muted-foreground font-mono text-xs">
                         {s.session_id.slice(0, 12)}…
                       </code>
                       <span className="flex-1 truncate">{s.goal}</span>
-                      <span className="text-muted-foreground font-mono text-[10px] tabular-nums">
+                      <span className="text-muted-foreground font-mono text-xs tabular-nums">
                         {s.history_len}
                       </span>
                     </button>
@@ -131,30 +122,29 @@ export function Agent() {
         {sessionStore.error && (
           <Card className="border-destructive/40">
             <CardContent className="p-4">
-              <pre className="text-destructive font-mono text-xs">{sessionStore.error}</pre>
+              <pre className="text-destructive text-xs">{sessionStore.error}</pre>
             </CardContent>
           </Card>
         )}
       </div>
 
-      {/* Right: session detail */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <CardTitle>
+          <CardTitle className="text-base">
             {selected ? `Session ${selected.session_id.slice(0, 12)}…` : "Pick a session"}
           </CardTitle>
           {selected && (
             <Button asChild size="sm" variant="outline">
-              <Link to={`/agent/${selected.session_id}`}>
-                Open timeline <ArrowRight className="h-3.5 w-3.5" />
+              <Link to={`/agent/sessions/${selected.session_id}`}>
+                Open timeline <ArrowRight className="h-4 w-4" />
               </Link>
             </Button>
           )}
         </CardHeader>
         <CardContent>
           {!selected ? (
-            <p className="text-muted-foreground text-xs">
-              select a session on the left to see its goal, tools, and history length — or jump
+            <p className="text-muted-foreground text-sm">
+              Select a session on the left to see its goal, tools, and history length — or jump
               straight into the timeline.
             </p>
           ) : (
@@ -168,13 +158,12 @@ export function Agent() {
         </CardContent>
       </Card>
 
-      {/* Inline checkpoint dialog */}
       {ckptFor && (
         <div className="lg:col-span-2">
           <Card className="border-warning/40">
             <CardContent className="flex items-center gap-2 p-4">
-              <Save className="text-warning h-3.5 w-3.5" />
-              <span className="text-xs">checkpoint path</span>
+              <Save className="text-warning h-4 w-4" />
+              <span className="text-sm">Checkpoint path</span>
               <Input
                 value={ckptPath}
                 onChange={(e) => setCkptPath(e.target.value)}
@@ -184,7 +173,6 @@ export function Agent() {
               />
               <Button
                 size="sm"
-                variant="success"
                 disabled={!ckptPath || sessionStore.busy}
                 onClick={() => {
                   sessionStore.cancel(ckptFor, ckptPath);
@@ -193,10 +181,10 @@ export function Agent() {
                 }}
                 data-action="save-checkpoint"
               >
-                save & cancel
+                Save & cancel
               </Button>
               <Button size="sm" variant="ghost" onClick={() => setCkptFor(null)}>
-                ×
+                Cancel
               </Button>
             </CardContent>
           </Card>
@@ -209,13 +197,13 @@ export function Agent() {
 function StatusPill({ status }: { status: SessionStatus }) {
   const map: Record<
     SessionStatus,
-    { variant: "success" | "warning" | "muted" | "destructive" | "default"; label: string }
+    { variant: "success" | "warning" | "muted" | "destructive"; label: string }
   > = {
-    Running: { variant: "success", label: "running" },
-    AwaitingObservation: { variant: "warning", label: "awaiting" },
-    Done: { variant: "muted", label: "done" },
-    Failed: { variant: "destructive", label: "failed" },
-    Cancelled: { variant: "destructive", label: "cancelled" },
+    Running: { variant: "success", label: "Running" },
+    AwaitingObservation: { variant: "warning", label: "Awaiting" },
+    Done: { variant: "muted", label: "Done" },
+    Failed: { variant: "destructive", label: "Failed" },
+    Cancelled: { variant: "destructive", label: "Cancelled" },
   };
   const m = map[status];
   return <Badge variant={m.variant}>{m.label}</Badge>;
@@ -250,34 +238,32 @@ function StartForm({
         onStart({ goal, allowed_tools: Array.from(tools) });
         setGoal("");
       }}
-      className="space-y-3"
+      className="space-y-4"
     >
       <div>
-        <label className="text-muted-foreground mb-2 block font-mono text-[10px] uppercase tracking-wider">
-          goal
-        </label>
+        <Label htmlFor="goal">Goal</Label>
         <Textarea
+          id="goal"
           rows={3}
-          placeholder="what should the agent do?"
+          placeholder="What should the agent do?"
           value={goal}
           onChange={(e) => setGoal(e.target.value)}
           data-input="goal"
         />
       </div>
       <div>
-        <label className="text-muted-foreground mb-2 block font-mono text-[10px] uppercase tracking-wider">
-          tools ({tools.size}/{reachable.length})
-        </label>
+        <Label>
+          Tools ({tools.size}/{reachable.length})
+        </Label>
         <div className="flex flex-wrap gap-2">
           {reachable.map((t) => (
             <label
               key={t}
-              className={cn(
-                "inline-flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1 font-mono text-[11px] transition-colors",
+              className={
                 tools.has(t)
-                  ? "border-primary/50 bg-primary/10 text-foreground"
-                  : "border-border bg-card text-muted-foreground hover:border-border/80",
-              )}
+                  ? "border-primary/40 bg-primary/10 inline-flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1 font-mono text-sm"
+                  : "bg-card text-muted-foreground hover:border-foreground/40 inline-flex cursor-pointer items-center gap-2 rounded-md border px-2 py-1 font-mono text-sm"
+              }
             >
               <input
                 type="checkbox"
@@ -293,12 +279,11 @@ function StartForm({
       </div>
       <Button
         type="submit"
-        size="sm"
-        variant="success"
+        size="default"
         disabled={!goal.trim() || busy}
         data-action="start-session"
       >
-        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
         Start session
       </Button>
     </form>
@@ -317,11 +302,11 @@ function SessionSummary({
   onCancelCheckpoint: () => void;
 }) {
   return (
-    <div className="space-y-3 text-xs">
-      <Meta label="goal" value={session.goal} block />
-      <Meta label="status" value={<StatusPill status={session.status} />} />
+    <div className="space-y-3 text-sm">
+      <Meta label="Goal" value={session.goal} block />
+      <Meta label="Status" value={<StatusPill status={session.status} />} />
       <Meta
-        label="tools"
+        label="Tools"
         value={
           <div className="flex flex-wrap gap-1">
             {session.allowed_tools.map((t) => (
@@ -332,10 +317,9 @@ function SessionSummary({
           </div>
         }
       />
-      <Meta label="history" value={`${session.history_len} steps`} />
-      {session.checkpoint_path && <Meta label="checkpoint" value={session.checkpoint_path} />}
-      <Separator />
-      <div className="flex items-center gap-2">
+      <Meta label="History" value={`${session.history_len} steps`} />
+      {session.checkpoint_path && <Meta label="Checkpoint" value={session.checkpoint_path} />}
+      <div className="flex items-center gap-2 pt-2">
         <Button
           size="sm"
           variant="destructive"
@@ -343,7 +327,7 @@ function SessionSummary({
           onClick={onCancel}
           data-action="cancel"
         >
-          <X className="h-3.5 w-3.5" /> cancel
+          <X className="h-4 w-4" /> Cancel
         </Button>
         <Button
           size="sm"
@@ -352,7 +336,7 @@ function SessionSummary({
           onClick={onCancelCheckpoint}
           data-action="cancel-checkpoint"
         >
-          <Save className="h-3.5 w-3.5" /> cancel &amp; checkpoint
+          <Save className="h-4 w-4" /> Cancel & checkpoint
         </Button>
       </div>
     </div>
@@ -361,10 +345,8 @@ function SessionSummary({
 
 function Meta({ label, value, block }: { label: string; value: React.ReactNode; block?: boolean }) {
   return (
-    <div className={cn("flex gap-3", block ? "flex-col" : "items-baseline justify-between")}>
-      <span className="text-muted-foreground font-mono text-[10px] uppercase tracking-wider">
-        {label}
-      </span>
+    <div className={block ? "flex flex-col gap-1" : "flex items-baseline justify-between gap-3"}>
+      <span className="text-muted-foreground text-xs">{label}</span>
       <div className={block ? "" : "text-right"}>{value}</div>
     </div>
   );

@@ -13,16 +13,17 @@
 // `data-stagger`; Sidebar, Header, and <main> are
 // `data-stagger-item` with --stagger-index 1/2/3 so they
 // resolve in sequence (rail → top bar → content). Total
-// entrance ≤ 600ms (sidebar 110–430ms, header 180–500ms,
-// main 250–570ms). Honors prefers-reduced-motion via the
+// entrance ≤ 500ms (sidebar 110–390ms, header 160–440ms,
+// main 210–490ms). Honors prefers-reduced-motion via the
 // CSS rules in src/index.css.
 
 import type { CSSProperties } from "react";
 
 import { Outlet } from "react-router-dom";
 
-import { SessionProvider } from "../../hooks/useAgentSession";
-import { TooltipProvider } from "../ui/tooltip";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { SessionProvider } from "@/hooks/useAgentSession";
+
 import { Header } from "./Header";
 import { Sidebar } from "./Sidebar";
 

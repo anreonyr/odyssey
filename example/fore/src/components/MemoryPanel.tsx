@@ -8,17 +8,17 @@
 // user might want to grab next, and on a developer-facing page
 // both surfaces earn their place.
 
-import type { AgentMemoryHit } from "../api/types";
+import type { AgentMemoryHit } from "@/api/types";
 
-import { Search, Plus, Loader2 } from "lucide-react";
+import { Loader2, Plus, Search } from "lucide-react";
 import { useState } from "react";
 
-import { agent } from "../api/client";
-import { Badge } from "./ui/badge";
-import { Button } from "./ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
-import { Input } from "./ui/input";
-import { Textarea } from "./ui/textarea";
+import { agent } from "@/api/client";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 
 export function MemoryPanel() {
   return (
@@ -48,40 +48,39 @@ function RecallPanel() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-xs">Recall</CardTitle>
+        <CardTitle className="text-sm font-medium">Recall</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="flex gap-2">
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="search memory…"
+            placeholder="Search memory…"
             onKeyDown={(e) => e.key === "Enter" && recall()}
             data-input="memory-query"
           />
           <Button
-            size="sm"
-            variant="default"
+            size="default"
             onClick={recall}
             disabled={running || !query.trim()}
             data-action="memory-recall"
           >
             {running ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <Search className="h-3.5 w-3.5" />
+              <Search className="h-4 w-4" />
             )}
-            recall
+            Recall
           </Button>
         </div>
         {hits.length === 0 ? (
-          <p className="text-muted-foreground text-xs">no hits yet.</p>
+          <p className="text-muted-foreground text-xs">No hits yet.</p>
         ) : (
           <ul className="space-y-2">
             {hits.map((h, i) => (
-              <li key={i} className="border-border bg-muted/20 rounded-md border p-2">
-                <p className="font-mono text-xs">{h.content}</p>
-                <div className="text-muted-foreground mt-1 flex items-center gap-2 text-[10px]">
+              <li key={i} className="bg-muted/30 rounded-md border p-2">
+                <p className="text-sm">{h.content}</p>
+                <div className="text-muted-foreground mt-1 flex items-center gap-2 text-xs">
                   <Badge variant="muted">score {h.score.toFixed(3)}</Badge>
                   {h.tags.map((t) => (
                     <Badge key={t} variant="outline">
@@ -128,12 +127,12 @@ function RecordPanel() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-xs">Record</CardTitle>
+        <CardTitle className="text-sm font-medium">Record</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <Textarea
           rows={4}
-          placeholder="memory content…"
+          placeholder="Memory content…"
           value={content}
           onChange={(e) => setContent(e.target.value)}
           data-input="memory-content"
@@ -141,25 +140,20 @@ function RecordPanel() {
         <Input
           value={tags}
           onChange={(e) => setTags(e.target.value)}
-          placeholder="tags (comma-separated)"
+          placeholder="Tags (comma-separated)"
           data-input="memory-tags"
         />
         <Button
-          size="sm"
-          variant="success"
+          size="default"
           onClick={record}
           disabled={running || !content.trim()}
           data-action="memory-record"
         >
-          {running ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          ) : (
-            <Plus className="h-3.5 w-3.5" />
-          )}
-          record
+          {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+          Record
         </Button>
         {lastId && (
-          <p className="text-muted-foreground font-mono text-[10px]">
+          <p className="text-muted-foreground font-mono text-xs">
             stored · id {lastId.slice(0, 12)}…
           </p>
         )}

@@ -1,9 +1,5 @@
-/* odyssey theme — GitHub Dark tokens exposed as HSL channels
-   so Tailwind's `bg-primary/50` syntax composes alpha without
-   recompiling. JetBrains Mono Variable loaded via
-   @fontsource-variable in main.tsx; the variable stack below
-   covers both display and body so the entire product renders
-   mono. The body::before grain overlay adds the paper texture. */
+/* Inter body sans + JetBrains Mono code; soft borders; no grain.
+   The @fontsource-variable/inter package loads the inter variable font. */
 
 @tailwind base;
 @tailwind components;
@@ -11,51 +7,36 @@
 
 @layer base {
   :root {
-    /* Base */
-    --background: 220 22% 9%; /* #0d1117 */
-    --foreground: 217 18% 80%; /* #c9d1d9 */
-
-    /* Surfaces */
-    --card: 220 16% 12%; /* #161b22 */
-    --card-foreground: 217 18% 80%;
-    --popover: 220 16% 12%;
-    --popover-foreground: 217 18% 80%;
-
-    /* Muted text + bg */
-    --muted: 220 13% 18%; /* #21262d */
-    --muted-foreground: 215 11% 65%; /* #8b949e */
-
-    /* Subtle accent for hover/active rows */
-    --accent: 220 13% 18%;
-    --accent-foreground: 217 18% 80%;
-
-    /* Primary — GitHub blue */
-    --primary: 212 92% 68%; /* #58a6ff */
+    --background: 220 14% 9%; /* #0d1117 — page base */
+    --foreground: 220 13% 92%;
+    --surface: 220 13% 11%; /* #161b22 — cards */
+    --card: 220 13% 11%;
+    --card-foreground: 220 13% 92%;
+    --popover: 220 13% 11%;
+    --popover-foreground: 220 13% 92%;
+    --surface-2: 220 12% 14%; /* raised hover rows */
+    --muted: 220 12% 14%;
+    --muted-foreground: 215 10% 60%;
+    --accent: 220 12% 14%;
+    --accent-foreground: 220 13% 92%;
+    --primary: 220 90% 64%; /* soft sky */
     --primary-foreground: 220 22% 9%;
-
-    /* Secondary — subdued */
-    --secondary: 220 13% 18%;
-    --secondary-foreground: 217 18% 80%;
-
-    /* Status colours */
-    --success: 137 56% 50%; /* #3fb950 */
+    --secondary: 220 12% 14%;
+    --secondary-foreground: 220 13% 92%;
+    --success: 150 50% 50%;
     --success-foreground: 220 22% 9%;
-    --warning: 41 70% 47%; /* #d29922 */
+    --warning: 38 85% 58%;
     --warning-foreground: 220 22% 9%;
-    --destructive: 358 75% 60%; /* #f85149 */
-    --destructive-foreground: 217 18% 80%;
-
-    /* Borders + inputs — thickened for brutalist structure (was 18%, now 25%) */
-    --border: 220 14% 25%; /* visible against #161b22 */
-    --input: 220 14% 25%;
-    --ring: 212 92% 68%;
-
+    --destructive: 0 72% 58%;
+    --destructive-foreground: 220 13% 92%;
+    --border: 220 13% 19%;
+    --input: 220 13% 19%;
+    --ring: 220 90% 64% / 0.5;
     --radius: 0.5rem;
 
-    /* Type stacks — JetBrains Mono Variable (loaded via
-       @fontsource-variable/jetbrains-mono in main.tsx) for
-       display + body, ui-monospace as fallback only. */
-    --font-ui: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --font-ui:
+      "Inter Variable", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      Roboto, "Helvetica Neue", Arial, sans-serif;
     --font-mono: "JetBrains Mono Variable", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   }
 }
@@ -69,53 +50,24 @@
   body {
     @apply bg-background text-foreground antialiased;
     font-family: var(--font-ui);
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.5;
   }
 
   body {
     min-height: 100vh;
-    isolation: isolate; /* bound the noise blend so overscroll
-                           and z-stacking don't leak the grain
-                           outside the page region */
+    isolation: isolate;
   }
 
   code,
   pre,
-  kbd {
+  kbd,
+  samp {
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 0.8125rem; /* 13px — slightly smaller than body */
   }
 }
 
-/* Mono-sized labels and chips everywhere they appear. */
-.font-mono,
-code,
-pre,
-kbd,
-samp {
-  font-family: var(--font-mono);
-  font-size: 12px;
-}
-
-/* Paper-grain noise overlay — 4% opacity SVG turbulence over
-   the GitHub Dark body. Fixed positioning follows scroll.
-   pointer-events: none keeps it decorative; mix-blend-mode
-   composites over card/surface fills without darkening
-   content text. */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 1;
-  opacity: 0.04;
-  mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 0.6 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
-}
-
-/* Subtle scrollbar for dark theme; the default chromium bar
-   looks out of place against the muted bg. */
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
@@ -131,35 +83,29 @@ body::before {
   background: hsl(var(--muted-foreground) / 0.4);
 }
 
-/* Entrance choreography — orchestrated page-load reveal.
-   Single curve across all items, CSS-only, honors
-   prefers-reduced-motion. See DESIGN.md "动作". */
+/* Subtle entrance — modern minimal keeps one orchestrated reveal. */
 @layer base {
   @keyframes rise-in {
     from {
       opacity: 0;
-      transform: translateY(8px);
+      transform: translateY(6px);
     }
     to {
       opacity: 1;
       transform: translateY(0);
     }
   }
-
   [data-stagger] {
-    --stagger-base: 40ms;
-    --stagger-step: 70ms;
-    --stagger-duration: 320ms;
-    --stagger-ease: cubic-bezier(0.16, 1, 0.3, 1); /* expo-out */
+    --stagger-base: 60ms;
+    --stagger-step: 50ms;
+    --stagger-duration: 280ms;
+    --stagger-ease: cubic-bezier(0.16, 1, 0.3, 1);
   }
-
   [data-stagger-item] {
     opacity: 0;
     animation: rise-in var(--stagger-duration) var(--stagger-ease) forwards;
     animation-delay: calc(var(--stagger-base) + (var(--stagger-index, 0) * var(--stagger-step)));
   }
-
-  /* Reduced-motion: snap to final state, no animation. */
   @media (prefers-reduced-motion: reduce) {
     [data-stagger-item] {
       animation: none;

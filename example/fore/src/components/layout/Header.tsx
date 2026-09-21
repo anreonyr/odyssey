@@ -16,20 +16,16 @@ import type { HTMLAttributes } from "react";
 
 import { useLocation } from "react-router-dom";
 
-import { useCaps } from "../../hooks/useCaps";
-import { Badge } from "../ui/badge";
+import { Badge } from "@/components/ui/badge";
+import { useCaps } from "@/hooks/useCaps";
 
 const TITLES: Array<[RegExp, string]> = [
   [/^\/$/, "Overview"],
-  [/^\/caps\/[^/]+$/, "Capability"],
-  [/^\/caps$/, "Capabilities"],
-  [/^\/agent\/[^/]+$/, "Session"],
-  [/^\/agent$/, "Agent"],
   [/^\/chat\/[^/]+$/, "Chat"],
   [/^\/chat$/, "Chat"],
-  [/^\/invoke$/, "Invoke"],
-  [/^\/playground$/, "Playground"],
-  [/^\/checkpoints$/, "Checkpoints"],
+  [/^\/agent\/sessions\/[^/]+$/, "Session"],
+  [/^\/agent\/sessions$/, "Agent sessions"],
+  [/^\/explore/, "Explore"],
 ];
 
 function titleFor(pathname: string): string {
@@ -47,19 +43,18 @@ export function Header(props: HTMLAttributes<HTMLElement>) {
   return (
     <header
       {...props}
-      className="border-border bg-card/40 flex h-12 shrink-0 items-center gap-3 border-b px-8"
+      className="bg-background flex h-12 shrink-0 items-center gap-3 border-b px-8"
     >
-      <h1 className="font-mono text-sm font-semibold tracking-tight">{title}</h1>
-      <span className="text-muted-foreground font-mono text-xs">/ odyssey agent frontend</span>
+      <h1 className="text-sm font-semibold tracking-tight">{title}</h1>
 
       <div className="ml-auto flex items-center gap-2">
         <Badge variant="muted">
           <span className="text-muted-foreground">caps</span>
-          <span className="text-foreground tabular-nums">{caps.length}</span>
+          <span className="font-mono tabular-nums">{caps.length}</span>
         </Badge>
         <Badge variant="muted">
           <span className="text-muted-foreground">reachable</span>
-          <span className="text-foreground tabular-nums">{reachable.size}</span>
+          <span className="font-mono tabular-nums">{reachable.size}</span>
         </Badge>
         <AgentBadge ready={ready} error={agentError} />
       </div>
@@ -68,13 +63,7 @@ export function Header(props: HTMLAttributes<HTMLElement>) {
 }
 
 function AgentBadge({ ready, error }: { ready: boolean; error: string | null }) {
-  if (error) {
-    return (
-      <Badge variant="destructive" title={error}>
-        agent · down
-      </Badge>
-    );
-  }
+  if (error) return <Badge variant="destructive">agent · down</Badge>;
   if (!ready) return <Badge variant="muted">agent · …</Badge>;
   return <Badge variant="success">agent · up</Badge>;
 }

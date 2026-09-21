@@ -1,47 +1,34 @@
-// Brutalist status pill for the chat surface. All caps, mono,
-// tracking-wide, brackets as decoration. Differentiation via
-// typography — no rounded backgrounds, no soft borders.
+// Stream-phase pill — a Badge keyed to the agent_stream
+// lifecycle phase (idle / connecting / streaming / done /
+// error). Used in the ChatSession compact header.
 
-import type { StreamPhase } from "../hooks/useAgentStream";
+import type { StreamPhase } from "@/hooks/useAgentStream";
 
-import { cn } from "../lib/utils";
+import { Badge } from "@/components/ui/badge";
 
-const PHASE_STYLES: Record<StreamPhase, { label: string; className: string }> = {
-  idle: {
-    label: "IDLE",
-    className: "border-border bg-card text-muted-foreground",
-  },
-  connecting: {
-    label: "CONN",
-    className: "border-warning/50 bg-warning/10 text-warning",
-  },
-  streaming: {
-    label: "STREAM",
-    className: "border-success/50 bg-success/10 text-success",
-  },
-  done: {
-    label: "DONE",
-    className: "border-border bg-muted text-foreground",
-  },
-  error: {
-    label: "ERROR",
-    className: "border-destructive/50 bg-destructive/10 text-destructive",
-  },
+const PHASE_VARIANT: Record<
+  StreamPhase,
+  "muted" | "warning" | "default" | "muted" | "destructive"
+> = {
+  idle: "muted",
+  connecting: "warning",
+  streaming: "default",
+  done: "muted",
+  error: "destructive",
+};
+
+const PHASE_LABEL: Record<StreamPhase, string> = {
+  idle: "Idle",
+  connecting: "Connecting",
+  streaming: "Streaming",
+  done: "Done",
+  error: "Error",
 };
 
 export function StatusPill({ phase }: { phase: StreamPhase }) {
-  const s = PHASE_STYLES[phase];
   return (
-    <span
-      data-phase={phase}
-      className={cn(
-        "inline-flex items-center gap-1.5 border-2 px-2 py-0.5 font-mono text-[10px] uppercase tracking-widest",
-        s.className,
-      )}
-    >
-      <span className="font-bold">[</span>
-      <span>{s.label}</span>
-      <span className="font-bold">]</span>
-    </span>
+    <Badge variant={PHASE_VARIANT[phase]} data-phase={phase}>
+      {PHASE_LABEL[phase]}
+    </Badge>
   );
 }

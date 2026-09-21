@@ -8,11 +8,11 @@
 // Final / Error events break out of the bubble layout and
 // span the column for emphasis.
 
-import type { AgentStreamEvent } from "../api/types";
+import type { AgentStreamEvent } from "@/api/types";
 
 import { useState } from "react";
 
-import { cn } from "../lib/utils";
+import { Button } from "@/components/ui/button";
 
 export type RenderRow =
   | { kind: "user"; text: string; firstAt: number }
@@ -24,35 +24,21 @@ export type RenderRow =
 
 function fmtTime(ts: number): string {
   const d = new Date(ts);
-  const h = String(d.getHours()).padStart(2, "0");
-  const m = String(d.getMinutes()).padStart(2, "0");
-  const s = String(d.getSeconds()).padStart(2, "0");
-  return `${h}:${m}:${s}`;
+  return d.toLocaleTimeString();
 }
-
-// ---------------- Grouping ----------------
-//
-// Collapses the raw `agent_stream` event sequence into the
-// `RenderRow` shape the bubbles render. Consecutive llm_delta
-// / llm_reply_text events fold into a single running LLM row
-// (so the user sees one bubble growing token-by-token, not a
-// flood of single-character rows); tool_call, tool_result,
-// final, error each get their own row with the originating
-// event preserved for the collapsible JSON view.
 
 export function groupEvents(events: AgentStreamEvent[], live: boolean): RenderRow[] {
   const rows: RenderRow[] = [];
   for (const evt of events) {
     const last = rows[rows.length - 1];
     if (evt.kind === "llm_delta" || evt.kind === "llm_reply_text") {
-      const text = evt.kind === "llm_delta" ? evt.text : evt.text;
       if (last?.kind === "llm") {
-        last.text += text;
+        last.text += evt.text;
         last.lastAt = Date.now();
       } else {
         rows.push({
           kind: "llm",
-          text,
+          text: evt.text,
           firstAt: Date.now(),
           lastAt: Date.now(),
           live: false,
@@ -68,8 +54,6 @@ export function groupEvents(events: AgentStreamEvent[], live: boolean): RenderRo
       rows.push({ kind: "error", event: evt, at: Date.now() });
     }
   }
-  // Mark the trailing llm row as live so the caret blinks while
-  // more deltas are in flight.
   const tail = rows[rows.length - 1];
   if (tail?.kind === "llm" && live) tail.live = true;
   return rows;
@@ -94,22 +78,15 @@ function BubbleShell({
 }) {
   const justify =
     side === "right" ? "justify-end" : side === "center" ? "justify-center" : "justify-start";
-  return <div className={cn("flex", justify)}>{children}</div>;
+  return <div className={`flex ${justify}`}>{children}</div>;
 }
 
 function UserBubble({ row }: { row: Extract<RenderRow, { kind: "user" }> }) {
   return (
     <BubbleShell side="right">
-      <div
-        className="bg-primary/10 border-primary/30 max-w-2xl border-2 px-4 py-2"
-        data-message-kind="user"
-      >
-        <pre className="text-foreground whitespace-pre-wrap font-mono text-xs leading-relaxed">
-          {row.text}
-        </pre>
-        <div className="text-muted-foreground mt-1 text-right font-mono text-[10px] tabular-nums">
-          {fmtTime(row.firstAt)}
-        </div>
+      <div className="bg-primary/10 max-w-2xl rounded-lg border px-4 py-2" data-message-kind="user">
+        <p className="whitespace-pre-wrap text-sm leading-relaxed">{row.text}</p>
+        <div className="text-muted-foreground mt-1 text-right text-xs">{fmtTime(row.firstAt)}</div>
       </div>
     </BubbleShell>
   );
@@ -118,16 +95,14 @@ function UserBubble({ row }: { row: Extract<RenderRow, { kind: "user" }> }) {
 function AgentBubble({ row }: { row: Extract<RenderRow, { kind: "llm" }> }) {
   return (
     <BubbleShell side="left">
-      <div className="bg-card border-border max-w-2xl border-2 px-4 py-2" data-message-kind="agent">
-        <pre className="text-foreground whitespace-pre-wrap font-mono text-xs leading-relaxed">
+      <div className="bg-card max-w-2xl rounded-lg border px-4 py-2" data-message-kind="agent">
+        <p className="whitespace-pre-wrap text-sm leading-relaxed">
           {row.text}
           {row.live && (
             <span className="text-primary ml-0.5 inline-block animate-pulse font-bold">▌</span>
           )}
-        </pre>
-        <div className="text-muted-foreground mt-1 font-mono text-[10px] tabular-nums">
-          {fmtTime(row.firstAt)}
-        </div>
+        </p>
+        <div className="text-muted-foreground mt-1 text-xs">{fmtTime(row.firstAt)}</div>
       </div>
     </BubbleShell>
   );
@@ -138,27 +113,28 @@ function ToolCallRow({ row }: { row: Extract<RenderRow, { kind: "tool_call" }> }
   const argCount = Object.keys(row.event.args || {}).length;
   return (
     <BubbleShell side="left">
-      <button
-        type="button"
+      <Button
+        variant="outline"
+        size="sm"
         onClick={() => setExpanded((v) => !v)}
-        className="border-warning/30 bg-warning/5 hover:bg-warning/10 max-w-2xl border-2 px-3 py-1.5 text-left transition-colors"
+        className="max-w-2xl justify-start"
         data-message-kind="tool-call"
         data-action="toggle-tool-call"
       >
-        <div className="flex items-center gap-2 font-mono text-[11px]">
-          <span className="text-muted-foreground">{expanded ? "▾" : "▸"}</span>
-          <span className="text-warning">called {row.event.tool}</span>
-          <span className="text-muted-foreground">
-            ({argCount} arg{argCount !== 1 ? "s" : ""})
-          </span>
-          <span className="text-muted-foreground ml-auto tabular-nums">{fmtTime(row.at)}</span>
-        </div>
-        {expanded && (
-          <pre className="text-foreground mt-2 font-mono text-[11px] leading-relaxed">
-            {JSON.stringify(row.event.args, null, 2)}
-          </pre>
-        )}
-      </button>
+        <span className="text-muted-foreground">{expanded ? "▾" : "▸"}</span>
+        <span className="text-warning">Called {row.event.tool}</span>
+        <span className="text-muted-foreground">
+          ({argCount} arg{argCount !== 1 ? "s" : ""})
+        </span>
+        <span className="text-muted-foreground ml-auto text-xs tabular-nums">
+          {fmtTime(row.at)}
+        </span>
+      </Button>
+      {expanded && (
+        <pre className="bg-muted/30 mt-1 max-w-2xl rounded-md border p-2 font-mono text-xs leading-relaxed">
+          {JSON.stringify(row.event.args, null, 2)}
+        </pre>
+      )}
     </BubbleShell>
   );
 }
@@ -168,36 +144,33 @@ function ToolResultRow({ row }: { row: Extract<RenderRow, { kind: "tool_result" 
   const outcome = row.event.outcome;
   return (
     <BubbleShell side="left">
-      <button
-        type="button"
+      <Button
+        variant="outline"
+        size="sm"
         onClick={() => setExpanded((v) => !v)}
-        className={cn(
-          "max-w-2xl border-2 px-3 py-1.5 text-left transition-colors",
-          outcome.ok
-            ? "border-border bg-muted/30 hover:bg-muted/50"
-            : "border-destructive/40 bg-destructive/5 hover:bg-destructive/10",
-        )}
+        className="max-w-2xl justify-start"
         data-message-kind="tool-result"
         data-action="toggle-tool-result"
       >
-        <div className="flex items-center gap-2 font-mono text-[11px]">
-          <span className="text-muted-foreground">{expanded ? "▾" : "▸"}</span>
-          <span className={outcome.ok ? "text-muted-foreground" : "text-destructive"}>
-            result of {row.event.tool} ({outcome.ok ? "ok" : "error"})
-          </span>
-          <span className="text-muted-foreground ml-auto tabular-nums">{fmtTime(row.at)}</span>
-        </div>
-        {expanded && (
-          <pre
-            className={cn(
-              "mt-2 whitespace-pre-wrap font-mono text-[11px] leading-relaxed",
-              outcome.ok ? "text-foreground" : "text-destructive",
-            )}
-          >
-            {outcome.ok ? JSON.stringify(outcome.value, null, 2) : outcome.error}
-          </pre>
-        )}
-      </button>
+        <span className="text-muted-foreground">{expanded ? "▾" : "▸"}</span>
+        <span className={outcome.ok ? "text-muted-foreground" : "text-destructive"}>
+          Result of {row.event.tool} ({outcome.ok ? "ok" : "error"})
+        </span>
+        <span className="text-muted-foreground ml-auto text-xs tabular-nums">
+          {fmtTime(row.at)}
+        </span>
+      </Button>
+      {expanded && (
+        <pre
+          className={
+            outcome.ok
+              ? "bg-muted/30 mt-1 max-w-2xl whitespace-pre-wrap rounded-md border p-2 font-mono text-xs leading-relaxed"
+              : "border-destructive/40 bg-destructive/5 text-destructive mt-1 max-w-2xl whitespace-pre-wrap rounded-md border p-2 font-mono text-xs leading-relaxed"
+          }
+        >
+          {outcome.ok ? JSON.stringify(outcome.value, null, 2) : outcome.error}
+        </pre>
+      )}
     </BubbleShell>
   );
 }
@@ -206,18 +179,14 @@ function FinalBubble({ row }: { row: Extract<RenderRow, { kind: "final" }> }) {
   return (
     <BubbleShell side="center">
       <div
-        className="bg-success/10 border-success/40 w-full max-w-2xl border-2 px-4 py-3"
+        className="border-success/40 bg-success/10 w-full max-w-2xl rounded-lg border px-4 py-3"
         data-message-kind="final"
       >
-        <div className="text-success mb-2 font-mono text-[10px] font-bold uppercase tracking-widest">
-          ■ final · {row.event.reason}
-        </div>
-        <pre className="text-foreground whitespace-pre-wrap font-mono text-xs leading-relaxed">
+        <div className="text-success mb-2 text-xs font-medium">Final · {row.event.reason}</div>
+        <pre className="whitespace-pre-wrap font-mono text-xs leading-relaxed">
           {stringifyCompact(row.event.value)}
         </pre>
-        <div className="text-muted-foreground mt-2 font-mono text-[10px] tabular-nums">
-          {fmtTime(row.at)}
-        </div>
+        <div className="text-muted-foreground mt-2 text-xs">{fmtTime(row.at)}</div>
       </div>
     </BubbleShell>
   );
@@ -227,18 +196,14 @@ function ErrorBubble({ row }: { row: Extract<RenderRow, { kind: "error" }> }) {
   return (
     <BubbleShell side="center">
       <div
-        className="bg-destructive/10 border-destructive/40 w-full max-w-2xl border-2 px-4 py-3"
+        className="border-destructive/40 bg-destructive/10 w-full max-w-2xl rounded-lg border px-4 py-3"
         data-message-kind="error"
       >
-        <div className="text-destructive mb-2 font-mono text-[10px] font-bold uppercase tracking-widest">
-          × error
-        </div>
+        <div className="text-destructive mb-2 text-xs font-medium">Error</div>
         <pre className="text-destructive whitespace-pre-wrap font-mono text-xs leading-relaxed">
           {row.event.message}
         </pre>
-        <div className="text-muted-foreground mt-2 font-mono text-[10px] tabular-nums">
-          {fmtTime(row.at)}
-        </div>
+        <div className="text-muted-foreground mt-2 text-xs">{fmtTime(row.at)}</div>
       </div>
     </BubbleShell>
   );

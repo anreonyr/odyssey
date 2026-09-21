@@ -1,21 +1,20 @@
-// LLM playground (`/playground`). Thin wrapper around the
-// `llm_complete` cap: prompt → completion, streamed via the
-// SSE handler. The streaming result is the headline
-// affordance here — the rest is a simple JSON request shape.
+// Playground tab — wraps llm_complete with a prompt/completion
+// UI. The system prompt is optional; the request envelope is
+// shown verbatim in the "Request" tab so users can copy it.
 
-import { Play, Loader2 } from "lucide-react";
+import { Loader2, Play } from "lucide-react";
 import { useState } from "react";
 
-import { client } from "../api/client";
-import { Badge } from "../components/ui/badge";
-import { Button } from "../components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
-import { Input } from "../components/ui/input";
-import { ScrollArea } from "../components/ui/scroll-area";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "../components/ui/tabs";
-import { Textarea } from "../components/ui/textarea";
+import { client } from "@/api/client";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
 
-export function Playground() {
+export function PlaygroundTab() {
   const [prompt, setPrompt] = useState("");
   const [system, setSystem] = useState("");
   const [completion, setCompletion] = useState("");
@@ -28,15 +27,8 @@ export function Playground() {
     setError(null);
     setCompletion("");
     try {
-      const input = {
-        prompt,
-        ...(system ? { system } : {}),
-      };
+      const input = { prompt, ...(system ? { system } : {}) };
       setRawJson(JSON.stringify(input, null, 2));
-      // llm_complete is sync today, but the streaming variant
-      // exists. We use the sync path so the result appears in
-      // one chunk; the streaming UI is reserved for caps that
-      // actually emit chunks.
       const value = await client.invoke<{ completion: string }>("llm_complete", input);
       setCompletion(value.completion);
     } catch (e) {
@@ -47,39 +39,31 @@ export function Playground() {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr,1fr]">
+    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0">
-          <CardTitle className="text-xs">Prompt</CardTitle>
-          <Button size="sm" variant="success" onClick={run} disabled={running || !prompt.trim()}>
-            {running ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <Play className="h-3.5 w-3.5" />
-            )}
-            run
+          <CardTitle className="text-sm font-medium">Prompt</CardTitle>
+          <Button size="sm" onClick={run} disabled={running || !prompt.trim()}>
+            {running ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+            Run
           </Button>
         </CardHeader>
         <CardContent className="space-y-3">
           <div>
-            <label className="text-muted-foreground mb-2 block font-mono text-[10px] uppercase tracking-wider">
-              system (optional)
-            </label>
+            <div className="text-muted-foreground mb-2 text-xs">System (optional)</div>
             <Input
               value={system}
               onChange={(e) => setSystem(e.target.value)}
-              placeholder="you are a helpful assistant…"
+              placeholder="You are a helpful assistant…"
             />
           </div>
           <div>
-            <label className="text-muted-foreground mb-2 block font-mono text-[10px] uppercase tracking-wider">
-              user prompt
-            </label>
+            <div className="text-muted-foreground mb-2 text-xs">User prompt</div>
             <Textarea
               rows={10}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
-              placeholder="ask the model…"
+              placeholder="Ask the model…"
             />
           </div>
         </CardContent>
@@ -87,7 +71,7 @@ export function Playground() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-xs">Result</CardTitle>
+          <CardTitle className="text-sm font-medium">Result</CardTitle>
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="text">
@@ -101,7 +85,7 @@ export function Playground() {
                   {error}
                 </pre>
               ) : (
-                <ScrollArea className="border-border bg-muted/20 max-h-[480px] rounded-md border">
+                <ScrollArea className="bg-muted/30 max-h-[480px] rounded-md border">
                   <pre className="p-3 font-mono text-xs leading-relaxed">
                     {completion || <span className="text-muted-foreground">(empty)</span>}
                   </pre>
@@ -109,7 +93,7 @@ export function Playground() {
               )}
             </TabsContent>
             <TabsContent value="raw">
-              <ScrollArea className="border-border bg-muted/20 max-h-[480px] rounded-md border">
+              <ScrollArea className="bg-muted/30 max-h-[480px] rounded-md border">
                 <pre className="p-3 font-mono text-xs">
                   {rawJson || (
                     <span className="text-muted-foreground">(run to see the request envelope)</span>
@@ -119,7 +103,7 @@ export function Playground() {
             </TabsContent>
           </Tabs>
           {rawJson && (
-            <p className="text-muted-foreground mt-2 font-mono text-[10px]">
+            <p className="text-muted-foreground mt-2 text-xs">
               <Badge variant="muted" className="mr-1">
                 llm_complete
               </Badge>
