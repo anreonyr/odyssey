@@ -32,7 +32,6 @@
 
 pub mod agent;
 pub mod bridge;
-pub mod bridge_resource;
 pub mod bundles;
 pub mod database;
 pub mod echo;

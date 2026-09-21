@@ -8,10 +8,9 @@
 //! for the `Resource::invoke` status response — the capability
 //! returns server status when invoked via `/api/invoke http_bridge`.
 //!
-//! Slice 1 ships the struct + Drop. Slice 2's
-//! `HttpBridgeBuiltin::mint` spawns the server via
-//! `serve::spawn_http_bridge_with_shutdown` and constructs the
-//! resource via `HttpBridgeResource::new`.
+//! Lives at `bridge::resource` (private submodule of `bridge`);
+//! re-exported as `bridge::HttpBridgeResource` for sibling
+//! modules within `bridge/`.
 
 use std::net::SocketAddr;
 
@@ -47,15 +46,12 @@ pub struct HttpBridgeResource {
 impl HttpBridgeResource {
     /// Construct a resource from already-spawned pieces.
     ///
-    /// Slice 2's `HttpBridgeBuiltin::mint` does the spawning
-    /// via `serve::spawn_http_bridge_with_shutdown` and passes
-    /// the resulting `JoinHandle` + `oneshot::Sender` here.
-    /// Splitting construction from spawning keeps `bridge_resource.rs`
-    /// free of kernel-import paths — the file lives in the
-    /// example layer (`odyssey-builtin`), so it must use
-    /// `odyssey::...` for any kernel reference; the spawn
-    /// happens in `bridge.rs` (Slice 2) where the import is
-    /// already in scope.
+    /// `HttpBridgeBuiltin::mint` does the spawning via
+    /// `serve::spawn_http_bridge_with_shutdown` and passes the
+    /// resulting `JoinHandle` + `oneshot::Sender` here.
+    /// Splitting construction from spawning keeps this file
+    /// free of `serve` import paths — only the sibling `mod.rs`
+    /// reaches into the kernel's HTTP layer.
     pub fn new(
         server_handle: JoinHandle<()>,
         cancel_tx: oneshot::Sender<()>,

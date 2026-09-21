@@ -6,14 +6,20 @@
 //! `ODYSSEY_FRONTEND_DIST` from the environment. When no
 //! frontend env is set, falls back to
 //! `CARGO_MANIFEST_DIR/../../fore/dist` (mirrors the live
-//! `main.rs:64-73` behavior). The server's shutdown signal
-//! flows through `HttpBridgeResource`'s `Drop` —
-//! `default_ruin` revokes the slot, the resource drops, the
-//! cancel signal fires.
+//! `main.rs` behavior from before the bridge became a plugin).
+//! The server's shutdown signal flows through
+//! `HttpBridgeResource`'s `Drop` — `default_ruin` revokes the
+//! slot, the resource drops, the cancel signal fires.
 //!
 //! Invoke (`/api/invoke http_bridge`) returns a status JSON
 //! via `impl Resource for HttpBridgeResource` (defined in
-//! `bridge_resource.rs`): `{"bound": "127.0.0.1:3030", "frontend": false}`.
+//! `bridge::resource`): `{"bound": "127.0.0.1:3030", "frontend": false}`.
+//!
+//! Module layout:
+//! - `bridge::HttpBridgeBuiltin` — the plugin (this file)
+//! - `bridge::resource::HttpBridgeResource` — the Resource
+//!   implementation, kept private; only the plugin needs to
+//!   construct one.
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -31,7 +37,9 @@ use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
 use odyssey::personality::lifecycle::serve;
 use tokio::sync::oneshot;
 
-use crate::bridge_resource::HttpBridgeResource;
+mod resource;
+
+pub use resource::HttpBridgeResource;
 
 /// Default bind address when `ODYSSEY_ADDR` is unset.
 const DEFAULT_BRIDGE_ADDR: &str = "127.0.0.1:3030";
@@ -67,8 +75,7 @@ impl HttpBridgeBuiltin {
             .parse()
             .expect("ODYSSEY_ADDR must be host:port");
 
-        // Mirror live `main.rs:64-73` behavior: prefer
-        // `ODYSSEY_FRONTEND_DIST`, fall back to
+        // Prefer `ODYSSEY_FRONTEND_DIST`, fall back to
         // `CARGO_MANIFEST_DIR/../../fore/dist`, unless
         // `ODYSSEY_NO_FRONTEND` is set (in which case the
         // server returns 503 for UI routes).
