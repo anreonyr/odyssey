@@ -132,7 +132,7 @@ function useSessionStore(): AgentSessionStore {
     setBusy(true);
     setError(null);
     try {
-      const input: AgentCancelInput = { session_id, path };
+      const input: AgentCancelInput = path !== undefined ? { session_id, path } : { session_id };
       const r = await agent.cancel(input);
       setSessions((m) => {
         const prev = m.get(session_id);
@@ -143,7 +143,7 @@ function useSessionStore(): AgentSessionStore {
           status: "Cancelled",
           history: r.history,
           history_len: r.history.length,
-          checkpoint_path: r.checkpoint_path,
+          ...(r.checkpoint_path !== undefined && { checkpoint_path: r.checkpoint_path }),
         });
         return next;
       });

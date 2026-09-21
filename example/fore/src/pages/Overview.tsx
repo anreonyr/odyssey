@@ -174,7 +174,7 @@ export function Overview() {
 }
 
 interface StatProps {
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string | undefined }>;
   label: string;
   value: number | string;
   tone: "default" | "success" | "warning" | "muted";
@@ -206,7 +206,7 @@ function Stat({ icon: Icon, label, value, tone }: StatProps) {
 
 interface QuickCardProps {
   to: string;
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string | undefined }>;
   title: string;
   description: string;
   count?: number;

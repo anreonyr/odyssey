@@ -32,7 +32,7 @@ import { cn } from "../../lib/utils";
 interface NavItem {
   to: string;
   label: string;
-  icon: React.ComponentType<{ className?: string }>;
+  icon: React.ComponentType<{ className?: string | undefined }>;
   /** Returns the count badge for this item. `null` means no badge. */
   badge?: () => number | null;
 }
