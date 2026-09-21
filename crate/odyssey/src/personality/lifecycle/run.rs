@@ -119,19 +119,17 @@ pub fn default_ruin(cspace: &CapabilitySpace, slot_ids: &[SlotId]) -> Result<usi
     Ok(revoked)
 }
 
-/// The bridge address `run` uses when the caller does not pick one.
-pub const DEFAULT_BRIDGE_ADDR: &str = "127.0.0.1:3030";
-
-/// Top-level entry point on the default bridge address. Boots the
-/// kernel, resolves the provided `(manifest, mint_fn, ruin_fn)`
-/// triples, mints each capability via the matching `mint_fn`,
-/// serves HTTP, and tears down on Ctrl-C. The default
-/// `run` does **not** serve the React frontend — that's an
-/// example concern; pass the path to `run_on` if you need it.
+/// Top-level entry point. Boots the kernel, resolves the
+/// provided `(manifest, mint_fn, ruin_fn)` triples, mints each
+/// capability via the matching `mint_fn`, blocks on Ctrl-C, and
+/// tears down. The HTTP bridge (if any) is a regular plugin —
+/// its mint reads `ODYSSEY_ADDR` / `ODYSSEY_NO_FRONTEND` /
+/// `ODYSSEY_FRONTEND_DIST` from the environment. The
+/// orchestrator does not name or know about any specific plugin.
 pub async fn run(
     plugins: &[(PluginManifest, MintFn, RuinFn)],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    run_on(DEFAULT_BRIDGE_ADDR.parse().unwrap(), plugins).await
+    run_on(plugins).await
 }
 
 /// `run` with an explicit bridge address.
@@ -148,7 +146,6 @@ pub async fn run(
 /// no longer threads the address or the frontend dist — both are
 /// the bridge plugin's concern, not the orchestrator's.
 pub async fn run_on(
-    addr: std::net::SocketAddr,
     plugins: &[(PluginManifest, MintFn, RuinFn)],
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 1. Setup — the resolver takes manifests alone; the
@@ -176,12 +173,15 @@ pub async fn run_on(
     // `ODYSSEY_FRONTEND_DIST` from the environment (see
     // `example/back/src/bridge.rs`).
     let minted = mint_from_registry(&factory, &plan, &typed_bindings, plugins).await?;
-    // 4. Wait for shutdown — the bridge plugin's Resource holds
-    // the HTTP server's lifecycle; the server runs until Ctrl-C
-    // fires. The orchestrator blocks on the same signal so
-    // teardown runs after the server's graceful shutdown.
-    eprintln!("\n[main] HTTP bridge up — open http://{addr}/");
-    eprintln!("[main] press Ctrl-C to stop");
+    // 4. Wait for shutdown — the orchestrator blocks on Ctrl-C
+    // and then triggers each plugin's `RuinFn` in reverse mint
+    // order. The orchestrator doesn't know which plugins are
+    // running; each plugin owns its own lifecycle (the bridge
+    // plugin's Resource, for example, drops its server task on
+    // `RuinFn`). The bridge prints `[http] listening` itself;
+    // we print nothing here so the orchestrator stays
+    // plugin-agnostic.
+    eprintln!("[main] waiting for Ctrl-C");
     let _ = tokio::signal::ctrl_c().await;
 
     // 5. Teardown — per-plugin `RuinFn` (default or custom)

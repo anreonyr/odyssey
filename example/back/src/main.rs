@@ -37,7 +37,7 @@
 //! `ODYSSEY_FRONTEND_DIST` from the environment (see
 //! `example/back/src/bridge.rs`).
 
-use odyssey::personality::lifecycle::run::{DEFAULT_BRIDGE_ADDR, run_on};
+use odyssey::personality::lifecycle::run::run_on;
 use odyssey_builtin::bundles;
 
 #[tokio::main(flavor = "current_thread")]
@@ -58,13 +58,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .flatten()
     .collect::<Vec<_>>();
 
-    // `ODYSSEY_ADDR` lets a test give its own instance a port of
-    // its own; without it the smoke test competes for the fixed one.
-    let addr = std::env::var("ODYSSEY_ADDR").unwrap_or_else(|_| DEFAULT_BRIDGE_ADDR.to_string());
-
-    run_on(
-        addr.parse().expect("ODYSSEY_ADDR must be host:port"),
-        &plugins,
-    )
-    .await
+    // The orchestrator is plugin-agnostic. The HTTP bridge's
+    // mint reads `ODYSSEY_ADDR` (default `127.0.0.1:3030`),
+    // `ODYSSEY_NO_FRONTEND`, and `ODYSSEY_FRONTEND_DIST`
+    // itself — see `example/back/src/bridge.rs`. We pass
+    // nothing more than the plugin list.
+    run_on(&plugins).await
 }
