@@ -254,9 +254,6 @@ pub struct TypedBinding {
     pub handle: String,
     /// Slot id in the consumer's `PluginCspace`.
     pub slot_id: SlotId,
-    /// Cspace name (`requires[*].capability`). Kept for
-    /// diagnostics + HTTP bridge tooling.
-    pub name: String,
 }
 
 /// Bag of typed bindings passed to every `MintFn` invocation.

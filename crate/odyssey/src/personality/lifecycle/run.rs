@@ -422,7 +422,6 @@ fn provision_dependencies(
             typed.entries.push(TypedBinding {
                 handle: b.handle.clone(),
                 slot_id,
-                name: b.capability.clone(),
             });
         }
         out.insert(plugin_id.clone(), typed);

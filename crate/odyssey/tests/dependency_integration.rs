@@ -286,7 +286,6 @@ fn resolve_then_provision_then_mint_end_to_end() {
             .push(odyssey::personality::lifecycle::mint::TypedBinding {
                 handle: b.handle.clone(),
                 slot_id,
-                name: b.capability.clone(),
             });
     }
 
