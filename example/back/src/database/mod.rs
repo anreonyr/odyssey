@@ -1,20 +1,28 @@
-//! Database builtin — in-memory key-value store.
+//! Database builtin — a generic KV-store trait with pluggable
+//! backends. The default backend is in-memory; other backends
+//! (file-backed, sqlite, ...) can be added under this directory
+//! by implementing the `Database` trait and registering a new
+//! builtin wrapper.
 //!
-//! Phase 5 plugin (was `plugins/database/`). Demoted to a builtin
-//! in Phase 8.
+//! ## Trait shape
 //!
-//! Operation is selected by the JSON-RPC `op` field:
-//! - `"get"` — read `key`. Returns `{ "ok": true, "value": <v> }` if
-//!   present, `{ "ok": false }` if missing.
-//! - `"set"` — write `key` to `value`. Returns `{ "ok": true }`.
-//! - `"delete"` — remove `key`. Returns `{ "ok": true }`.
+//! Three operations, all `&self`:
+//! - `get(key)` returns `Some(value)` if present, else `None`.
+//! - `set(key, value)` stores; overwrites silently.
+//! - `delete(key)` removes the entry.
 //!
-//! State lives in a `RwLock<HashMap<String, Value>>` inside the
-//! resource. Multiple `Arc<DatabaseResource>` clones share the
-//! same backing store (the `Arc<RwLock<...>>`).
+//! Errors are reported as `String` to match the rest of the
+//! kernel's `Resource::invoke` shape.
+//!
+//! ## Cap
+//!
+//! One cap per plugin: `database`. The dispatch is on the
+//! `op` field (`get` / `set` / `delete`). See the JSON
+//! Schema in `DatabaseBuiltin::manifest` for the exact shape.
 
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+pub mod in_memory;
+
+use std::sync::Arc;
 
 use odyssey::capability::enforce::quota::CapabilityBudget;
 use odyssey::core::Resource;
@@ -27,10 +35,23 @@ use odyssey::personality::lifecycle::mint::{CapabilityFactory, MintError, TypedB
 use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
 use serde_json::{Value, json};
 
-type Store = Arc<RwLock<HashMap<String, Value>>>;
+pub use in_memory::InMemoryDatabase;
 
+/// Backend-agnostic KV store. Backends live as sibling files
+/// under `database/` (e.g. `in_memory.rs`, future
+/// `file.rs`, `sqlite.rs`); each is a thin newtype that
+/// implements this trait.
+pub trait Database: Send + Sync {
+    fn get(&self, key: &str) -> Result<Option<Value>, String>;
+    fn set(&self, key: &str, value: Value) -> Result<(), String>;
+    fn delete(&self, key: &str) -> Result<bool, String>;
+}
+
+/// Resource wrapper that dispatches by `op` over any
+/// `Arc<dyn Database>`. The builtin chooses a backend at
+/// mint time; the resource itself is backend-agnostic.
 pub struct DatabaseResource {
-    store: Store,
+    backend: Arc<dyn Database>,
 }
 
 impl Resource for DatabaseResource {
@@ -50,14 +71,10 @@ impl Resource for DatabaseResource {
                         input
                     )
                 })?;
-                let store = self
-                    .store
-                    .read()
-                    .map_err(|e| format!("database: lock poisoned: {e}"))?;
-                Ok(match store.get(key) {
-                    Some(value) => json!({ "ok": true, "value": value }),
-                    None => json!({ "ok": false }),
-                })
+                match self.backend.get(key)? {
+                    Some(value) => Ok(json!({ "ok": true, "value": value })),
+                    None => Ok(json!({ "ok": false })),
+                }
             }
             "set" => {
                 let key = input.get("key").and_then(|v| v.as_str()).ok_or_else(|| {
@@ -66,22 +83,14 @@ impl Resource for DatabaseResource {
                 let value = input.get("value").cloned().ok_or_else(|| {
                     format!("database.set: expected {{\"op\":\"set\",\"key\":\"<string>\",\"value\":...}}, got {}", input)
                 })?;
-                let mut store = self
-                    .store
-                    .write()
-                    .map_err(|e| format!("database: lock poisoned: {e}"))?;
-                store.insert(key.to_string(), value);
+                self.backend.set(key, value)?;
                 Ok(json!({ "ok": true }))
             }
             "delete" => {
                 let key = input.get("key").and_then(|v| v.as_str()).ok_or_else(|| {
                     format!("database.delete: expected {{\"op\":\"delete\",\"key\":\"<string>\"}}, got {}", input)
                 })?;
-                let mut store = self
-                    .store
-                    .write()
-                    .map_err(|e| format!("database: lock poisoned: {e}"))?;
-                store.remove(key);
+                self.backend.delete(key)?;
                 Ok(json!({ "ok": true }))
             }
             other => Err(format!(
@@ -96,17 +105,12 @@ pub struct DatabaseBuiltin;
 impl BuiltinManifest for DatabaseBuiltin {
     type Resource = DatabaseResource;
     fn manifest(&self) -> PluginManifest {
-        // The database's input shape is discriminated by the
-        // `op` field. JSON Schema's `oneOf` expresses the
-        // three shapes precisely; the LLM picks the right
-        // one based on the op it wants to perform. The
-        // in-memory store is per-process — values do not
-        // survive a restart. The schema declares the
+        // Discriminated union over `op`. The schema declares
         // `additionalProperties: false` on each variant so
         // the LLM doesn't accidentally pass a `value` on a
         // `get`.
         let tool_schema = serde_json::json!({
-            "description": "In-process JSON key-value store. Keys are strings, values are any JSON value. State is per-process and lost on restart.",
+            "description": "Backend-agnostic JSON key-value store. Keys are strings, values are any JSON value. The chosen backend determines persistence.",
             "input_schema": {
                 "oneOf": [
                     {
@@ -169,24 +173,13 @@ impl BuiltinManifest for DatabaseBuiltin {
 }
 
 impl DatabaseBuiltin {
-    /// Typed mint — Slice 3 migration: the database cap now
-    /// lives in the plugin's own `PluginCspace`, then we
-    /// grant a derived slot into the orchestrator's global
-    /// cspace so the HTTP bridge can still look it up by
-    /// name. The returned `SlotId` is the GLOBAL one — the
-    /// orchestrator's existing teardown path
-    /// (`default_ruin` revoking the returned ids) works
-    /// unchanged.
-    ///
-    /// DI Phase 21: `typed_bindings` is unused (database is a
-    /// leaf); return type widens to `Result<SlotId, MintError>`
-    /// so the kernel-side `grant_to` surfaces as a typed
-    /// DI Phase 21: `typed_bindings` is unused (database is a
-    /// leaf). The `.expect(...)` is unchanged: a kernel-side
-    /// `grant_to` failure today panics (caught by the
-    /// orchestrator's `catch_unwind` on `MintFn`). The
-    /// `MintError` enum exists as a future-shape surface; the
-    /// `MintFn` typedef stays `SlotId`.
+    /// Construct a builtin that wraps the given backend.
+    /// Mint routes through the standard PluginCspace + grant_to
+    /// pattern; the backend reference lives inside the resource.
+    pub fn new() -> Self {
+        Self
+    }
+
     pub fn mint(
         &self,
         factory: &CapabilityFactory,
@@ -200,13 +193,12 @@ impl DatabaseBuiltin {
         use odyssey::core::rights::rights::{CapabilityRights, Rights};
 
         let pc = factory.plugin_cspace(plugin);
+        let backend: Arc<dyn Database> = Arc::new(InMemoryDatabase::new());
         let local_slot = pc.mint(
             kind,
             decl,
             budget.clone(),
-            Arc::new(DatabaseResource {
-                store: Arc::new(RwLock::new(HashMap::new())),
-            }),
+            Arc::new(DatabaseResource { backend }),
         );
         let rights = CapabilityRights {
             operations: Rights::INVOKE | Rights::ASSIGN,
@@ -221,12 +213,6 @@ impl DatabaseBuiltin {
             })
     }
 
-    /// Phase 11: colocated registration helper. Returns the
-    /// `(manifest, mint_fn, ruin_fn)` triple; see
-    /// `builtins/src/echo.rs::register` for rationale.
-    ///
-    /// DI Phase 21: closure forwards `typed_bindings` to the
-    /// inherent `mint`.
     pub fn register() -> (PluginManifest, MintFn, RuinFn) {
         (
             DatabaseBuiltin.manifest(),
@@ -243,5 +229,11 @@ impl DatabaseBuiltin {
             },
             default_ruin,
         )
+    }
+}
+
+impl Default for DatabaseBuiltin {
+    fn default() -> Self {
+        Self::new()
     }
 }
