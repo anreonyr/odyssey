@@ -52,18 +52,16 @@ function capToPlugin(name: string): string {
 export function CapabilitiesTab() {
   const { caps, reachable, describes, ready } = useCaps();
   const [filter, setFilter] = useState("");
-  const [onlyReachable, setOnlyReachable] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
 
   const filtered = useMemo(() => {
     const f = filter.toLowerCase();
     return caps.filter((c) => {
-      if (onlyReachable && !reachable.has(c.name)) return false;
       if (f && !c.name.toLowerCase().includes(f) && !capToPlugin(c.name).toLowerCase().includes(f))
         return false;
       return true;
     });
-  }, [caps, filter, onlyReachable, reachable]);
+  }, [caps, filter]);
 
   const groups = useMemo(() => {
     const map = new Map<string, CapInfo[]>();
@@ -78,8 +76,14 @@ export function CapabilitiesTab() {
   const sel = selected ? caps.find((c) => c.name === selected) : null;
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-[420px,1fr]">
-      <Card>
+    // The two cards share the viewport-bottom space; capping
+    // their height to `100vh - <header+padding>` lets the
+    // ScrollArea inside the left card actually scroll when
+    // the cap list grows past the viewport, instead of
+    // overflowing into the parent `<main>` and pushing the
+    // right card off-screen.
+    <div className="grid h-[calc(100vh-8rem)] grid-cols-1 gap-4 lg:grid-cols-[420px,1fr]">
+      <Card className="flex min-h-0 flex-col">
         <CardHeader className="space-y-3">
           <div className="flex items-center gap-2">
             <Input
@@ -89,22 +93,22 @@ export function CapabilitiesTab() {
               data-input="caps-filter"
             />
             <Button
-              variant={onlyReachable ? "default" : "outline"}
+              variant="outline"
               size="sm"
-              onClick={() => setOnlyReachable((v) => !v)}
-              data-action="toggle-reachable"
+              disabled
+              data-action="toggle-binding-row"
             >
-              Reachable only
+              Binding row only
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="min-h-0 flex-1 overflow-hidden p-0">
           {!ready ? (
             <p className="text-muted-foreground p-4 text-sm">Loading capabilities…</p>
           ) : groups.length === 0 ? (
             <p className="text-muted-foreground p-4 text-sm">No capabilities match the filter.</p>
           ) : (
-            <ScrollArea className="max-h-[60vh]">
+            <ScrollArea className="h-full">
               {groups.map(([plugin, group]) => (
                 <div key={plugin} className="border-t" data-plugin={plugin}>
                   <div className="bg-muted/30 flex items-center justify-between px-3 py-2">
@@ -113,7 +117,7 @@ export function CapabilitiesTab() {
                   </div>
                   <ul className="divide-y">
                     {group.map((cap) => {
-                      const r = reachable.has(cap.name);
+                      const r = reachable.get(cap.name);
                       const d = describes.get(cap.name);
                       const ops = d && d.live ? d.operations : null;
                       return (
@@ -153,9 +157,13 @@ export function CapabilitiesTab() {
                                 </Badge>
                               ) : !r ? (
                                 <Badge variant="outline" className="text-[10px]">
-                                  not in binding row
+                                  not in cspace
                                 </Badge>
-                              ) : null}
+                              ) : (
+                                <Badge variant="outline" className="text-[10px]">
+                                  via cspace lookup
+                                </Badge>
+                              )}
                             </div>
                           </button>
                         </li>
@@ -169,7 +177,7 @@ export function CapabilitiesTab() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="flex min-h-0 flex-col overflow-hidden">
         <CardHeader>
           {sel ? (
             <div className="flex items-center gap-2">
@@ -182,7 +190,9 @@ export function CapabilitiesTab() {
             <span className="text-muted-foreground text-sm">Pick a capability on the left</span>
           )}
         </CardHeader>
-        {sel && <CapInspector cap={sel} />}
+        <CardContent className="min-h-0 flex-1 overflow-auto">
+          {sel ? <CapInspector cap={sel} /> : null}
+        </CardContent>
       </Card>
     </div>
   );
@@ -217,7 +227,7 @@ function CapInspector({ cap }: { cap: CapInfo }) {
   }
 
   return (
-    <CardContent className="space-y-4">
+    <div className="space-y-4">
       <div className="grid grid-cols-2 gap-3 text-sm">
         <div>
           <div className="text-muted-foreground text-xs">Plugin</div>
@@ -260,6 +270,6 @@ function CapInspector({ cap }: { cap: CapInfo }) {
           </ScrollArea>
         )}
       </div>
-    </CardContent>
+    </div>
   );
 }

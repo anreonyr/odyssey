@@ -61,7 +61,6 @@ pub const CONTRACT_DESCRIBE: &str = "agent_describe";
 pub enum AgentError {
     Input(String),
     Unknown(String),
-    Unbound(String),
 }
 
 impl std::fmt::Display for AgentError {
@@ -69,9 +68,6 @@ impl std::fmt::Display for AgentError {
         match self {
             Self::Input(message) => write!(f, "agent: {message}"),
             Self::Unknown(handle) => write!(f, "agent: unknown handle `{handle}`"),
-            Self::Unbound(handle) => {
-                write!(f, "agent: handle `{handle}` has no bound capability")
-            }
         }
     }
 }
@@ -109,16 +105,37 @@ impl AgentCore {
     }
 
     pub fn describe(&self, handle: &str) -> Result<Value, AgentError> {
-        let reach = self.reach(handle)?;
-        match reach.live {
+        // Try the plugin's own binding row first so a handle
+        // such as "echo" resolves even though the observer
+        // plugin (`agent_describe`) doesn't itself bind to it.
+        // Fall back to a cspace lookup by capability name so
+        // `agent_list` can return any cap's metadata through
+        // the same `describe` entry point.
+        let (resolved_handle, capability_name, provider) =
+            if let Some(row) = self.rows.iter().find(|r| r.handle == handle) {
+                (
+                    row.handle.clone(),
+                    row.capability.clone(),
+                    row.provider.clone(),
+                )
+            } else if let Some(cap) = self.cspace.lookup_by_name(handle) {
+                let meta = cap.meta();
+                (
+                    handle.to_string(),
+                    meta.name.clone(),
+                    meta.plugin.clone(),
+                )
+            } else {
+                return Err(AgentError::Unknown(handle.to_string()));
+            };
+
+        let cap = self.cspace.lookup_by_name(&capability_name);
+        match cap {
             None => Ok(json!({
-                "handle": reach.binding.handle,
-                "provider": {
-                    "name": reach.binding.provider.name,
-                    "version": reach.binding.provider.version,
-                },
+                "handle": resolved_handle,
+                "provider": { "name": provider.name, "version": provider.version },
                 "live": false,
-                "capability": reach.binding.capability,
+                "capability": capability_name,
                 "unbound": true,
             })),
             Some(cap) => {
@@ -136,13 +153,10 @@ impl AgentCore {
                 .filter_map(|(held, name)| held.then_some(name))
                 .collect();
                 Ok(json!({
-                    "handle": reach.binding.handle,
-                    "provider": {
-                        "name": reach.binding.provider.name,
-                        "version": reach.binding.provider.version,
-                    },
+                    "handle": resolved_handle,
+                    "provider": { "name": provider.name, "version": provider.version },
                     "live": true,
-                    "capability": reach.binding.capability,
+                    "capability": capability_name,
                     "kind": kind,
                     "operations": ops,
                 }))
@@ -151,28 +165,42 @@ impl AgentCore {
     }
 
     pub fn list(&self) -> Result<Value, AgentError> {
-        let handles: Vec<Value> = self
+        // The plugin that owns this `AgentCore` may have an
+        // empty binding row (the observer plugins — `agent_list`
+        // and `agent_describe` — declare no `requires`), so
+        // walking `self.rows` alone produces an empty list and
+        // the UI shows every cap as "not in binding row". The
+        // observer's job is to answer "what is in the cspace
+        // and what is behind it", not "what does this one
+        // plugin bind to".
+        //
+        // Walk the global cspace and return one entry per
+        // capability. Each entry names its plugin so the UI can
+        // group caps by source and surface provider metadata.
+        // `handle` mirrors `capability` for caps the consumer
+        // doesn't bind to (the observer's empty row case).
+        let binding_handles: std::collections::HashMap<&str, &str> = self
             .rows
             .iter()
-            .map(|row| {
-                let live = if row.capability.is_empty() {
-                    None
-                } else {
-                    self.cspace.lookup_by_name(&row.capability)
-                };
-                match live {
-                    None => Err(AgentError::Unbound(row.handle.clone())),
-                    Some(_) => Ok(json!({
-                        "handle": row.handle,
-                        "provider": {
-                            "name": row.provider.name,
-                            "version": row.provider.version,
-                        },
-                        "capability": row.capability,
-                    })),
-                }
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+            .filter(|r| !r.capability.is_empty())
+            .map(|r| (r.capability.as_str(), r.handle.as_str()))
+            .collect();
+        let mut handles: Vec<Value> = Vec::new();
+        for meta in self.cspace.enumerate() {
+            let handle = binding_handles
+                .get(meta.name.as_str())
+                .copied()
+                .unwrap_or(meta.name.as_str());
+            handles.push(json!({
+                "handle": handle,
+                "capability": meta.name,
+                "live": true,
+                "provider": {
+                    "name": meta.plugin.name,
+                    "version": meta.plugin.version,
+                },
+            }));
+        }
         Ok(json!({ "handles": handles }))
     }
 }

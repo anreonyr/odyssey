@@ -23,7 +23,7 @@ import { useAgentSession } from "@/hooks/useAgentSession";
 import { useCaps } from "@/hooks/useCaps";
 
 export function AgentSessions() {
-  const { reachable } = useCaps();
+  const { tools: toolList } = useCaps();
   const sessionStore = useAgentSession();
   const navigate = useNavigate();
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -44,7 +44,7 @@ export function AgentSessions() {
           </CardHeader>
           <CardContent>
             <StartForm
-              reachable={Array.from(reachable.keys())}
+              reachable={toolList}
               busy={sessionStore.busy}
               onStart={async (input) => {
                 const id = await sessionStore.start(input);

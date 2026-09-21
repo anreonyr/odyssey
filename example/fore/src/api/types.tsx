@@ -26,8 +26,18 @@ export interface CapInfo {
 // ---------- agent_list / agent_describe (read-only observers) ----------
 
 export interface AgentListEntry {
+  /** Binding-row handle if the consumer that owns this observer
+   *  has the cap on its own `requires`; otherwise mirrors
+   *  `capability` so the field is a stable display key. */
   handle: string;
+  /** Capability name in the cspace — the key the rest of the UI
+   *  (CapabilitiesTab filter, Chat tool picker) joins on. */
+  capability: string;
   live: boolean;
+  provider: {
+    name: string;
+    version: string;
+  };
 }
 
 export interface AgentListPayload {

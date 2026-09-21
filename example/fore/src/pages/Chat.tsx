@@ -28,15 +28,13 @@ export function Chat() {
 }
 
 function StartPanel() {
-  const { reachable } = useCaps();
+  const { tools: toolList } = useCaps();
   const sessionStore = useAgentSession();
   const navigate = useNavigate();
   const [goal, setGoal] = useState("");
-  const [tools, setTools] = useState<Set<string>>(new Set(reachable.keys()));
+  const [tools, setTools] = useState<Set<string>>(new Set(toolList));
   const [loadPath, setLoadPath] = useState("");
   const [showLoad, setShowLoad] = useState(false);
-
-  const toolList = Array.from(reachable.keys());
 
   function toggle(t: string) {
     setTools((prev) => {
