@@ -9,4 +9,7 @@
 // convention triggers clippy's `module_inception` warning; we
 // suppress it deliberately here too.
 #[allow(clippy::module_inception)]
+pub mod bundle;
 pub mod manifest;
+
+pub use bundle::BundleId;

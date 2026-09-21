@@ -25,6 +25,7 @@ use serde_json::Value;
 
 pub use crate::core::identity::ids::PluginId;
 use crate::core::identity::kind::CapKind;
+use crate::core::manifest::bundle::BundleId;
 
 // ---------------------------------------------------------------------------
 // Data shapes
@@ -33,6 +34,21 @@ use crate::core::identity::kind::CapKind;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct PluginManifest {
     pub plugin: PluginId,
+    /// Optional bundle identity. When `Some`, the plugin belongs
+    /// to a named bundle — used by `ResolvedPlan::render` to group
+    /// the mint order in boot diagrams, and by `ResolveError`
+    /// variants' `requester_bundle` field to attribute failures to
+    /// a bundle. The kernel does NOT use this for dispatch
+    /// (`plugin_registry` keys by `plugin.name`, unchanged);
+    /// `None` is the default for plugins that ship outside any
+    /// bundle context.
+    ///
+    /// `skip_serializing_if = "Option::is_none"` keeps the wire
+    /// format stable for pre-bundle manifests — a JSON file that
+    /// omits the field round-trips to `None`, and a manifest with
+    /// `None` serializes without the key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bundle: Option<BundleId>,
     #[serde(default)]
     pub exposes: Vec<CapabilityDecl>,
     /// Phase 3 P3.1 — capability-keyed dependencies. The resolver
@@ -163,6 +179,7 @@ pub struct CapabilityDecl {
 pub struct ManifestBuilder {
     name: String,
     version: String,
+    bundle: Option<BundleId>,
     exposes: Vec<CapabilityDecl>,
     requires: Vec<CapabilityRequirement>,
     timeout_ms: Option<u32>,
@@ -177,6 +194,7 @@ impl ManifestBuilder {
         Self {
             name: plugin_name.into(),
             version: "0.1.0".into(),
+            bundle: None,
             exposes: Vec::new(),
             requires: Vec::new(),
             timeout_ms: None,
@@ -186,6 +204,28 @@ impl ManifestBuilder {
     /// Override the plugin version (default `"0.1.0"`).
     pub fn version(mut self, v: impl Into<String>) -> Self {
         self.version = v.into();
+        self
+    }
+
+    /// Tag this manifest as a member of bundle
+    /// `(name, version)`. Used by `Bundle::register()` wrappers
+    /// at the example layer to stamp every member manifest with
+    /// the same bundle id; the kernel then groups the mint order
+    /// in boot diagrams and attributes `ResolveError` failures
+    /// to the bundle that contained the offending plugin.
+    ///
+    /// Additive and chainable, matching every other setter on
+    /// `ManifestBuilder` (precedent `202deae` — the singular
+    /// `.in_type` setter went with the deleted `in_type` field;
+    /// `bundle` is a non-replacing chainable setter).
+    ///
+    /// `Some(BundleId)` is set unconditionally; calling `.bundle()`
+    /// a second time replaces the prior value (the only setter on
+    /// `ManifestBuilder` that does this). The intent is that a
+    /// bundle author calls `.bundle()` exactly once per manifest,
+    /// in concert with the rest of the bundle's members.
+    pub fn bundle(mut self, name: impl Into<String>, version: impl Into<String>) -> Self {
+        self.bundle = Some(BundleId::new(name, version));
         self
     }
 
@@ -330,12 +370,14 @@ impl ManifestBuilder {
         let ManifestBuilder {
             name,
             version,
+            bundle,
             exposes,
             requires,
             timeout_ms,
         } = self;
         PluginManifest {
             plugin: PluginId { name, version },
+            bundle,
             exposes,
             requires,
             timeout_ms,
