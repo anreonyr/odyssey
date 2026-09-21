@@ -31,6 +31,7 @@
 //! - `model/reranker` — stub `Reranker` impl.
 
 pub mod agent;
+pub mod bundles;
 pub mod database;
 pub mod echo;
 pub mod inspectors;

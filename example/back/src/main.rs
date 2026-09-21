@@ -7,50 +7,52 @@
 //! (the library); the example depends on both. The library itself
 //! stays plugin-free.
 //!
-//! The order matters for the resolver: tool plugins first
-//! (the agent calls them at runtime), then the read-only
-//! observers (agent_list / agent_describe / inspectors), then
-//! the model providers (generator / embedder / reranker), and
-//! finally `agent` whose `requires` reference generator and
-//! embedder. The orchestrator's resolver computes a topological
-//! order; listing them in roughly that order keeps the example's
-//! list match the actual mint order it produces.
+//! The example assembles its plugins via 5 named bundles
+//! (see `odyssey_builtin::bundles`):
 //!
-//! After the refactor: 10 builtin manifests (down from 12).
-//! Memory is internal to `agent`; no separate `memory` plugin.
-//! The `llm` plugin became three independent stubs (`generator`,
-//! `embedder`, `reranker`).
+//! 1. `tool_caps()`       — `echo`, `database`
+//! 2. `observers()`       — `agent_list`, `agent_describe`
+//! 3. `inspectors_bundle()`— `inspector`, `schema_inspector`
+//! 4. `model_providers()` — `generator`, `embedder`, `reranker`
+//! 5. `agent_bundle()`    — `agent`
+//!
+//! Each bundle stamps its member manifests with a `BundleId`;
+//! the kernel's resolver groups the boot diagram's mint order by
+//! bundle (`ResolvedPlan::render` in
+//! `crate/odyssey/src/personality/composition/resolve.rs`). The
+//! resolver algorithm itself is unchanged — bundles are a
+//! packaging concept at this layer, not a runtime dispatch
+//! construct; `run_on` continues to receive a flat
+//! `&[(PluginManifest, MintFn, RuinFn)]` slice.
+//!
+//! Cross-bundle `requires` work transparently: the resolver sees
+//! the union of every bundle's manifests and produces a single
+//! topological order. `agent_describe` (in `observers`) requires
+//! `echo` and `database` (in `tool_caps`); `agent` (in `agent`)
+//! requires `generator` and `embedder` (in `model_providers`).
 
 use std::path::PathBuf;
 
 use odyssey::personality::lifecycle::run::{DEFAULT_BRIDGE_ADDR, run_on};
-use odyssey_builtin::{
-    agent, database, echo, inspectors,
-    model::{embedder, generator, reranker},
-};
+use odyssey_builtin::bundles;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Assemble the 10 builtin manifests via 5 named bundles.
+    // The flatten is `Vec<Vec<(PluginManifest, MintFn, RuinFn)>>`
+    // → `Vec<(PluginManifest, MintFn, RuinFn)>` — the slice
+    // type `run_on` expects (unchanged).
     let plugins = vec![
-        // Tool caps the agent can call.
-        echo::EchoBuiltin::register(),
-        database::DatabaseBuiltin::register(),
-        // Read-only observers (binding-table based).
-        agent::AgentListBuiltin::register(),
-        agent::AgentDescribeBuiltin::register(),
-        // Cspace inspectors (read-only).
-        inspectors::ProfileInspectorBuiltin::register(),
-        inspectors::SchemaInspectorBuiltin::register(),
-        // Model providers (no dependencies on each other;
-        // required by agent).
-        generator::GeneratorBuiltin::register(),
-        embedder::EmbedderBuiltin::register(),
-        reranker::RerankerBuiltin::register(),
-        // The agent — requires generator and embedder;
-        // calls tool caps via cspace lookup at runtime,
-        // gated by per-session `allowed_tools`.
-        agent::AgentRuntimeBuiltin::register(),
-    ];
+        bundles::tool_caps(),
+        bundles::observers(),
+        bundles::inspectors_bundle(),
+        bundles::model_providers(),
+        bundles::agent_bundle(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<_>>();
+
     // `ODYSSEY_ADDR` lets a test give its own instance a port of
     // its own; without it the smoke test competes for the fixed one.
     let addr = std::env::var("ODYSSEY_ADDR").unwrap_or_else(|_| DEFAULT_BRIDGE_ADDR.to_string());
