@@ -43,7 +43,6 @@ use crate::personality::lifecycle::lifecycle_event::{LifecycleEvent, LifecycleEv
 use crate::personality::lifecycle::mint::{
     CapabilityFactory, MintError, TypedBinding, TypedBindings,
 };
-use crate::personality::lifecycle::serve::spawn_http_bridge;
 
 /// Typed mint entry point — the kernel's
 /// `CapabilityFactory::mint<R>` is generic over `R` so this is
@@ -132,7 +131,7 @@ pub const DEFAULT_BRIDGE_ADDR: &str = "127.0.0.1:3030";
 pub async fn run(
     plugins: &[(PluginManifest, MintFn, RuinFn)],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    run_on(DEFAULT_BRIDGE_ADDR.parse().unwrap(), None, plugins).await
+    run_on(DEFAULT_BRIDGE_ADDR.parse().unwrap(), plugins).await
 }
 
 /// `run` with an explicit bridge address.
@@ -143,16 +142,13 @@ pub async fn run(
 /// holds the fixed port, or — worse — silently connects to it and
 /// asserts against a build that is not the one under test.
 ///
-/// `frontend_dist` is the path to the React app's built `dist/`
-/// directory. When `Some`, the HTTP bridge also serves the app
-/// at `/`, `/assets/*`, and as a SPA fallback; when `None`, the
-/// API surface still works but UI routes return 503. The example
-/// binary passes `Some("../../frontend/dist")` from its own
-/// `CARGO_MANIFEST_DIR`; tests pass `None` since they only need
-/// the API.
+/// The HTTP bridge is now a regular plugin (`http_bridge`); the
+/// plugin's mint reads `ODYSSEY_ADDR` / `ODYSSEY_NO_FRONTEND` /
+/// `ODYSSEY_FRONTEND_DIST` from the environment. The orchestrator
+/// no longer threads the address or the frontend dist — both are
+/// the bridge plugin's concern, not the orchestrator's.
 pub async fn run_on(
     addr: std::net::SocketAddr,
-    frontend_dist: Option<&std::path::Path>,
     plugins: &[(PluginManifest, MintFn, RuinFn)],
 ) -> Result<(), Box<dyn std::error::Error>> {
     // 1. Setup — the resolver takes manifests alone; the
@@ -175,13 +171,18 @@ pub async fn run_on(
     let typed_bindings = provision_dependencies(&factory, &plan);
 
     // 3. Mint in resolved order — dispatch by plugin name through
-    // the registry.
+    // the registry. The bridge plugin's mint reads
+    // `ODYSSEY_ADDR` / `ODYSSEY_NO_FRONTEND` /
+    // `ODYSSEY_FRONTEND_DIST` from the environment (see
+    // `example/back/src/bridge.rs`).
     let minted = mint_from_registry(&factory, &plan, &typed_bindings, plugins).await?;
-    // 4. Serve.
-    let server_handle = spawn_http_bridge(addr, cspace.clone(), frontend_dist);
+    // 4. Wait for shutdown — the bridge plugin's Resource holds
+    // the HTTP server's lifecycle; the server runs until Ctrl-C
+    // fires. The orchestrator blocks on the same signal so
+    // teardown runs after the server's graceful shutdown.
     eprintln!("\n[main] HTTP bridge up — open http://{addr}/");
     eprintln!("[main] press Ctrl-C to stop");
-    let _ = server_handle.await;
+    let _ = tokio::signal::ctrl_c().await;
 
     // 5. Teardown — per-plugin `RuinFn` (default or custom)
     // fires before `cspace.revoke_tree` per slot so the hook

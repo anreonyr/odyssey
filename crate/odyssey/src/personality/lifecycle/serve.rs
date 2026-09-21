@@ -377,20 +377,38 @@ pub async fn serve(
 }
 
 /// Spawn the HTTP bridge on `addr` and return the task handle.
+/// Spawn the HTTP bridge on `addr` and return the task handle.
 ///
-/// The bridge runs until either side returns from the serve
-/// future. We pass a Ctrl-C future to `serve` so the orchestrator
-/// can shut the bridge down by simply dropping the awaiter.
+/// Thin wrapper around `spawn_http_bridge_with_shutdown` for
+/// callers that don't need to participate in the
+/// capability-kernel teardown flow. The shutdown signal is
+/// `tokio::signal::ctrl_c()` — the same anchor the
+/// orchestrator's `run_on` uses after mint completes.
 pub fn spawn_http_bridge(
     addr: SocketAddr,
     cspace: CapabilitySpace,
     frontend_dist: Option<&std::path::Path>,
 ) -> tokio::task::JoinHandle<()> {
+    spawn_http_bridge_with_shutdown(addr, cspace, frontend_dist, async {
+        let _ = tokio::signal::ctrl_c().await;
+    })
+}
+
+/// Spawn the HTTP bridge with a custom shutdown signal.
+///
+/// The bridge runs until either side returns from the `serve`
+/// future. We accept a shutdown future so the bridge plugin's
+/// Resource Drop can cancel the server task via `oneshot`,
+/// while the orchestrator's Ctrl-C awaiter remains the
+/// top-level shutdown anchor.
+pub fn spawn_http_bridge_with_shutdown(
+    addr: SocketAddr,
+    cspace: CapabilitySpace,
+    frontend_dist: Option<&std::path::Path>,
+    shutdown: impl std::future::Future<Output = ()> + Send + 'static,
+) -> tokio::task::JoinHandle<()> {
     let frontend_dist = frontend_dist.map(std::path::Path::to_path_buf);
     tokio::spawn(async move {
-        serve(addr, cspace, frontend_dist.as_deref(), async {
-            let _ = tokio::signal::ctrl_c().await;
-        })
-        .await;
+        serve(addr, cspace, frontend_dist.as_deref(), shutdown).await;
     })
 }
