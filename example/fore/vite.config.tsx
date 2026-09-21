@@ -64,7 +64,7 @@ export default defineConfig({
     outDir: "dist",
     emptyOutDir: true,
     sourcemap: true,
-    target: "es2020",
+    target: "esnext",
     rollupOptions: {
       output: {
         // IIFE + inlineDynamicImports keeps the bundle as a
