@@ -62,7 +62,7 @@ use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginM
 use odyssey::core::meta::meta::CapabilityMeta;
 use odyssey::core::rights::rights::{CapabilityRights, Rights};
 use odyssey::personality::composition::resolve::ResolvedBinding;
-use odyssey::personality::lifecycle::mint::CapabilityFactory;
+use odyssey::personality::lifecycle::mint::{CapabilityFactory, MintError, TypedBindings};
 use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
 use serde_json::{Value, json};
 use tokio::sync::broadcast;
@@ -429,6 +429,13 @@ impl AgentSlots {
     /// Build the four typed slots from cspace + bindings. The
     /// `ResolvedBinding` rows name the capability each `requires`
     /// resolved to. The slot id comes from the live cap.
+    ///
+    /// Pre-DI: this was the only consumer of the binding
+    /// table. Phase 21 retains it for the read-only
+    /// introspection path (`AgentCore::reach` walks
+    /// `self.bindings` directly) and for tests that don't
+    /// have a provisioner in front of them. New code uses
+    /// [`Self::from_typed_bindings`] instead.
     pub fn from_bindings(cspace: &CapabilitySpace, bindings: &[ResolvedBinding]) -> Self {
         let slot_for = |handle: &str| -> SlotId {
             let b = bindings
@@ -438,6 +445,35 @@ impl AgentSlots {
             cspace.slot_for_name(&b.capability).unwrap_or_else(|| {
                 panic!("agent_runtime: cap `{}` not bound to a slot", b.capability)
             })
+        };
+
+        Self {
+            llm_complete: Slot::new(cspace.clone(), slot_for("llm_complete")),
+            llm_embed: Slot::new(cspace.clone(), slot_for("llm_embed")),
+            memory_query: Slot::new(cspace.clone(), slot_for("memory_query")),
+            memory_insert: Slot::new(cspace.clone(), slot_for("memory_insert")),
+        }
+    }
+
+    /// DI Phase 21: build the four typed slots from pre-resolved
+    /// typed bindings. The provision step at
+    /// `personality::lifecycle::run::provision_dependencies`
+    /// has already installed each provider's typed cap into the
+    /// global cspace; `typed_bindings` carries the `slot_id`s
+    /// needed to construct typed `Slot<R>` without a name
+    /// lookup. The `_typed_bindings.clone()`-equivalent cspace
+    /// passed in is the global cspace (the providers' local
+    /// slots are visible there because Slice 3's mint-grant
+    /// pattern installs them as global slots for HTTP-bridge
+    /// reachability).
+    pub fn from_typed_bindings(cspace: &CapabilitySpace, typed_bindings: &TypedBindings) -> Self {
+        let slot_for = |handle: &str| -> SlotId {
+            typed_bindings
+                .entries
+                .iter()
+                .find(|b| b.handle == handle)
+                .unwrap_or_else(|| panic!("agent_runtime: required handle `{handle}` missing"))
+                .slot_id
         };
 
         Self {
@@ -755,14 +791,29 @@ pub fn subscribe_session_broadcast(session_id: &str) -> Option<broadcast::Receiv
 
 pub struct AgentRuntime {
     pub cspace: CapabilitySpace,
+    /// DI Phase 21: typed bindings replace the string-keyed
+    /// `Vec<ResolvedBinding>`. The provision step has already
+    /// installed every required cap into the consumer's
+    /// `PluginCspace`; the typed binding carries the `slot_id`
+    /// needed to construct typed `Slot<R>` for the four
+    /// providers (llm_complete, llm_embed, memory_query,
+    /// memory_insert).
+    pub typed_bindings: TypedBindings,
+    /// Kept for the read-only introspection path
+    /// (`AgentCore::reach` walks this for the agent builtin).
     pub bindings: Vec<ResolvedBinding>,
     pub sessions: Sessions,
 }
 
 impl AgentRuntime {
-    pub fn new(cspace: CapabilitySpace, bindings: Vec<ResolvedBinding>) -> Self {
+    pub fn new(
+        cspace: CapabilitySpace,
+        typed_bindings: TypedBindings,
+        bindings: Vec<ResolvedBinding>,
+    ) -> Self {
         Self {
             cspace,
+            typed_bindings,
             bindings,
             sessions: global_sessions(),
         }
@@ -781,7 +832,7 @@ impl AgentRuntime {
                 return Err(AgentError::ToolUnknown(tool.clone()));
             }
         }
-        let slots = AgentSlots::from_bindings(&self.cspace, &self.bindings);
+        let slots = AgentSlots::from_typed_bindings(&self.cspace, &self.typed_bindings);
         let session = Session::new(goal, context, allowed_tools, limits, slots, &self.cspace);
         let id = session.id.clone();
         self.sessions
@@ -1027,7 +1078,7 @@ impl AgentRuntime {
         let checkpoint: SessionCheckpoint = serde_json::from_slice(&bytes)
             .map_err(|e| AgentError::Serialization(format!("session checkpoint parse: {e}")))?;
         let sid = SessionId(checkpoint.id.0.clone());
-        let slots = AgentSlots::from_bindings(&self.cspace, &self.bindings);
+        let slots = AgentSlots::from_typed_bindings(&self.cspace, &self.typed_bindings);
         let (sender, _rx) = broadcast::channel(64);
         let event_bus_slot_id = mint_session_event_bus(&self.cspace, sender.clone());
         let now = Session::now_ms();
@@ -1057,7 +1108,7 @@ impl AgentRuntime {
     }
 
     pub fn plan(&self, goal: &str, tools: &[String]) -> Result<Value, AgentError> {
-        let slots = AgentSlots::from_bindings(&self.cspace, &self.bindings);
+        let slots = AgentSlots::from_typed_bindings(&self.cspace, &self.typed_bindings);
         let system = build_plan_prompt(tools);
         let resp = slots
             .llm_complete
@@ -1084,7 +1135,7 @@ impl AgentRuntime {
         top_k: usize,
         filter_tags: Vec<String>,
     ) -> Result<Value, AgentError> {
-        let slots = AgentSlots::from_bindings(&self.cspace, &self.bindings);
+        let slots = AgentSlots::from_typed_bindings(&self.cspace, &self.typed_bindings);
         let embed_resp = slots
             .llm_embed
             .invoke(Rights::INVOKE, json!({ "texts": [query] }))
@@ -1116,7 +1167,7 @@ impl AgentRuntime {
     }
 
     pub fn record(&self, content: Value, tags: Vec<String>) -> Result<Value, AgentError> {
-        let slots = AgentSlots::from_bindings(&self.cspace, &self.bindings);
+        let slots = AgentSlots::from_typed_bindings(&self.cspace, &self.typed_bindings);
         let text_repr = content.to_string();
         let embed_resp = slots
             .llm_embed
@@ -1685,6 +1736,7 @@ fn step_to_value(s: &Step) -> Value {
 pub struct AgentRuntimeBuiltin;
 
 impl BuiltinManifest for AgentRuntimeBuiltin {
+    type Resource = AgentStartResource;
     fn manifest(&self) -> PluginManifest {
         ManifestBuilder::new("agent_runtime")
             .expose(NAME_START, CONTRACT_START)
@@ -1720,9 +1772,11 @@ impl AgentRuntimeBuiltin {
         kind: CapKind,
         budget: CapabilityBudget,
         bindings: &[ResolvedBinding],
-    ) -> SlotId {
+        typed_bindings: &TypedBindings,
+    ) -> Result<SlotId, MintError> {
         let runtime = Arc::new(AgentRuntime::new(
             factory.space().clone(),
+            typed_bindings.clone(),
             bindings.to_vec(),
         ));
         match decl.name.as_str() {
@@ -1813,8 +1867,16 @@ impl AgentRuntimeBuiltin {
     pub fn register() -> (PluginManifest, MintFn, RuinFn) {
         (
             AgentRuntimeBuiltin.manifest(),
-            |factory, plugin, decl, kind, budget, bindings| {
-                AgentRuntimeBuiltin::mint(factory, plugin, decl, kind, budget, bindings)
+            |factory, plugin, decl, kind, budget, bindings, typed_bindings| {
+                AgentRuntimeBuiltin::mint(
+                    factory,
+                    plugin,
+                    decl,
+                    kind,
+                    budget,
+                    bindings,
+                    typed_bindings,
+                )
             },
             default_ruin,
         )
@@ -1834,7 +1896,7 @@ fn mint_cap<R>(
     decl: &CapabilityDecl,
     budget: CapabilityBudget,
     resource: Arc<R>,
-) -> SlotId
+) -> Result<SlotId, MintError>
 where
     R: Resource + 'static,
 {
@@ -1852,5 +1914,9 @@ where
     };
     pc.inner()
         .grant_to::<R>(local_slot, factory.space(), rights, decl.name.clone())
-        .expect("grant from plugin cspace to global should succeed")
+        .map_err(|e| MintError::GrantFailed {
+            plugin: plugin.name.clone(),
+            cap: decl.name.clone(),
+            source: e,
+        })
 }

@@ -39,7 +39,7 @@ use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::personality::composition::resolve::ResolvedBinding;
-use odyssey::personality::lifecycle::mint::CapabilityFactory;
+use odyssey::personality::lifecycle::mint::{CapabilityFactory, MintError, TypedBindings};
 use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
 use serde_json::{Value, json};
 
@@ -499,6 +499,7 @@ impl Resource for MemoryInsertResource {
 pub struct MemoryBuiltin;
 
 impl BuiltinManifest for MemoryBuiltin {
+    type Resource = MemoryQueryResource;
     fn manifest(&self) -> PluginManifest {
         ManifestBuilder::new("memory")
             .expose(NAME_QUERY, CONTRACT_QUERY)
@@ -542,7 +543,8 @@ impl MemoryBuiltin {
         kind: CapKind,
         budget: CapabilityBudget,
         _bindings: &[ResolvedBinding],
-    ) -> SlotId {
+        _typed_bindings: &TypedBindings,
+    ) -> Result<SlotId, MintError> {
         use odyssey::core::rights::rights::{CapabilityRights, Rights};
 
         // Backend selection (extracted so we don't put a
@@ -586,7 +588,11 @@ impl MemoryBuiltin {
                         rights,
                         decl.name.clone(),
                     )
-                    .expect("grant from plugin cspace to global should succeed")
+                    .map_err(|e| MintError::GrantFailed {
+                        plugin: plugin.name.clone(),
+                        cap: decl.name.clone(),
+                        source: e,
+                    })
             }
             NAME_INSERT => {
                 let local_slot = pc.mint(
@@ -602,7 +608,11 @@ impl MemoryBuiltin {
                         rights,
                         decl.name.clone(),
                     )
-                    .expect("grant from plugin cspace to global should succeed")
+                    .map_err(|e| MintError::GrantFailed {
+                        plugin: plugin.name.clone(),
+                        cap: decl.name.clone(),
+                        source: e,
+                    })
             }
             other => panic!("memory: unexpected capability name `{other}`"),
         }
@@ -611,8 +621,16 @@ impl MemoryBuiltin {
     pub fn register() -> (PluginManifest, MintFn, RuinFn) {
         (
             MemoryBuiltin.manifest(),
-            |factory, plugin, decl, kind, budget, bindings| {
-                MemoryBuiltin.mint(factory, plugin, decl, kind, budget, bindings)
+            |factory, plugin, decl, kind, budget, bindings, typed_bindings| {
+                MemoryBuiltin.mint(
+                    factory,
+                    plugin,
+                    decl,
+                    kind,
+                    budget,
+                    bindings,
+                    typed_bindings,
+                )
             },
             default_ruin,
         )

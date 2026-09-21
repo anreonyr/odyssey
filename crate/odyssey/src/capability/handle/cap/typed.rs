@@ -192,6 +192,14 @@ impl<R: Resource> Capability<R> {
             self.operations,
             rights.operations
         );
+        // DI Phase 21: zero-rights tripwire complements the runtime
+        // attenuation checks at `derive_with`/`grant_to`/`install_derived`.
+        debug_assert!(
+            !rights.operations.is_empty(),
+            "Capability::derive would produce zero-rights child: held={:?}, requested={:?}",
+            self.operations,
+            rights.operations
+        );
         let new_budget = CapabilityBudget::share_with(&self.budget, rights.timeout_ms);
         let mut new_meta = self.meta.clone();
         new_meta.id = new_id;

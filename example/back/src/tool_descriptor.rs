@@ -41,7 +41,7 @@ use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::core::rights::rights::Rights;
 use odyssey::personality::composition::resolve::ResolvedBinding;
-use odyssey::personality::lifecycle::mint::CapabilityFactory;
+use odyssey::personality::lifecycle::mint::{CapabilityFactory, MintError, TypedBindings};
 use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
 use serde_json::{Value, json};
 
@@ -162,6 +162,7 @@ impl Resource for ToolDescriptorResource {
 pub struct ToolDescriptorBuiltin;
 
 impl BuiltinManifest for ToolDescriptorBuiltin {
+    type Resource = ToolDescriptorResource;
     fn manifest(&self) -> PluginManifest {
         ManifestBuilder::new("tool_descriptor")
             .expose(NAME, CONTRACT)
@@ -179,7 +180,8 @@ impl ToolDescriptorBuiltin {
         kind: CapKind,
         budget: CapabilityBudget,
         _bindings: &[ResolvedBinding],
-    ) -> SlotId {
+        _typed_bindings: &TypedBindings,
+    ) -> Result<SlotId, MintError> {
         use odyssey::core::rights::rights::{CapabilityRights, Rights};
 
         let pc = factory.plugin_cspace(plugin);
@@ -200,14 +202,26 @@ impl ToolDescriptorBuiltin {
                 rights,
                 decl.name.clone(),
             )
-            .expect("grant from plugin cspace to global should succeed")
+            .map_err(|e| MintError::GrantFailed {
+                plugin: plugin.name.clone(),
+                cap: decl.name.clone(),
+                source: e,
+            })
     }
 
     pub fn register() -> (PluginManifest, MintFn, RuinFn) {
         (
             ToolDescriptorBuiltin.manifest(),
-            |factory, plugin, decl, kind, budget, bindings| {
-                ToolDescriptorBuiltin.mint(factory, plugin, decl, kind, budget, bindings)
+            |factory, plugin, decl, kind, budget, bindings, typed_bindings| {
+                ToolDescriptorBuiltin.mint(
+                    factory,
+                    plugin,
+                    decl,
+                    kind,
+                    budget,
+                    bindings,
+                    typed_bindings,
+                )
             },
             default_ruin,
         )

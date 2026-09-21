@@ -74,9 +74,18 @@ pub struct CapabilityRequirement {
     /// Contract name to bind against. Must match exactly one
     /// `[[exposes]] contract_name` from another loaded manifest,
     /// or boot fails with `ResolveError::Unprovided` (no
-    /// provider) or `ResolveError::Ambiguous` (multiple providers
-    /// without a priority hint).
+    /// provider). With multiple providers, see `priority`.
     pub contract: String,
+    /// DI Phase 21: priority hint for multi-provider selection.
+    /// `None` (default) is equivalent to `Some(0)` for
+    /// comparison purposes. Higher `priority` wins; equal
+    /// priority falls back to `(version, name)` lex tie-break.
+    /// When the resolver's `priority`-filter still leaves
+    /// multiple top-priority providers, boot succeeds with a
+    /// warning rather than a hard fail (`ResolveError::Ambiguous`
+    /// is reserved for the empty-providers case).
+    #[serde(default)]
+    pub priority: Option<u32>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -110,6 +119,20 @@ pub struct CapabilityDecl {
     /// `tool_descriptor` plugin that interprets it.
     #[serde(default)]
     pub tool_schema: Option<Value>,
+    /// DI Phase 21: priority hint used by the resolver when
+    /// multiple providers publish the same contract. Highest
+    /// `priority` wins; equal priority falls back to
+    /// `(version, name)` lex tie-break, with a boot-time
+    /// warning instead of a hard fail (`AmbiguousPriority`).
+    /// `None` (default) is equivalent to `Some(0)` for
+    /// comparison purposes — the resolver treats the
+    /// absence of a hint as "no preference, pick me last".
+    /// `Some(0)` is rejected at `validate()` time
+    /// (`EmptyPriority`) for symmetry with the consumer-side
+    /// `requires_with_priority`: if you mean "no hint", drop
+    /// the field.
+    #[serde(default)]
+    pub priority: Option<u32>,
 }
 
 // ---------------------------------------------------------------------------
@@ -176,6 +199,7 @@ impl ManifestBuilder {
             kind: CapKind::Sync,
             contract_name: contract_name.into(),
             tool_schema: None,
+            priority: None,
         });
         self
     }
@@ -195,6 +219,29 @@ impl ManifestBuilder {
             kind: CapKind::Sync,
             contract_name: contract_name.into(),
             tool_schema: Some(tool_schema),
+            priority: None,
+        });
+        self
+    }
+
+    /// Append a sync capability with a priority hint. Used by
+    /// DI's multi-provider resolution: when two plugins publish
+    /// the same `contract_name`, the resolver picks the
+    /// highest-`priority` provider. Tie → warning + lex-min.
+    /// `priority=0` is rejected at `validate()` time; use the
+    /// no-priority [`Self::expose`] for "default preference".
+    pub fn expose_with_priority(
+        mut self,
+        name: impl Into<String>,
+        contract_name: impl Into<String>,
+        priority: u32,
+    ) -> Self {
+        self.exposes.push(CapabilityDecl {
+            name: name.into(),
+            kind: CapKind::Sync,
+            contract_name: contract_name.into(),
+            tool_schema: None,
+            priority: Some(priority),
         });
         self
     }
@@ -214,6 +261,7 @@ impl ManifestBuilder {
             kind: CapKind::Stream,
             contract_name: contract_name.into(),
             tool_schema: None,
+            priority: None,
         });
         self
     }
@@ -234,6 +282,7 @@ impl ManifestBuilder {
             kind: CapKind::Stream,
             contract_name: contract_name.into(),
             tool_schema: Some(tool_schema),
+            priority: None,
         });
         self
     }
@@ -244,6 +293,27 @@ impl ManifestBuilder {
         self.requires.push(CapabilityRequirement {
             name: handle.into(),
             contract: contract.into(),
+            priority: None,
+        });
+        self
+    }
+
+    /// Append a `[[requires]]` entry with a priority hint.
+    /// Used by DI's multi-provider resolution: highest
+    /// `priority` wins; equal priority falls back to lex-min
+    /// on `(version, name)`. `Some(0)` is rejected at
+    /// `validate()` time (`EmptyPriority`) — drop the hint
+    /// entirely if you want to participate as a default.
+    pub fn requires_with_priority(
+        mut self,
+        handle: impl Into<String>,
+        contract: impl Into<String>,
+        priority: u32,
+    ) -> Self {
+        self.requires.push(CapabilityRequirement {
+            name: handle.into(),
+            contract: contract.into(),
+            priority: Some(priority),
         });
         self
     }
@@ -308,11 +378,29 @@ pub enum ManifestInvalid {
     EmptyPluginName,
     EmptyPluginVersion,
     NoExposes,
-    EmptyExposeName { index: usize },
-    EmptyExposeContract { index: usize },
-    DuplicateExposeName { name: String },
-    EmptyRequireHandle { index: usize },
-    EmptyRequireContract { index: usize },
+    EmptyExposeName {
+        index: usize,
+    },
+    EmptyExposeContract {
+        index: usize,
+    },
+    DuplicateExposeName {
+        name: String,
+    },
+    EmptyRequireHandle {
+        index: usize,
+    },
+    EmptyRequireContract {
+        index: usize,
+    },
+    /// DI Phase 21: `priority: Some(0)` is suspicious — it
+    /// suggests the author meant "unimportant" and should drop
+    /// the hint entirely (let it default to `None`). Catching
+    /// it at validate time avoids silent priority-zero ties at
+    /// boot.
+    EmptyPriority {
+        index: usize,
+    },
 }
 
 impl std::fmt::Display for ManifestInvalid {
@@ -335,6 +423,14 @@ impl std::fmt::Display for ManifestInvalid {
             }
             Self::EmptyRequireContract { index } => {
                 write!(f, "requires[{index}].contract is empty")
+            }
+            Self::EmptyPriority { index } => {
+                write!(
+                    f,
+                    "exposes[{index}].priority or requires[{index}].priority is 0; \
+                     use the no-priority setter (expose / requires) instead of \
+                     expose_with_priority / requires_with_priority with 0"
+                )
             }
         }
     }
@@ -404,6 +500,15 @@ impl PluginManifest {
                     name: e.name.clone(),
                 });
             }
+            // DI Phase 21: catch suspicious zero priority at
+            // validate time. Use `expose` (not
+            // `expose_with_priority`) to express "no hint".
+            // Same rule as the consumer-side `requires_with_priority`;
+            // both flavours share the `EmptyPriority` variant since
+            // the fix is the same: drop the field.
+            if matches!(e.priority, Some(0)) {
+                return Err(ManifestInvalid::EmptyPriority { index: i });
+            }
         }
         for (i, r) in self.requires.iter().enumerate() {
             if r.name.is_empty() {
@@ -411,6 +516,12 @@ impl PluginManifest {
             }
             if r.contract.is_empty() {
                 return Err(ManifestInvalid::EmptyRequireContract { index: i });
+            }
+            // DI Phase 21: catch suspicious zero priority at
+            // validate time. Use `requires` (not
+            // `requires_with_priority`) to express "no hint".
+            if matches!(r.priority, Some(0)) {
+                return Err(ManifestInvalid::EmptyPriority { index: i });
             }
         }
         Ok(())

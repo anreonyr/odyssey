@@ -6,6 +6,102 @@ adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added — Phase 21: Dependency Injection via Capability (typed bindings + priority)
+
+The orchestrator can now pre-resolve a consumer's `requires`
+into typed `SlotId`s in the global cspace before mint runs,
+and the resolver picks the highest-priority provider when
+multiple plugins publish the same contract. The DI surface
+crosses the kernel boundary as a typed-binding table carried
+through the `MintFn` signature, not as kernel-internal
+bookkeeping.
+
+- `BuiltinManifest::Resource` associated type — every
+  concrete builtin declares `type Resource = XResource;`.
+  The trait stays type-only (no method bodies), which is
+  the standard workaround for "need `R` but cannot dispatch
+  via vtable" (`CapabilityFactory::mint<R>` is generic
+  over `R`; trait objects can't dispatch into a generic
+  call). All 11 builtin impls in `example/back/src/`
+  declare their `Resource`.
+- `CapabilityRequirement::priority: Option<u32>` — the
+  consumer-side hint, recorded on `ResolvedBinding::priority`
+  for diagnostics and future binding-inspection tooling.
+- `CapabilityDecl::priority: Option<u32>` — the
+  *provider-side* priority that the resolver actually uses.
+  The resolver's `priority` filter at `resolve()` picks
+  the highest-priority provider, ties → warning +
+  `(version, name)` lex-min. `priority: Some(0)` is rejected
+  at `validate()` time (`EmptyPriority`) — use the
+  no-priority setter if you want to participate as default.
+- `ManifestBuilder::requires_with_priority(...)` and
+  `ManifestBuilder::expose_with_priority(...)` setters.
+- `TypedBindings` + `TypedBinding` structs in
+  `personality::lifecycle::mint` — the typed-binding carrier
+  that the orchestrator hands each `MintFn` invocation.
+  Each entry pairs the consumer's local handle with a
+  `SlotId` in the global cspace (where the provider's
+  `grant_to` already installed the typed cap).
+- `MintFn` signature widens to
+  `fn(...) -> Result<SlotId, MintError>` — three failure
+  modes typed: `HandlerReturned`, `GrantFailed`,
+  `Panicked`. The orchestrator wraps each call in
+  `catch_unwind`; a panicking builtin becomes
+  `MintError::Panicked`.
+- `provision_dependencies` step between `resolve()` and
+  `mint_from_registry()` — pre-fetches each consumer's
+  binding `slot_id`s from the global cspace, so consumer
+  `MintFn`s don't have to call `slot_for_name` themselves.
+- `AgentSlots::from_typed_bindings` — the new consumer path
+  for typed bindings (the `AgentRuntime` builtin uses this;
+  `from_bindings` is kept for the read-only introspection
+  path).
+- `ResolveError::AmbiguousPriority { contract, providers }`
+  — replaces `ResolveError::Ambiguous`; the hard-fail
+  invariant is now "zero providers for a contract"
+  (`Unprovided`). Multiple top-priority providers → boot
+  succeeds with a warning, lex-min selected.
+
+### Added — Zero-rights attenuation precondition (Phase 21 Slice 2)
+
+A `Rights::empty()` child is now rejected at construction
+time at the three kernel attenuation sites (`derive_with`,
+`grant_to`, `install_derived`) with
+`CapabilityError::AttenuationViolation`. Previously the
+empty rights set was installable and silently failed every
+invoke via `Capability::invoke`'s `OperationDenied` check;
+the boot-time loud fail turns a silent runtime fault into a
+clear configuration error.
+
+- New tests in `crate/odyssey/tests/zero_rights_attenuation.rs`
+  — 3 tests pinning the new precondition.
+- `Capability::derive` carries a `debug_assert!` symmetric
+  to the runtime check.
+- The `attenuated_capability_denies_unheld_op` smoke test
+  was updated to reflect the new semantics (attenuate to
+  `INVOKE`-only, verify `ASSIGN` is denied at runtime).
+
+### Design divergence — 4-tuple plugin registry deferred
+
+The Phase 21 design called for the plugin registry tuple
+to grow from 3 to 4 elements:
+`(PluginManifest, MintFn, RuinFn, &dyn BuiltinManifest)`,
+so the orchestrator could read `BuiltinManifest::Resource`
+(the provider's `type Resource`) when constructing typed
+bindings. This was not implemented because **Rust trait
+objects cannot carry associated types** — `&dyn
+BuiltinManifest` requires `BuiltinManifest` to be
+object-safe, but adding `type Resource: Resource;` makes
+the trait non-object-safe. The implementation uses the
+3-tuple and resolves typed caps by `slot_for_name` lookup
+in the global cspace, which is functionally equivalent
+(the consumer's `Slot::capability()` does the RTTI
+downcast at use time). The 4-tuple approach would require
+either dropping the `Resource` associated type (reverting
+to the Phase 8 trait shape) or introducing a wrapper
+newtype that erases the type — both options were
+considered and deferred.
+
 ### Added — Phase 6: Plugin Authority Graph verification
 
 - **New tests** in `crate/odyssey/tests/`:

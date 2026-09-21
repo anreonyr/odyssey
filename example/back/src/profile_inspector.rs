@@ -39,7 +39,7 @@ use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::core::rights::rights::Rights;
 use odyssey::personality::composition::resolve::ResolvedBinding;
-use odyssey::personality::lifecycle::mint::CapabilityFactory;
+use odyssey::personality::lifecycle::mint::{CapabilityFactory, MintError, TypedBindings};
 use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
 use serde_json::{Value, json};
 
@@ -140,6 +140,7 @@ impl Resource for ProfileInspectorResource {
 pub struct ProfileInspectorBuiltin;
 
 impl BuiltinManifest for ProfileInspectorBuiltin {
+    type Resource = ProfileInspectorResource;
     fn manifest(&self) -> PluginManifest {
         ManifestBuilder::new("profile_inspector")
             .expose(NAME, CONTRACT)
@@ -157,7 +158,8 @@ impl ProfileInspectorBuiltin {
         kind: CapKind,
         budget: CapabilityBudget,
         _bindings: &[ResolvedBinding],
-    ) -> SlotId {
+        _typed_bindings: &TypedBindings,
+    ) -> Result<SlotId, MintError> {
         use odyssey::core::rights::rights::{CapabilityRights, Rights};
 
         let pc = factory.plugin_cspace(plugin);
@@ -178,14 +180,26 @@ impl ProfileInspectorBuiltin {
                 rights,
                 decl.name.clone(),
             )
-            .expect("grant from plugin cspace to global should succeed")
+            .map_err(|e| MintError::GrantFailed {
+                plugin: plugin.name.clone(),
+                cap: decl.name.clone(),
+                source: e,
+            })
     }
 
     pub fn register() -> (PluginManifest, MintFn, RuinFn) {
         (
             ProfileInspectorBuiltin.manifest(),
-            |factory, plugin, decl, kind, budget, bindings| {
-                ProfileInspectorBuiltin.mint(factory, plugin, decl, kind, budget, bindings)
+            |factory, plugin, decl, kind, budget, bindings, typed_bindings| {
+                ProfileInspectorBuiltin.mint(
+                    factory,
+                    plugin,
+                    decl,
+                    kind,
+                    budget,
+                    bindings,
+                    typed_bindings,
+                )
             },
             default_ruin,
         )

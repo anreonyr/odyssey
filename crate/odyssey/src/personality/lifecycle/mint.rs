@@ -234,3 +234,98 @@ impl CapabilityFactory {
         slot_id
     }
 }
+
+// ---------------------------------------------------------------------------
+// DI Phase 21: typed-binding carrier + mint-error surface
+// ---------------------------------------------------------------------------
+
+/// One typed-binding row. `slot_id` points at a slot in the
+/// consumer's own `PluginCspace` (installed there by
+/// `provision_dependencies` between `resolve()` and
+/// `mint_from_registry()`). The `cap` is the erased
+/// `Arc<dyn AnyCapability>` shape the consumer uses to
+/// construct typed `Slot<R>` via
+/// `Slot::new(consumer_pc.inner(), binding.slot_id)` +
+/// `Slot::capability()` RTTI downcast.
+#[derive(Debug, Clone)]
+pub struct TypedBinding {
+    /// Local handle inside the consumer plugin (matches
+    /// `requires[*].name`).
+    pub handle: String,
+    /// Slot id in the consumer's `PluginCspace`.
+    pub slot_id: SlotId,
+    /// Cspace name (`requires[*].capability`). Kept for
+    /// diagnostics + HTTP bridge tooling.
+    pub name: String,
+}
+
+/// Bag of typed bindings passed to every `MintFn` invocation.
+/// Plugins with no `requires` see `TypedBindings::default()`.
+///
+/// The provision step at the orchestrator boundary populates
+/// one `TypedBindings` per consumer, keyed by `PluginId`. The
+/// consumer's `MintFn` does not have to look anything up — it
+/// receives the typed slot ids directly.
+#[derive(Debug, Clone, Default)]
+pub struct TypedBindings {
+    pub entries: Vec<TypedBinding>,
+}
+
+/// Mint-time error from a builtin. Mirrors the
+/// orchestrator-boundary error type pattern
+/// (`ManifestLoadError`, `ResolveError`). Three variants
+/// cover the three observed failure modes today:
+/// - `HandlerReturned` — reserved for builtins that return
+///   an error from a resource constructor (none today; the
+///   shape is here so future error-aware mints have a path).
+/// - `GrantFailed` — the cross-cspace `grant_to` from
+///   `pc.inner()` to `factory.space()` failed (e.g.
+///   `AttenuationViolation`, `SlotEmpty`).
+/// - `Panicked` — the builtin panicked mid-mint; the
+///   orchestrator wraps the `MintFn` call in `catch_unwind`
+///   (mirroring the `RuinFn` path at `run.rs:280`).
+#[derive(Debug)]
+pub enum MintError {
+    HandlerReturned {
+        plugin: String,
+        cap: String,
+        message: String,
+    },
+    GrantFailed {
+        plugin: String,
+        cap: String,
+        source: crate::capability::error::CapabilityError,
+    },
+    Panicked {
+        plugin: String,
+        payload: Box<dyn std::any::Any + Send + 'static>,
+    },
+}
+
+impl std::fmt::Display for MintError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::HandlerReturned {
+                plugin,
+                cap,
+                message,
+            } => write!(
+                f,
+                "mint failed: handler returned error in `{plugin}` for cap `{cap}`: {message}"
+            ),
+            Self::GrantFailed {
+                plugin,
+                cap,
+                source,
+            } => write!(
+                f,
+                "mint failed: grant_to in `{plugin}` for cap `{cap}`: {source}"
+            ),
+            Self::Panicked { plugin, payload } => {
+                write!(f, "mint panicked in `{plugin}`: {payload:?}")
+            }
+        }
+    }
+}
+
+impl std::error::Error for MintError {}

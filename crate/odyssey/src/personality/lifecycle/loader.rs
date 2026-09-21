@@ -68,6 +68,7 @@ use std::sync::{Arc, OnceLock, RwLock};
 
 use crate::core::identity::ids::SlotId;
 use crate::core::manifest::manifest::{ManifestLoadError, PluginManifest};
+use crate::personality::lifecycle::mint::MintError;
 use crate::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
 
 // ---------------------------------------------------------------------------
@@ -280,6 +281,14 @@ pub fn load_plugin_from_path_with_handlers(
 /// message: keeping the loud-failure contract intact means
 /// an operator who forgets a handler sees the same error
 /// shape regardless of which loader they used.
+///
+/// DI Phase 21: signature widened to 7 args; the seventh is
+/// `typed_bindings`. Returns `Result<SlotId, MintError>` —
+/// a missing handler surfaces as `MintError::HandlerReturned`
+/// (a `Box<dyn Any>` payload would be cleaner but the
+/// orchestrator's `catch_unwind` path already converts a
+/// panic to `MintError::Panicked`, and "missing handler" is
+/// a configuration error worth keeping typed).
 fn bound_mint_fn(
     factory: &crate::personality::lifecycle::mint::CapabilityFactory,
     plugin: &crate::core::identity::ids::PluginId,
@@ -287,49 +296,63 @@ fn bound_mint_fn(
     kind: crate::core::identity::kind::CapKind,
     budget: crate::capability::enforce::quota::CapabilityBudget,
     bindings: &[crate::personality::composition::resolve::ResolvedBinding],
-) -> SlotId {
+    typed_bindings: &crate::personality::lifecycle::mint::TypedBindings,
+) -> Result<SlotId, MintError> {
     let table = plugin_handlers()
         .read()
         .expect("plugin handler registry poisoned");
     let Some(registry) = table.get(plugin.name.as_str()) else {
-        panic!(
-            "Slice 5 placeholder MintFn invoked: plugin `{}` has no handler \
-             registry installed (missing load_plugin_from_path_with_handlers?). \
-             A follow-up commit should map each exposed capability name to \
-             a real handler.",
-            plugin.name
-        );
+        return Err(MintError::HandlerReturned {
+            plugin: plugin.name.clone(),
+            cap: decl.name.clone(),
+            message: format!(
+                "no handler registry installed for plugin `{}` (missing \
+                 load_plugin_from_path_with_handlers?)",
+                plugin.name
+            ),
+        });
     };
     match registry.lookup(decl.name.as_str()) {
-        Some(handler) => handler(factory, plugin, decl, kind, budget, bindings),
-        None => panic!(
-            "Slice 5 placeholder MintFn invoked: capability `{}` has no \
-             handler bound for plugin `{}`. A follow-up commit should map \
-             each exposed capability name to a real handler.",
-            decl.name, plugin.name
+        Some(handler) => handler(
+            factory,
+            plugin,
+            decl,
+            kind,
+            budget,
+            bindings,
+            typed_bindings,
         ),
+        None => Err(MintError::HandlerReturned {
+            plugin: plugin.name.clone(),
+            cap: decl.name.clone(),
+            message: format!(
+                "no handler bound for capability `{}` (missing registry entry)",
+                decl.name
+            ),
+        }),
     }
 }
 
-/// The placeholder `MintFn`. When invoked it panics with
-/// the Slice 5 message so the operator sees the gap.
-///
-/// We deliberately don't panic with `HandlerUnbound` —
-/// `MintFn` returns `SlotId`, not `Result<SlotId, _>`, and
-/// the orchestrator has no error path for a missing
-/// handler. A panic is loud and unmissable; an `Err` would
-/// have required changing the orchestrator's signature,
-/// which the spec forbids.
+/// The placeholder `MintFn`. When invoked it returns a
+/// `MintError::HandlerReturned` describing the missing
+/// handler so the operator sees the gap at boot time
+/// (via the orchestrator's typed-error path) rather than
+/// panicking mid-mint.
 fn placeholder_mint_fn(
     _factory: &crate::personality::lifecycle::mint::CapabilityFactory,
     _plugin: &crate::core::identity::ids::PluginId,
-    _decl: &crate::core::manifest::manifest::CapabilityDecl,
+    decl: &crate::core::manifest::manifest::CapabilityDecl,
     _kind: crate::core::identity::kind::CapKind,
     _budget: crate::capability::enforce::quota::CapabilityBudget,
     _bindings: &[crate::personality::composition::resolve::ResolvedBinding],
-) -> SlotId {
-    panic!(
-        "Slice 5 placeholder MintFn invoked: loaded plugins don't have handlers bound yet. \
-         A follow-up commit should map each exposed capability name to a real handler."
-    );
+    _typed_bindings: &crate::personality::lifecycle::mint::TypedBindings,
+) -> Result<SlotId, MintError> {
+    Err(MintError::HandlerReturned {
+        plugin: String::new(),
+        cap: decl.name.clone(),
+        message: "Slice 5 placeholder MintFn invoked: loaded plugins don't \
+                  have handlers bound yet. A follow-up commit should map each \
+                  exposed capability name to a real handler."
+            .into(),
+    })
 }

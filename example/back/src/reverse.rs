@@ -18,7 +18,7 @@ use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::personality::composition::resolve::ResolvedBinding;
-use odyssey::personality::lifecycle::mint::CapabilityFactory;
+use odyssey::personality::lifecycle::mint::{CapabilityFactory, MintError, TypedBindings};
 use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
 use serde_json::{Value, json};
 
@@ -42,6 +42,7 @@ impl Resource for ReverseResource {
 pub struct ReverseBuiltin;
 
 impl BuiltinManifest for ReverseBuiltin {
+    type Resource = ReverseResource;
     fn manifest(&self) -> PluginManifest {
         let tool_schema = serde_json::json!({
             "description": "Reverses the input string character by character. Useful for palindrome checks and string processing.",
@@ -82,6 +83,18 @@ impl ReverseBuiltin {
     /// orchestrator's existing teardown path
     /// (`default_ruin` revoking the returned ids) works
     /// unchanged.
+    ///
+    /// DI Phase 21: `typed_bindings` is unused (reverse is a
+    /// leaf) but the parameter is part of the widened
+    /// DI Phase 21: `typed_bindings` carries the consumer's
+    /// pre-resolved typed slot ids. Reverse is a leaf (no
+    /// `requires`), so this argument is unused; the
+    /// underscore-prefixed name documents the intent. The
+    /// `.expect(...)` is unchanged from Slice 3: a kernel-side
+    /// `grant_to` failure today panics (caught by the
+    /// orchestrator's `catch_unwind` on `MintFn`). The
+    /// `MintError` enum exists as a future-shape surface;
+    /// the `MintFn` typedef stays `SlotId`.
     pub fn mint(
         &self,
         factory: &CapabilityFactory,
@@ -90,7 +103,8 @@ impl ReverseBuiltin {
         kind: CapKind,
         budget: CapabilityBudget,
         _bindings: &[ResolvedBinding],
-    ) -> SlotId {
+        _typed_bindings: &TypedBindings,
+    ) -> Result<SlotId, MintError> {
         use odyssey::core::rights::rights::{CapabilityRights, Rights};
 
         let pc = factory.plugin_cspace(plugin);
@@ -101,17 +115,33 @@ impl ReverseBuiltin {
         };
         pc.inner()
             .grant_to::<ReverseResource>(local_slot, factory.space(), rights, decl.name.clone())
-            .expect("grant from plugin cspace to global should succeed")
+            .map_err(|e| MintError::GrantFailed {
+                plugin: plugin.name.clone(),
+                cap: decl.name.clone(),
+                source: e,
+            })
     }
 
     /// Phase 11: colocated registration helper. Returns the
     /// `(manifest, mint_fn, ruin_fn)` triple; see
     /// `builtins/src/echo.rs::register` for rationale.
+    ///
+    /// DI Phase 21: `MintFn` signature widens (typed_bindings
+    /// parameter, `Result` return). The closure body forwards
+    /// the new argument to the inherent `mint`.
     pub fn register() -> (PluginManifest, MintFn, RuinFn) {
         (
             ReverseBuiltin.manifest(),
-            |factory, plugin, decl, kind, budget, bindings| {
-                ReverseBuiltin.mint(factory, plugin, decl, kind, budget, bindings)
+            |factory, plugin, decl, kind, budget, bindings, typed_bindings| {
+                ReverseBuiltin.mint(
+                    factory,
+                    plugin,
+                    decl,
+                    kind,
+                    budget,
+                    bindings,
+                    typed_bindings,
+                )
             },
             default_ruin,
         )

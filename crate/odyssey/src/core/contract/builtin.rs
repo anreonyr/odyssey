@@ -23,11 +23,20 @@
 //! order. The manifest is the only thing personality needs from
 //! a homogeneous list view.
 
+use crate::core::contract::resource::Resource;
 use crate::core::manifest::manifest::PluginManifest;
 
 /// Capability manifest returned by a builtin. All builtins
 /// implement this so the personality orchestrator can collect
 /// manifests into a homogeneous list.
 pub trait BuiltinManifest: Send + Sync {
+    /// DI Phase 21: the resource type this builtin hands to the
+    /// kernel at mint. Type-only associated type (no method
+    /// bodies); the standard workaround for "need R but cannot
+    /// dispatch via vtable" — `CapabilityFactory::mint<R>` is
+    /// generic over `R`, and a trait object can't dispatch into
+    /// a generic call. Each concrete builtin declares
+    /// `type Resource = XResource;`.
+    type Resource: Resource;
     fn manifest(&self) -> PluginManifest;
 }

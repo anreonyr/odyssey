@@ -54,7 +54,7 @@ use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::core::rights::rights::Rights;
 use odyssey::personality::composition::resolve::ResolvedBinding;
-use odyssey::personality::lifecycle::mint::CapabilityFactory;
+use odyssey::personality::lifecycle::mint::{CapabilityFactory, MintError, TypedBindings};
 use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
 
 /// Names one capability row of the agent's reachable table.
@@ -282,6 +282,7 @@ pub const REACHES: [(&str, &str); 4] = [
 pub struct AgentListBuiltin;
 
 impl BuiltinManifest for AgentListBuiltin {
+    type Resource = AgentListResource;
     fn manifest(&self) -> PluginManifest {
         ManifestBuilder::new("agent_list")
             .expose(CONTRACT_LIST, CONTRACT_LIST)
@@ -298,8 +299,16 @@ impl AgentListBuiltin {
     pub fn register() -> (PluginManifest, MintFn, RuinFn) {
         (
             AgentListBuiltin.manifest(),
-            |factory, plugin, decl, kind, budget, bindings| {
-                AgentListBuiltin.mint(factory, plugin, decl, kind, budget, bindings)
+            |factory, plugin, decl, kind, budget, bindings, typed_bindings| {
+                AgentListBuiltin.mint(
+                    factory,
+                    plugin,
+                    decl,
+                    kind,
+                    budget,
+                    bindings,
+                    typed_bindings,
+                )
             },
             default_ruin,
         )
@@ -313,7 +322,8 @@ impl AgentListBuiltin {
         kind: CapKind,
         budget: CapabilityBudget,
         bindings: &[ResolvedBinding],
-    ) -> SlotId {
+        _typed_bindings: &TypedBindings,
+    ) -> Result<SlotId, MintError> {
         use odyssey::core::rights::rights::{CapabilityRights, Rights};
 
         let pc = factory.plugin_cspace(plugin);
@@ -332,7 +342,11 @@ impl AgentListBuiltin {
         };
         pc.inner()
             .grant_to::<AgentListResource>(local_slot, factory.space(), rights, decl.name.clone())
-            .expect("grant from plugin cspace to global should succeed")
+            .map_err(|e| MintError::GrantFailed {
+                plugin: plugin.name.clone(),
+                cap: decl.name.clone(),
+                source: e,
+            })
     }
 }
 
@@ -340,6 +354,7 @@ impl AgentListBuiltin {
 pub struct AgentDescribeBuiltin;
 
 impl BuiltinManifest for AgentDescribeBuiltin {
+    type Resource = AgentDescribeResource;
     fn manifest(&self) -> PluginManifest {
         ManifestBuilder::new("agent_describe")
             .expose(CONTRACT_DESCRIBE, CONTRACT_DESCRIBE)
@@ -356,8 +371,16 @@ impl AgentDescribeBuiltin {
     pub fn register() -> (PluginManifest, MintFn, RuinFn) {
         (
             AgentDescribeBuiltin.manifest(),
-            |factory, plugin, decl, kind, budget, bindings| {
-                AgentDescribeBuiltin.mint(factory, plugin, decl, kind, budget, bindings)
+            |factory, plugin, decl, kind, budget, bindings, typed_bindings| {
+                AgentDescribeBuiltin.mint(
+                    factory,
+                    plugin,
+                    decl,
+                    kind,
+                    budget,
+                    bindings,
+                    typed_bindings,
+                )
             },
             default_ruin,
         )
@@ -371,7 +394,8 @@ impl AgentDescribeBuiltin {
         kind: CapKind,
         budget: CapabilityBudget,
         bindings: &[ResolvedBinding],
-    ) -> SlotId {
+        _typed_bindings: &TypedBindings,
+    ) -> Result<SlotId, MintError> {
         use odyssey::core::rights::rights::{CapabilityRights, Rights};
 
         let pc = factory.plugin_cspace(plugin);
@@ -395,6 +419,10 @@ impl AgentDescribeBuiltin {
                 rights,
                 decl.name.clone(),
             )
-            .expect("grant from plugin cspace to global should succeed")
+            .map_err(|e| MintError::GrantFailed {
+                plugin: plugin.name.clone(),
+                cap: decl.name.clone(),
+                source: e,
+            })
     }
 }

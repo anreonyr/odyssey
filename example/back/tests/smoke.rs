@@ -56,7 +56,7 @@ use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::CapabilityDecl;
 use odyssey::core::meta::chunk::CapabilityChunk;
 use odyssey::core::rights::rights::Rights;
-use odyssey::personality::lifecycle::mint::CapabilityFactory;
+use odyssey::personality::lifecycle::mint::{CapabilityFactory, TypedBindings};
 use odyssey_builtin::echo::{EchoBuiltin, EchoResource};
 use odyssey_builtin::streaming_echo::{StreamingEchoBuiltin, StreamingEchoResource};
 use tokio_stream::StreamExt;
@@ -76,17 +76,20 @@ fn echo_builtin_round_trips_through_typed_mint() {
     // non-capturing closure of the same shape, so calling
     // the inherent method exercises the exact code path
     // the orchestrator's `MintFn` does.
-    let slot_id = builtin.mint(
-        &factory,
-        &PluginId {
-            name: "echo".into(),
-            version: "0.1.0".into(),
-        },
-        decl,
-        CapKind::Sync,
-        CapabilityBudget::new(5000),
-        &[],
-    );
+    let slot_id = builtin
+        .mint(
+            &factory,
+            &PluginId {
+                name: "echo".into(),
+                version: "0.1.0".into(),
+            },
+            decl,
+            CapKind::Sync,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
 
     let slot: Slot<EchoResource> = Slot::new(cspace, slot_id);
     let input = serde_json::json!({"hello": "world"});
@@ -127,14 +130,17 @@ fn echo_mint_lives_in_plugin_cspace_and_exports_to_global() {
     // slot) — the existing teardown path
     // (`default_ruin` revoking returned slot ids) works
     // unchanged.
-    let global_slot = builtin.mint(
-        &factory,
-        &plugin_id,
-        decl,
-        CapKind::Sync,
-        CapabilityBudget::new(5000),
-        &[],
-    );
+    let global_slot = builtin
+        .mint(
+            &factory,
+            &plugin_id,
+            decl,
+            CapKind::Sync,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
 
     // The global cspace has the cap under the declared
     // name. HTTP bridge and cross-plugin lookups land here.
@@ -206,43 +212,40 @@ fn attenuated_capability_denies_unheld_op() {
 
     let builtin = EchoBuiltin;
     let decl = &builtin.manifest().exposes[0];
-    let slot_id = builtin.mint(
-        &factory,
-        &PluginId {
-            name: "echo".into(),
-            version: "0.1.0".into(),
-        },
-        decl,
-        CapKind::Sync,
-        CapabilityBudget::new(5000),
-        &[],
-    );
+    let slot_id = builtin
+        .mint(
+            &factory,
+            &PluginId {
+                name: "echo".into(),
+                version: "0.1.0".into(),
+            },
+            decl,
+            CapKind::Sync,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
 
     // Source slot has all rights (factory default). Derive
-    // an empty-rights child via `grant` — seL4 CNode.Mint,
-    // the standard attenuation primitive.
-    //
-    // Slice 2 redesign: under the INVOKE / ASSIGN / REVOKE
-    // schema, `READ` no longer exists. The lossy projection
-    // (READ → INVOKE) collapses the original test's "child
-    // has READ, parent has EXECUTE" contrast — both project
-    // to INVOKE and `contains` passes. The attenuation check
-    // is now exercised by giving the child `Rights::empty()`
-    // (full attenuation; no INVOKE bit) and requesting
-    // `Rights::INVOKE` — `empty.contains(INVOKE) == false`
-    // so the kernel surfaces OperationDenied.
+    // an INVOKE-only child via `grant` — the standard
+    // attenuation primitive. Slice 2's zero-rights precondition
+    // rejects `Rights::empty()` at boot time (see
+    // `tests/zero_rights_attenuation.rs`); we test the runtime-
+    // denied case here by attenuating to INVOKE-only and asserting
+    // that ASSIGN fails on the child.
     let source: Slot<EchoResource> = Slot::new(cspace.clone(), slot_id);
-    let empty_id = source
+    let invoke_only_id = source
         .grant(
             CapabilityRights {
-                operations: Rights::empty(),
+                operations: Rights::INVOKE,
                 timeout_ms: 5000,
             },
-            "echo_empty".into(),
+            "echo_invoke_only".into(),
         )
-        .expect("grant should succeed when attenuating fully to empty");
+        .expect("grant with INVOKE should succeed");
 
-    let empty: Slot<EchoResource> = Slot::new(cspace.clone(), empty_id);
+    let invoke_only: Slot<EchoResource> = Slot::new(cspace.clone(), invoke_only_id);
 
     // The source still works — rights haven't been
     // attenuated on the source, only the derived child.
@@ -251,21 +254,23 @@ fn attenuated_capability_denies_unheld_op() {
         .expect("source slot still has all rights, must accept INVOKE");
     assert_eq!(ok, serde_json::json!({"x": 1}));
 
-    // The child denies INVOKE — the held rights are empty.
-    // (The site uses `Rights::INVOKE` directly; the original
-    // (The original test's `OperationRights::EXECUTE` would auto-
-    // convert via `From<OperationRights> for Rights` to the same
-    // value, but `OperationRights` is now deleted at Phase 5;
-    // `Rights::INVOKE` is the direct form.)
-    let denied = empty
+    // The child accepts INVOKE (held rights include it).
+    let child_ok = invoke_only
         .invoke(Rights::INVOKE, serde_json::json!({"x": 1}))
-        .expect_err("attenuated child must reject INVOKE");
+        .expect("attenuated child must accept INVOKE");
+    assert_eq!(child_ok, serde_json::json!({"x": 1}));
+
+    // The child denies ASSIGN — the held rights do not
+    // include ASSIGN.
+    let denied = invoke_only
+        .invoke(Rights::ASSIGN, serde_json::json!({"x": 1}))
+        .expect_err("attenuated child must reject ASSIGN");
     match denied {
         CapabilityError::OperationDenied {
             requested, held, ..
         } => {
-            assert_eq!(requested, Rights::INVOKE);
-            assert_eq!(held, Rights::empty());
+            assert_eq!(requested, Rights::ASSIGN);
+            assert_eq!(held, Rights::INVOKE);
         }
         other => panic!("expected OperationDenied, got {other:?}"),
     }
@@ -300,6 +305,7 @@ fn plugin_cspaces_are_isolated_until_explicit_transfer() {
         kind: CapKind::Sync,
         contract_name: "echo".into(),
         tool_schema: None,
+        priority: None,
     };
 
     // Each plugin mints its own echo cap into its own cspace.
@@ -409,17 +415,20 @@ async fn streaming_echo_builtin_round_trips_through_typed_open() {
     let manifest = builtin.manifest();
     let decl = &manifest.exposes[0];
 
-    let slot_id = builtin.mint(
-        &factory,
-        &PluginId {
-            name: "streaming_echo".into(),
-            version: "0.1.0".into(),
-        },
-        decl,
-        CapKind::Stream,
-        CapabilityBudget::new(5000),
-        &[],
-    );
+    let slot_id = builtin
+        .mint(
+            &factory,
+            &PluginId {
+                name: "streaming_echo".into(),
+                version: "0.1.0".into(),
+            },
+            decl,
+            CapKind::Stream,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
 
     let slot: Slot<StreamingEchoResource> = Slot::new(cspace, slot_id);
     let rx = slot
@@ -484,17 +493,20 @@ fn streaming_echo_kind_mismatch_on_invoke() {
     let manifest = builtin.manifest();
     let decl = &manifest.exposes[0];
 
-    let slot_id = builtin.mint(
-        &factory,
-        &PluginId {
-            name: "streaming_echo".into(),
-            version: "0.1.0".into(),
-        },
-        decl,
-        CapKind::Stream,
-        CapabilityBudget::new(5000),
-        &[],
-    );
+    let slot_id = builtin
+        .mint(
+            &factory,
+            &PluginId {
+                name: "streaming_echo".into(),
+                version: "0.1.0".into(),
+            },
+            decl,
+            CapKind::Stream,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
 
     let slot: Slot<StreamingEchoResource> = Slot::new(cspace, slot_id);
     let err = slot
@@ -639,6 +651,7 @@ fn agent_reaches_only_its_bindings_and_reports_revocation() {
         provider: plugin("echo"),
         capability: "echo".into(),
         contract: "echo".into(),
+        priority: 0,
     };
 
     // 1. Live in the cspace, absent from the table.
@@ -654,15 +667,19 @@ fn agent_reaches_only_its_bindings_and_reports_revocation() {
         kind: CapKind::Sync,
         contract_name: "plain".into(),
         tool_schema: None,
+        priority: None,
     };
-    EchoBuiltin.mint(
-        &factory,
-        &plugin("plain"),
-        &plain_decl,
-        CapKind::Sync,
-        CapabilityBudget::new(5000),
-        &[],
-    );
+    EchoBuiltin
+        .mint(
+            &factory,
+            &plugin("plain"),
+            &plain_decl,
+            CapKind::Sync,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
     let core = AgentCore::new(cspace.clone(), vec![echo_row("echo")]);
     assert!(
         cspace.lookup_by_name("plain").is_some(),
@@ -685,14 +702,17 @@ fn agent_reaches_only_its_bindings_and_reports_revocation() {
     // 2. A row whose capability is revoked.
     let cspace = CapabilitySpace::new();
     let factory = CapabilityFactory::with_clock(cspace.clone(), Arc::new(SystemClock));
-    let slot = EchoBuiltin.mint(
-        &factory,
-        &plugin("echo"),
-        &manifest.exposes[0],
-        CapKind::Sync,
-        CapabilityBudget::new(5000),
-        &[],
-    );
+    let slot = EchoBuiltin
+        .mint(
+            &factory,
+            &plugin("echo"),
+            &manifest.exposes[0],
+            CapKind::Sync,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
     let core = AgentCore::new(cspace.clone(), vec![echo_row("echo")]);
 
     let described = core.describe("echo").expect("describe a live handle");
@@ -726,6 +746,7 @@ fn agent_reaches_only_its_bindings_and_reports_revocation() {
                 provider: plugin("echo"),
                 capability: String::new(),
                 contract: "echo".into(),
+                priority: 0,
             },
         ],
     );
@@ -803,18 +824,22 @@ fn agent_describe_refuses_unknown_fields() {
         kind: CapKind::Sync,
         contract_name: "echo".into(),
         tool_schema: None,
+        priority: None,
     };
-    EchoBuiltin.mint(
-        &factory,
-        &PluginId {
-            name: "echo".into(),
-            version: "0.1.0".into(),
-        },
-        &decl,
-        CapKind::Sync,
-        CapabilityBudget::new(5000),
-        &[],
-    );
+    EchoBuiltin
+        .mint(
+            &factory,
+            &PluginId {
+                name: "echo".into(),
+                version: "0.1.0".into(),
+            },
+            &decl,
+            CapKind::Sync,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
 
     let resource = AgentDescribeResource::new(
         cspace,
@@ -827,6 +852,7 @@ fn agent_describe_refuses_unknown_fields() {
                 },
                 capability: "echo".into(),
                 contract: "echo".into(),
+                priority: 0,
             },
         ],
     );
@@ -1054,17 +1080,20 @@ fn llm_complete_builtin_round_trips_through_typed_mint() {
     let manifest = LlmBuiltin.manifest();
     let decl = &manifest.exposes[0];
 
-    let slot_id = LlmBuiltin.mint(
-        &factory,
-        &PluginId {
-            name: "llm".into(),
-            version: "0.1.0".into(),
-        },
-        decl,
-        CapKind::Sync,
-        CapabilityBudget::new(5000),
-        &[],
-    );
+    let slot_id = LlmBuiltin
+        .mint(
+            &factory,
+            &PluginId {
+                name: "llm".into(),
+                version: "0.1.0".into(),
+            },
+            decl,
+            CapKind::Sync,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
 
     let slot: Slot<LlmCompleteResource> = Slot::new(cspace, slot_id);
     let out = slot
@@ -1089,17 +1118,20 @@ fn llm_embed_builtin_round_trips_through_typed_mint() {
     let manifest = LlmBuiltin.manifest();
     let decl = &manifest.exposes[1];
 
-    let slot_id = LlmBuiltin.mint(
-        &factory,
-        &PluginId {
-            name: "llm".into(),
-            version: "0.1.0".into(),
-        },
-        decl,
-        CapKind::Sync,
-        CapabilityBudget::new(5000),
-        &[],
-    );
+    let slot_id = LlmBuiltin
+        .mint(
+            &factory,
+            &PluginId {
+                name: "llm".into(),
+                version: "0.1.0".into(),
+            },
+            decl,
+            CapKind::Sync,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
 
     let slot: Slot<LlmEmbedResource> = Slot::new(cspace, slot_id);
     let out = slot
@@ -1130,28 +1162,34 @@ fn memory_query_finds_inserted_record_by_substring() {
     let insert_decl = &manifest.exposes[1];
     let query_decl = &manifest.exposes[0];
 
-    let insert_id = MemoryBuiltin.mint(
-        &factory,
-        &PluginId {
-            name: "memory".into(),
-            version: "0.1.0".into(),
-        },
-        insert_decl,
-        CapKind::Sync,
-        CapabilityBudget::new(5000),
-        &[],
-    );
-    let query_id = MemoryBuiltin.mint(
-        &factory,
-        &PluginId {
-            name: "memory".into(),
-            version: "0.1.0".into(),
-        },
-        query_decl,
-        CapKind::Sync,
-        CapabilityBudget::new(5000),
-        &[],
-    );
+    let insert_id = MemoryBuiltin
+        .mint(
+            &factory,
+            &PluginId {
+                name: "memory".into(),
+                version: "0.1.0".into(),
+            },
+            insert_decl,
+            CapKind::Sync,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
+    let query_id = MemoryBuiltin
+        .mint(
+            &factory,
+            &PluginId {
+                name: "memory".into(),
+                version: "0.1.0".into(),
+            },
+            query_decl,
+            CapKind::Sync,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
 
     let insert_slot: Slot<MemoryInsertResource> = Slot::new(cspace.clone(), insert_id);
     let query_slot: Slot<MemoryQueryResource> = Slot::new(cspace, query_id);
@@ -1198,29 +1236,35 @@ fn tool_descriptor_reports_schema_missing_for_unschemaed_caps() {
 
     // Mint `agent_list` (no tool_schema — observer cap) so
     // the cspace has a cap to look up.
-    AgentListBuiltin.mint(
-        &factory,
-        &PluginId {
-            name: "agent_list".into(),
-            version: "0.1.0".into(),
-        },
-        &AgentListBuiltin.manifest().exposes[0],
-        CapKind::Sync,
-        CapabilityBudget::new(5000),
-        &[],
-    );
+    AgentListBuiltin
+        .mint(
+            &factory,
+            &PluginId {
+                name: "agent_list".into(),
+                version: "0.1.0".into(),
+            },
+            &AgentListBuiltin.manifest().exposes[0],
+            CapKind::Sync,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
     let td_manifest = ToolDescriptorBuiltin.manifest();
-    let td_id = ToolDescriptorBuiltin.mint(
-        &factory,
-        &PluginId {
-            name: "tool_descriptor".into(),
-            version: "0.1.0".into(),
-        },
-        &td_manifest.exposes[0],
-        CapKind::Sync,
-        CapabilityBudget::new(5000),
-        &[],
-    );
+    let td_id = ToolDescriptorBuiltin
+        .mint(
+            &factory,
+            &PluginId {
+                name: "tool_descriptor".into(),
+                version: "0.1.0".into(),
+            },
+            &td_manifest.exposes[0],
+            CapKind::Sync,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
     let slot: Slot<ToolDescriptorResource> = Slot::new(cspace, td_id);
     let err = slot
         .invoke(Rights::INVOKE, serde_json::json!({"tool": "agent_list"}))
@@ -1255,62 +1299,77 @@ fn tool_descriptor_returns_schema_for_every_tool_builtin() {
     // Mint all four tool builtins. Each has a distinct
     // type, so we mint them by name rather than iterating
     // over a homogeneous collection.
-    EchoBuiltin.mint(
-        &factory,
-        &PluginId {
-            name: "echo".into(),
-            version: "0.1.0".into(),
-        },
-        &EchoBuiltin.manifest().exposes[0],
-        CapKind::Sync,
-        CapabilityBudget::new(5000),
-        &[],
-    );
-    ReverseBuiltin.mint(
-        &factory,
-        &PluginId {
-            name: "reverse".into(),
-            version: "0.1.0".into(),
-        },
-        &ReverseBuiltin.manifest().exposes[0],
-        CapKind::Sync,
-        CapabilityBudget::new(5000),
-        &[],
-    );
-    DatabaseBuiltin.mint(
-        &factory,
-        &PluginId {
-            name: "database".into(),
-            version: "0.1.0".into(),
-        },
-        &DatabaseBuiltin.manifest().exposes[0],
-        CapKind::Sync,
-        CapabilityBudget::new(5000),
-        &[],
-    );
-    StreamingEchoBuiltin.mint(
-        &factory,
-        &PluginId {
-            name: "streaming_echo".into(),
-            version: "0.1.0".into(),
-        },
-        &StreamingEchoBuiltin.manifest().exposes[0],
-        CapKind::Stream,
-        CapabilityBudget::new(5000),
-        &[],
-    );
+    EchoBuiltin
+        .mint(
+            &factory,
+            &PluginId {
+                name: "echo".into(),
+                version: "0.1.0".into(),
+            },
+            &EchoBuiltin.manifest().exposes[0],
+            CapKind::Sync,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
+    ReverseBuiltin
+        .mint(
+            &factory,
+            &PluginId {
+                name: "reverse".into(),
+                version: "0.1.0".into(),
+            },
+            &ReverseBuiltin.manifest().exposes[0],
+            CapKind::Sync,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
+    DatabaseBuiltin
+        .mint(
+            &factory,
+            &PluginId {
+                name: "database".into(),
+                version: "0.1.0".into(),
+            },
+            &DatabaseBuiltin.manifest().exposes[0],
+            CapKind::Sync,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
+    StreamingEchoBuiltin
+        .mint(
+            &factory,
+            &PluginId {
+                name: "streaming_echo".into(),
+                version: "0.1.0".into(),
+            },
+            &StreamingEchoBuiltin.manifest().exposes[0],
+            CapKind::Stream,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
 
-    let td_id = ToolDescriptorBuiltin.mint(
-        &factory,
-        &PluginId {
-            name: "tool_descriptor".into(),
-            version: "0.1.0".into(),
-        },
-        &ToolDescriptorBuiltin.manifest().exposes[0],
-        CapKind::Sync,
-        CapabilityBudget::new(5000),
-        &[],
-    );
+    let td_id = ToolDescriptorBuiltin
+        .mint(
+            &factory,
+            &PluginId {
+                name: "tool_descriptor".into(),
+                version: "0.1.0".into(),
+            },
+            &ToolDescriptorBuiltin.manifest().exposes[0],
+            CapKind::Sync,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
     let slot: Slot<ToolDescriptorResource> = Slot::new(cspace, td_id);
 
     for tool in ["echo", "reverse", "database", "streaming_echo"] {
@@ -1347,28 +1406,34 @@ fn profile_inspector_returns_cap_meta_and_operations() {
     let cspace = CapabilitySpace::new();
     let factory = CapabilityFactory::with_clock(cspace.clone(), Arc::new(SystemClock));
 
-    EchoBuiltin.mint(
-        &factory,
-        &PluginId {
-            name: "echo".into(),
-            version: "0.1.0".into(),
-        },
-        &EchoBuiltin.manifest().exposes[0],
-        CapKind::Sync,
-        CapabilityBudget::new(5000),
-        &[],
-    );
-    let pi_id = ProfileInspectorBuiltin.mint(
-        &factory,
-        &PluginId {
-            name: "profile_inspector".into(),
-            version: "0.1.0".into(),
-        },
-        &ProfileInspectorBuiltin.manifest().exposes[0],
-        CapKind::Sync,
-        CapabilityBudget::new(5000),
-        &[],
-    );
+    EchoBuiltin
+        .mint(
+            &factory,
+            &PluginId {
+                name: "echo".into(),
+                version: "0.1.0".into(),
+            },
+            &EchoBuiltin.manifest().exposes[0],
+            CapKind::Sync,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
+    let pi_id = ProfileInspectorBuiltin
+        .mint(
+            &factory,
+            &PluginId {
+                name: "profile_inspector".into(),
+                version: "0.1.0".into(),
+            },
+            &ProfileInspectorBuiltin.manifest().exposes[0],
+            CapKind::Sync,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
     let slot: Slot<ProfileInspectorResource> = Slot::new(cspace, pi_id);
     let out = slot
         .invoke(Rights::INVOKE, serde_json::json!({"subject": "echo"}))
@@ -1470,37 +1535,46 @@ fn agent_runtime_session_lifecycle_with_mock_llm() {
     // (the test's tool cap), then agent_runtime's 7 caps.
     let llm_manifest = llm::LlmBuiltin.manifest();
     for decl in &llm_manifest.exposes {
-        llm::LlmBuiltin.mint(
-            &factory,
-            &llm_manifest.plugin,
-            decl,
-            decl.kind,
-            CapabilityBudget::new(5000),
-            &[],
-        );
+        llm::LlmBuiltin
+            .mint(
+                &factory,
+                &llm_manifest.plugin,
+                decl,
+                decl.kind,
+                CapabilityBudget::new(5000),
+                &[],
+                &TypedBindings::default(),
+            )
+            .expect("mint must succeed");
     }
     let mem_manifest = memory::MemoryBuiltin.manifest();
     for decl in &mem_manifest.exposes {
-        memory::MemoryBuiltin.mint(
+        memory::MemoryBuiltin
+            .mint(
+                &factory,
+                &mem_manifest.plugin,
+                decl,
+                decl.kind,
+                CapabilityBudget::new(5000),
+                &[],
+                &TypedBindings::default(),
+            )
+            .expect("mint must succeed");
+    }
+    let echo_id = EchoBuiltin
+        .mint(
             &factory,
-            &mem_manifest.plugin,
-            decl,
-            decl.kind,
+            &PluginId {
+                name: "echo".into(),
+                version: "0.1.0".into(),
+            },
+            &EchoBuiltin.manifest().exposes[0],
+            CapKind::Sync,
             CapabilityBudget::new(5000),
             &[],
-        );
-    }
-    let echo_id = EchoBuiltin.mint(
-        &factory,
-        &PluginId {
-            name: "echo".into(),
-            version: "0.1.0".into(),
-        },
-        &EchoBuiltin.manifest().exposes[0],
-        CapKind::Sync,
-        CapabilityBudget::new(5000),
-        &[],
-    );
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
     assert!(cspace.lookup_by_name("echo").is_some());
 
     // Mint the agent_runtime's eight caps.
@@ -1512,6 +1586,18 @@ fn agent_runtime_session_lifecycle_with_mock_llm() {
             .get(&agent_manifest.plugin)
             .map(Vec::as_slice)
             .unwrap_or(&[]);
+        let mut typed_bindings = TypedBindings::default();
+        for b in bindings {
+            if let Some(slot_id) = cspace.slot_for_name(&b.capability) {
+                typed_bindings
+                    .entries
+                    .push(odyssey::personality::lifecycle::mint::TypedBinding {
+                        handle: b.handle.clone(),
+                        slot_id,
+                        name: b.capability.clone(),
+                    });
+            }
+        }
         let id = AgentRuntimeBuiltin::mint(
             &factory,
             &agent_manifest.plugin,
@@ -1519,6 +1605,7 @@ fn agent_runtime_session_lifecycle_with_mock_llm() {
             decl.kind,
             CapabilityBudget::new(30000),
             bindings,
+            &typed_bindings,
         );
         agent_slot_ids.push(id);
     }
@@ -1530,7 +1617,19 @@ fn agent_runtime_session_lifecycle_with_mock_llm() {
         .get(&agent_manifest.plugin)
         .cloned()
         .unwrap_or_default();
-    let runtime = AgentRuntime::new(cspace.clone(), bindings);
+    let mut typed_bindings = TypedBindings::default();
+    for b in &bindings {
+        if let Some(slot_id) = cspace.slot_for_name(&b.capability) {
+            typed_bindings
+                .entries
+                .push(odyssey::personality::lifecycle::mint::TypedBinding {
+                    handle: b.handle.clone(),
+                    slot_id,
+                    name: b.capability.clone(),
+                });
+        }
+    }
+    let runtime = AgentRuntime::new(cspace.clone(), typed_bindings, bindings);
 
     // Start a session.
     let sid = runtime
@@ -1662,25 +1761,31 @@ fn agent_plan_returns_text_step() {
     // slot lookup succeeds.
     let llm_manifest = llm::LlmBuiltin.manifest();
     for decl in &llm_manifest.exposes {
-        llm::LlmBuiltin.mint(
-            &factory,
-            &llm_manifest.plugin,
-            decl,
-            decl.kind,
-            CapabilityBudget::new(5000),
-            &[],
-        );
+        llm::LlmBuiltin
+            .mint(
+                &factory,
+                &llm_manifest.plugin,
+                decl,
+                decl.kind,
+                CapabilityBudget::new(5000),
+                &[],
+                &TypedBindings::default(),
+            )
+            .expect("mint must succeed");
     }
     let mem_manifest = memory::MemoryBuiltin.manifest();
     for decl in &mem_manifest.exposes {
-        memory::MemoryBuiltin.mint(
-            &factory,
-            &mem_manifest.plugin,
-            decl,
-            decl.kind,
-            CapabilityBudget::new(5000),
-            &[],
-        );
+        memory::MemoryBuiltin
+            .mint(
+                &factory,
+                &mem_manifest.plugin,
+                decl,
+                decl.kind,
+                CapabilityBudget::new(5000),
+                &[],
+                &TypedBindings::default(),
+            )
+            .expect("mint must succeed");
     }
 
     let agent_manifest = AgentRuntimeBuiltin.manifest();
@@ -1690,6 +1795,18 @@ fn agent_plan_returns_text_step() {
         .get(&agent_manifest.plugin)
         .map(Vec::as_slice)
         .unwrap_or(&[]);
+    let mut typed_bindings = TypedBindings::default();
+    for b in bindings {
+        if let Some(slot_id) = cspace.slot_for_name(&b.capability) {
+            typed_bindings
+                .entries
+                .push(odyssey::personality::lifecycle::mint::TypedBinding {
+                    handle: b.handle.clone(),
+                    slot_id,
+                    name: b.capability.clone(),
+                });
+        }
+    }
     AgentRuntimeBuiltin::mint(
         &factory,
         &agent_manifest.plugin,
@@ -1697,11 +1814,14 @@ fn agent_plan_returns_text_step() {
         decl.kind,
         CapabilityBudget::new(5000),
         bindings,
-    );
+        &typed_bindings,
+    )
+    .expect("agent_runtime mint must succeed");
 
     let out = AgentPlanResource {
         runtime: Arc::new(odyssey_builtin::agent_runtime::AgentRuntime::new(
             cspace,
+            typed_bindings,
             bindings.to_vec(),
         )),
     }
@@ -1746,25 +1866,31 @@ async fn agent_stream_emits_done_after_cancel() {
     // must do it explicitly.)
     let llm_manifest = llm::LlmBuiltin.manifest();
     for decl in &llm_manifest.exposes {
-        llm::LlmBuiltin.mint(
-            &factory,
-            &llm_manifest.plugin,
-            decl,
-            decl.kind,
-            CapabilityBudget::new(5000),
-            &[],
-        );
+        llm::LlmBuiltin
+            .mint(
+                &factory,
+                &llm_manifest.plugin,
+                decl,
+                decl.kind,
+                CapabilityBudget::new(5000),
+                &[],
+                &TypedBindings::default(),
+            )
+            .expect("mint must succeed");
     }
     let mem_manifest = memory::MemoryBuiltin.manifest();
     for decl in &mem_manifest.exposes {
-        memory::MemoryBuiltin.mint(
-            &factory,
-            &mem_manifest.plugin,
-            decl,
-            decl.kind,
-            CapabilityBudget::new(5000),
-            &[],
-        );
+        memory::MemoryBuiltin
+            .mint(
+                &factory,
+                &mem_manifest.plugin,
+                decl,
+                decl.kind,
+                CapabilityBudget::new(5000),
+                &[],
+                &TypedBindings::default(),
+            )
+            .expect("mint must succeed");
     }
 
     let agent_manifest = AgentRuntimeBuiltin.manifest();
@@ -1773,9 +1899,21 @@ async fn agent_stream_emits_done_after_cancel() {
         .get(&agent_manifest.plugin)
         .cloned()
         .unwrap_or_default();
+    let mut typed_bindings = TypedBindings::default();
+    for b in &bindings {
+        if let Some(slot_id) = cspace.slot_for_name(&b.capability) {
+            typed_bindings
+                .entries
+                .push(odyssey::personality::lifecycle::mint::TypedBinding {
+                    handle: b.handle.clone(),
+                    slot_id,
+                    name: b.capability.clone(),
+                });
+        }
+    }
 
     // Start a session.
-    let runtime = AgentRuntime::new(cspace.clone(), bindings.clone());
+    let runtime = AgentRuntime::new(cspace.clone(), typed_bindings.clone(), bindings.clone());
     let sid = runtime
         .start(
             "test".into(),
@@ -1787,7 +1925,11 @@ async fn agent_stream_emits_done_after_cancel() {
 
     // Open the stream.
     let stream_resource = AgentStreamResource {
-        runtime: Arc::new(AgentRuntime::new(cspace.clone(), bindings)),
+        runtime: Arc::new(AgentRuntime::new(
+            cspace.clone(),
+            typed_bindings.clone(),
+            bindings,
+        )),
     };
     let rx = stream_resource
         .open(serde_json::json!({"session_id": sid.to_string()}))
@@ -1796,7 +1938,11 @@ async fn agent_stream_emits_done_after_cancel() {
     // Cancel from another "thread" of work — we have the
     // session id, and the stream's broadcast closes when the
     // session is removed.
-    let runtime_for_cancel = Arc::new(AgentRuntime::new(cspace.clone(), runtime.bindings.clone()));
+    let runtime_for_cancel = Arc::new(AgentRuntime::new(
+        cspace.clone(),
+        typed_bindings,
+        runtime.bindings.clone(),
+    ));
     let sid_for_cancel = sid.clone();
     tokio::spawn(async move {
         // Give the stream a moment to subscribe.
@@ -2612,14 +2758,17 @@ fn llm_streaming_deltas_reach_session_broadcast() {
     // by our custom one below.
     let mem_manifest = odyssey_builtin::memory::MemoryBuiltin.manifest();
     for decl in &mem_manifest.exposes {
-        odyssey_builtin::memory::MemoryBuiltin.mint(
-            &factory,
-            &mem_manifest.plugin,
-            decl,
-            decl.kind,
-            CapabilityBudget::new(5000),
-            &[],
-        );
+        odyssey_builtin::memory::MemoryBuiltin
+            .mint(
+                &factory,
+                &mem_manifest.plugin,
+                decl,
+                decl.kind,
+                CapabilityBudget::new(5000),
+                &[],
+                &TypedBindings::default(),
+            )
+            .expect("mint must succeed");
     }
 
     // Subscribe to the session's broadcast BEFORE creating
@@ -2631,7 +2780,12 @@ fn llm_streaming_deltas_reach_session_broadcast() {
         .get(&AgentRuntimeBuiltin.manifest().plugin)
         .cloned()
         .unwrap_or_default();
-    let runtime = AgentRuntime::new(cspace.clone(), bindings.clone());
+    // typed_bindings construction deferred until after the
+    // custom ThreeDeltaBackend LLM mint below (the runtime
+    // needs llm_complete's typed Slot to find the per-session
+    // event bus, so the Slot must be resolvable here).
+    let mut typed_bindings: Option<TypedBindings> = None;
+    let mut runtime: Option<AgentRuntime> = None;
 
     // First, mint the LLM and memory caps with the env-driven
     // backends so `AgentSlots::from_bindings` finds all 4.
@@ -2644,25 +2798,31 @@ fn llm_streaming_deltas_reach_session_broadcast() {
 
     let llm_manifest = odyssey_builtin::llm::LlmBuiltin.manifest();
     for decl in &llm_manifest.exposes {
-        odyssey_builtin::llm::LlmBuiltin.mint(
-            &factory,
-            &llm_manifest.plugin,
-            decl,
-            decl.kind,
-            CapabilityBudget::new(5000),
-            &[],
-        );
+        odyssey_builtin::llm::LlmBuiltin
+            .mint(
+                &factory,
+                &llm_manifest.plugin,
+                decl,
+                decl.kind,
+                CapabilityBudget::new(5000),
+                &[],
+                &TypedBindings::default(),
+            )
+            .expect("mint must succeed");
     }
     let mem_manifest = odyssey_builtin::memory::MemoryBuiltin.manifest();
     for decl in &mem_manifest.exposes {
-        odyssey_builtin::memory::MemoryBuiltin.mint(
-            &factory,
-            &mem_manifest.plugin,
-            decl,
-            decl.kind,
-            CapabilityBudget::new(5000),
-            &[],
-        );
+        odyssey_builtin::memory::MemoryBuiltin
+            .mint(
+                &factory,
+                &mem_manifest.plugin,
+                decl,
+                decl.kind,
+                CapabilityBudget::new(5000),
+                &[],
+                &TypedBindings::default(),
+            )
+            .expect("mint must succeed");
     }
 
     // Override the `llm_complete` mint with our custom
@@ -2683,8 +2843,25 @@ fn llm_streaming_deltas_reach_session_broadcast() {
         Arc::new(custom_llm),
     );
 
+    // Now that all caps are minted (including the custom
+    // LLM), build typed_bindings and construct the runtime.
+    let mut tb = TypedBindings::default();
+    for b in &bindings {
+        if let Some(slot_id) = cspace.slot_for_name(&b.capability) {
+            tb.entries
+                .push(odyssey::personality::lifecycle::mint::TypedBinding {
+                    handle: b.handle.clone(),
+                    slot_id,
+                    name: b.capability.clone(),
+                });
+        }
+    }
+    typed_bindings = Some(tb.clone());
+    runtime = Some(AgentRuntime::new(cspace.clone(), tb, bindings.clone()));
+
     // Start a session. The session's broadcast sender is
     // what the typed `SessionEventBus` cap publishes into.
+    let runtime = runtime.expect("runtime must be set after LLM mint");
     let sid = runtime
         .start(
             "test".into(),
@@ -2874,38 +3051,47 @@ fn agent_session_can_be_paused_and_loaded() {
     let factory = CapabilityFactory::with_clock(cspace.clone(), Arc::new(SystemClock));
 
     // Mint echo so the tool call succeeds.
-    EchoBuiltin.mint(
-        &factory,
-        &PluginId {
-            name: "echo".into(),
-            version: "0.1.0".into(),
-        },
-        &EchoBuiltin.manifest().exposes[0],
-        CapKind::Sync,
-        CapabilityBudget::new(5000),
-        &[],
-    );
+    EchoBuiltin
+        .mint(
+            &factory,
+            &PluginId {
+                name: "echo".into(),
+                version: "0.1.0".into(),
+            },
+            &EchoBuiltin.manifest().exposes[0],
+            CapKind::Sync,
+            CapabilityBudget::new(5000),
+            &[],
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
     // Mint the env-driven LLM and memory caps so
     // `AgentSlots::from_bindings` finds all four.
     for decl in &LlmBuiltin.manifest().exposes {
-        LlmBuiltin.mint(
-            &factory,
-            &LlmBuiltin.manifest().plugin,
-            decl,
-            decl.kind,
-            CapabilityBudget::new(5000),
-            &[],
-        );
+        LlmBuiltin
+            .mint(
+                &factory,
+                &LlmBuiltin.manifest().plugin,
+                decl,
+                decl.kind,
+                CapabilityBudget::new(5000),
+                &[],
+                &TypedBindings::default(),
+            )
+            .expect("mint must succeed");
     }
     for decl in &MemoryBuiltin.manifest().exposes {
-        MemoryBuiltin.mint(
-            &factory,
-            &MemoryBuiltin.manifest().plugin,
-            decl,
-            decl.kind,
-            CapabilityBudget::new(5000),
-            &[],
-        );
+        MemoryBuiltin
+            .mint(
+                &factory,
+                &MemoryBuiltin.manifest().plugin,
+                decl,
+                decl.kind,
+                CapabilityBudget::new(5000),
+                &[],
+                &TypedBindings::default(),
+            )
+            .expect("mint must succeed");
     }
 
     let bindings = plan
@@ -2913,7 +3099,19 @@ fn agent_session_can_be_paused_and_loaded() {
         .get(&AgentRuntimeBuiltin.manifest().plugin)
         .cloned()
         .unwrap_or_default();
-    let runtime = AgentRuntime::new(cspace.clone(), bindings.clone());
+    let mut typed_bindings = TypedBindings::default();
+    for b in &bindings {
+        if let Some(slot_id) = cspace.slot_for_name(&b.capability) {
+            typed_bindings
+                .entries
+                .push(odyssey::personality::lifecycle::mint::TypedBinding {
+                    handle: b.handle.clone(),
+                    slot_id,
+                    name: b.capability.clone(),
+                });
+        }
+    }
+    let runtime = AgentRuntime::new(cspace.clone(), typed_bindings.clone(), bindings.clone());
 
     // 1. Start a session, advance once, then cancel with
     //    a checkpoint path. The mock LLM fires the
@@ -2969,7 +3167,7 @@ fn agent_session_can_be_paused_and_loaded() {
     //    session must have the SAME id (so external
     //    bookkeeping survives) and the same goal.
     drop(runtime);
-    let runtime2 = AgentRuntime::new(cspace.clone(), bindings.clone());
+    let runtime2 = AgentRuntime::new(cspace.clone(), typed_bindings.clone(), bindings.clone());
     let new_sid = runtime2.load(path_str).expect("load should succeed");
     assert_eq!(new_sid, sid.as_str(), "loaded session keeps its id");
 
@@ -3025,6 +3223,7 @@ fn agent_runtime_caps_hold_all_three_role_bits() {
             kind: CapKind::Sync,
             contract_name: decl.to_string(),
             tool_schema: None,
+            priority: None,
         };
         let _ = mint_fn(
             &factory,
@@ -3033,7 +3232,9 @@ fn agent_runtime_caps_hold_all_three_role_bits() {
             CapKind::Sync,
             CapabilityBudget::new(5000),
             &[],
-        );
+            &TypedBindings::default(),
+        )
+        .expect("mint must succeed");
     }
 
     for name in [

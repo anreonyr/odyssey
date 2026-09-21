@@ -58,6 +58,7 @@ fn make_decl(name: &str) -> CapabilityDecl {
         kind: CapKind::Sync,
         contract_name: String::new(),
         tool_schema: None,
+        priority: None,
     }
 }
 

@@ -40,7 +40,7 @@ use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::core::meta::chunk::CapabilityChunk;
 use odyssey::personality::composition::resolve::ResolvedBinding;
-use odyssey::personality::lifecycle::mint::CapabilityFactory;
+use odyssey::personality::lifecycle::mint::{CapabilityFactory, MintError, TypedBindings};
 use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
 use serde_json::{Value, json};
 
@@ -102,6 +102,7 @@ impl Resource for StreamingEchoResource {
 pub struct StreamingEchoBuiltin;
 
 impl BuiltinManifest for StreamingEchoBuiltin {
+    type Resource = StreamingEchoResource;
     fn manifest(&self) -> PluginManifest {
         // The output is a stream — JSON Schema doesn't have a
         // first-class "stream of T" primitive, so we describe
@@ -163,7 +164,8 @@ impl StreamingEchoBuiltin {
         kind: CapKind,
         budget: CapabilityBudget,
         _bindings: &[ResolvedBinding],
-    ) -> SlotId {
+        _typed_bindings: &TypedBindings,
+    ) -> Result<SlotId, MintError> {
         use odyssey::core::rights::rights::{CapabilityRights, Rights};
 
         let pc = factory.plugin_cspace(plugin);
@@ -179,7 +181,11 @@ impl StreamingEchoBuiltin {
                 rights,
                 decl.name.clone(),
             )
-            .expect("grant from plugin cspace to global should succeed")
+            .map_err(|e| MintError::GrantFailed {
+                plugin: plugin.name.clone(),
+                cap: decl.name.clone(),
+                source: e,
+            })
     }
 
     /// Phase 11: colocated registration helper. Returns the
@@ -189,8 +195,16 @@ impl StreamingEchoBuiltin {
     pub fn register() -> (PluginManifest, MintFn, RuinFn) {
         (
             StreamingEchoBuiltin.manifest(),
-            |factory, plugin, decl, kind, budget, bindings| {
-                StreamingEchoBuiltin.mint(factory, plugin, decl, kind, budget, bindings)
+            |factory, plugin, decl, kind, budget, bindings, typed_bindings| {
+                StreamingEchoBuiltin.mint(
+                    factory,
+                    plugin,
+                    decl,
+                    kind,
+                    budget,
+                    bindings,
+                    typed_bindings,
+                )
             },
             default_ruin,
         )

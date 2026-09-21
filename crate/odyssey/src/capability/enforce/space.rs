@@ -420,6 +420,16 @@ impl CapabilitySpace {
                 },
             );
         }
+        // DI Phase 21: zero-rights precondition (matches `derive_with`).
+        if rights.operations.is_empty() {
+            return Err(
+                crate::capability::error::CapabilityError::AttenuationViolation {
+                    from,
+                    requested: rights.operations,
+                    held: held.operations,
+                },
+            );
+        }
         let new_id = target.next_derived_id();
         let derived = source.derive(rights, new_id);
         let new_slot = target.allocate();
@@ -552,6 +562,16 @@ impl CapabilitySpace {
         new_cap: Capability<R>,
         new_name: String,
     ) -> Result<SlotId, crate::capability::error::CapabilityError> {
+        // DI Phase 21: zero-rights precondition (matches `derive_with` + `grant_to`).
+        if new_cap.operations().is_empty() {
+            return Err(
+                crate::capability::error::CapabilityError::AttenuationViolation {
+                    from: parent,
+                    requested: new_cap.operations(),
+                    held: new_cap.operations(),
+                },
+            );
+        }
         // Take `parents.write()` FIRST as the serialisation point.
         let mut parents = self.inner.parents.write().expect("cspace poisoned");
         {
@@ -775,6 +795,21 @@ fn derive_with<R: Resource>(
         .ok_or(crate::capability::error::CapabilityError::SlotEmpty(from))?;
     let held = source.rights();
     if !held.contains(&rights) {
+        return Err(
+            crate::capability::error::CapabilityError::AttenuationViolation {
+                from,
+                requested: rights.operations,
+                held: held.operations,
+            },
+        );
+    }
+    // DI Phase 21: refuse zero-rights children at boot, not at
+    // first-invoke. The `empty.contains(empty) == true` invariant
+    // holds, so today an empty-rights cap silently fails every
+    // invoke via `Capability::invoke`'s `OperationDenied` check.
+    // We surface the same error at the attenuation site so a
+    // misconfigured builtin fails boot loudly.
+    if rights.operations.is_empty() {
         return Err(
             crate::capability::error::CapabilityError::AttenuationViolation {
                 from,

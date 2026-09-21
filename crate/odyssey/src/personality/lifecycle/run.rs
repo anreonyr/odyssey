@@ -39,7 +39,9 @@ use crate::core::identity::kind::CapKind;
 use crate::core::manifest::manifest::{CapabilityDecl, PluginManifest};
 use crate::personality::composition::resolve::{ResolvedBinding, ResolvedPlan, resolve};
 use crate::personality::lifecycle::lifecycle_event::{LifecycleEvent, LifecycleEventBus};
-use crate::personality::lifecycle::mint::CapabilityFactory;
+use crate::personality::lifecycle::mint::{
+    CapabilityFactory, MintError, TypedBinding, TypedBindings,
+};
 use crate::personality::lifecycle::serve::spawn_http_bridge;
 
 /// Typed mint entry point — the kernel's
@@ -53,13 +55,27 @@ use crate::personality::lifecycle::serve::spawn_http_bridge;
 /// `bindings` is the *minting plugin's own* row of
 /// `ResolvedPlan::bindings` — the capabilities its `requires`
 /// resolved to, as `(handle, provider, capability)` triples. It
-/// is empty for a plugin that declares no dependencies. A
-/// builtin that has no use for its binding table ignores it;
-/// the agent builtin is the one that keeps it, and that is the
-/// only way the table reaches a running plugin. Injection
-/// happens here rather than at call time because minting walks
-/// `plan.mint_order`, so a consumer is always minted after the
-/// providers it binds to.
+/// is empty for a plugin that declares no dependencies.
+///
+/// DI Phase 21: `typed_bindings` is the pre-resolved typed slot
+/// table the provision step produces. Each entry pairs the
+/// consumer's local handle with a `SlotId` in the *global*
+/// cspace (where the provider's `grant_to` already installed
+/// the typed cap). The consumer's `Slot<R>` is constructed
+/// with `Slot::new(factory.space().clone(), typed_binding.slot_id)`;
+/// `Slot::capability()` does the RTTI downcast at use time.
+///
+/// DI Phase 21: returns `Result<SlotId, MintError>` instead of
+/// `SlotId`. Three failure modes are typed:
+/// - `HandlerReturned` — a future builtin returns an error
+///   from its resource constructor (no current builtin does;
+///   the variant is here so error-aware mints have a path).
+/// - `GrantFailed` — the cross-cspace `grant_to` from
+///   `pc.inner()` to `factory.space()` failed (e.g.
+///   `AttenuationViolation`, `SlotEmpty`).
+/// - `Panicked` — surfaced by the orchestrator's `catch_unwind`
+///   wrapper around the `MintFn` call (mirroring how the
+///   `RuinFn` path handles panics).
 pub type MintFn = fn(
     factory: &CapabilityFactory,
     plugin: &PluginId,
@@ -67,7 +83,8 @@ pub type MintFn = fn(
     kind: CapKind,
     budget: CapabilityBudget,
     bindings: &[ResolvedBinding],
-) -> SlotId;
+    typed_bindings: &TypedBindings,
+) -> Result<SlotId, MintError>;
 
 /// Per-plugin teardown hook. Called by the orchestrator *before*
 /// any orchestrator-side revoke, so the hook still sees its own
@@ -149,9 +166,16 @@ pub async fn run_on(
     let plan: ResolvedPlan = resolve(&manifests).map_err(|e| format!("resolver: {e}"))?;
     println!("\n[resolver]\n{}", plan.render());
 
+    // DI Phase 21: provision typed bindings between resolve and
+    // mint. The provisioner pre-fetches each consumer's binding
+    // `slot_id`s from the global cspace (where the provider's
+    // `grant_to` installed them) so consumer `MintFn`s don't
+    // have to call `slot_for_name` themselves.
+    let typed_bindings = provision_dependencies(&factory, &plan);
+
     // 3. Mint in resolved order — dispatch by plugin name through
     // the registry.
-    let minted = mint_from_registry(&factory, &plan, plugins).await?;
+    let minted = mint_from_registry(&factory, &plan, &typed_bindings, plugins).await?;
     // 4. Serve.
     let server_handle = spawn_http_bridge(addr, cspace.clone(), frontend_dist);
     eprintln!("\n[main] HTTP bridge up — open http://{addr}/");
@@ -228,6 +252,7 @@ fn plugin_registry<'a>(
 async fn mint_from_registry(
     factory: &CapabilityFactory,
     plan: &ResolvedPlan,
+    typed_bindings: &HashMap<PluginId, TypedBindings>,
     plugins: &[(PluginManifest, MintFn, RuinFn)],
 ) -> Result<HashMap<PluginId, Vec<SlotId>>, Box<dyn std::error::Error>> {
     let by_name = plugin_registry(plugins)?;
@@ -235,15 +260,45 @@ async fn mint_from_registry(
     let mut minted: HashMap<PluginId, Vec<SlotId>> = HashMap::new();
     for plugin_id in &plan.mint_order {
         let entry = &by_name[plugin_id.name.as_str()];
-        let bindings: &[ResolvedBinding] = plan
+        let resolver_bindings: &[ResolvedBinding] = plan
             .bindings
             .get(plugin_id)
             .map(Vec::as_slice)
             .unwrap_or(&[]);
+        // DI Phase 21: typed bindings are pre-fetched by the
+        // provision step (see `provision_dependencies`). Plugins
+        // with no `requires` see `TypedBindings::default()`.
+        let empty = TypedBindings::default();
+        let typed = typed_bindings.get(plugin_id).unwrap_or(&empty);
         let mut plugin_slots = Vec::with_capacity(entry.manifest.exposes.len());
         for decl in &entry.manifest.exposes {
             let budget = CapabilityBudget::new(entry.manifest.timeout_ms.unwrap_or(5000));
-            let slot_id = (entry.mint_fn)(factory, plugin_id, decl, decl.kind, budget, bindings);
+            // DI Phase 21: `catch_unwind` symmetric to the ruin
+            // path. A panicking builtin becomes
+            // `MintError::Panicked` (mirroring how the ruin
+            // path handles panics at `RuinFn`). The builtin's
+            // own `Result::Err` flows through unchanged.
+            let mint_call = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                (entry.mint_fn)(
+                    factory,
+                    plugin_id,
+                    decl,
+                    decl.kind,
+                    budget,
+                    resolver_bindings,
+                    typed,
+                )
+            }));
+            let slot_id = match mint_call {
+                Ok(Ok(slot)) => slot,
+                Ok(Err(e)) => return Err(Box::new(e)),
+                Err(payload) => {
+                    return Err(Box::new(MintError::Panicked {
+                        plugin: plugin_id.name.clone(),
+                        payload,
+                    }));
+                }
+            };
             plugin_slots.push(slot_id);
         }
         minted.insert(plugin_id.clone(), plugin_slots);
@@ -317,4 +372,60 @@ fn ruin_via_registry(
     }
     let remaining = cspace.len();
     println!("[shutdown] cspace remaining slots: {remaining}");
+}
+
+// ---------------------------------------------------------------------------
+// DI Phase 21: typed-binding provisioner
+// ---------------------------------------------------------------------------
+
+/// Pre-fetch each consumer's binding slot_ids from the global
+/// cspace. Each provider's `grant_to` already installed the
+/// typed `Arc<Capability<R>>` into the global cspace under the
+/// provider's declared cap name; this step resolves the
+/// `(handle, capability)` pair from each consumer's binding row
+/// to that slot_id, so the consumer's `MintFn` doesn't have to
+/// walk bindings or call `slot_for_name` itself.
+///
+/// The provisioner runs after `resolve()` (which has the binding
+/// table) and before `mint_from_registry()` (which calls the
+/// consumer's `MintFn`). Topological order is already established
+/// by `plan.mint_order`, so the provider's cap is guaranteed to
+/// be in the global cspace before any consumer reads it.
+fn provision_dependencies(
+    factory: &CapabilityFactory,
+    plan: &ResolvedPlan,
+) -> HashMap<PluginId, TypedBindings> {
+    let mut out: HashMap<PluginId, TypedBindings> = HashMap::new();
+    let space = factory.space();
+    for plugin_id in &plan.mint_order {
+        let Some(bindings) = plan.bindings.get(plugin_id) else {
+            continue;
+        };
+        let mut typed = TypedBindings::default();
+        for b in bindings {
+            // Look up the provider's typed cap in the global
+            // cspace. Every Slice 3 builtin grants to
+            // `factory.space()` via `pc.inner().grant_to(...)`,
+            // so the cap exists under the provider's declared
+            // `cap_name` (matches `ResolvedBinding::capability`).
+            let Some(slot_id) = space.slot_for_name(&b.capability) else {
+                // Should be unreachable: `resolve()`'s
+                // `Unprovided` check fires earlier if no
+                // provider exposes the contract. If we land
+                // here something has gone wrong in the
+                // orchestrator pipeline; skip rather than
+                // panic — the consumer's mint body still
+                // sees an empty TypedBindings and any name
+                // lookup fails loudly.
+                continue;
+            };
+            typed.entries.push(TypedBinding {
+                handle: b.handle.clone(),
+                slot_id,
+                name: b.capability.clone(),
+            });
+        }
+        out.insert(plugin_id.clone(), typed);
+    }
+    out
 }

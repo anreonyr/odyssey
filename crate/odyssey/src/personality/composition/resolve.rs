@@ -35,12 +35,21 @@ pub enum ResolveError {
         contract: String,
         by: String,
     },
-    /// Two providers published the same contract without a
-    /// priority hint; the resolver can't pick one.
-    Ambiguous {
+    /// DI Phase 21: multiple providers published the same
+    /// contract and the resolver's priority filter still left
+    /// ambiguity (all tied at top priority, or all `priority=None`).
+    /// This is NOT a hard failure — the orchestrator treats
+    /// `AmbiguousPriority` as a boot-time warning and
+    /// continues with lex-min selection. The variant is
+    /// surfaced through `ResolverReport` (logged at boot)
+    /// rather than propagated as an error.
+    ///
+    /// `providers` is the full top-priority candidate list,
+    /// in `(version, name)` lex order (the same order the
+    /// orchestrator selects from).
+    AmbiguousPriority {
         contract: String,
-        a: String,
-        b: String,
+        providers: Vec<PluginId>,
     },
     /// The dependency graph has a cycle. The chain lists the
     /// plugins that form the cycle, in `"name@version"` form.
@@ -74,8 +83,20 @@ impl fmt::Display for ResolveError {
                 f,
                 "no provider for contract `{contract}` (requested by {by})"
             ),
-            Self::Ambiguous { contract, a, b } => {
-                write!(f, "ambiguous contract `{contract}` (providers: {a}, {b})")
+            Self::AmbiguousPriority {
+                contract,
+                providers,
+            } => {
+                let names: Vec<String> = providers
+                    .iter()
+                    .map(|p| format!("{}@{}", p.name, p.version))
+                    .collect();
+                write!(
+                    f,
+                    "ambiguous contract `{contract}` — {} top-priority providers ({}); orchestrator selects lex-min",
+                    providers.len(),
+                    names.join(", ")
+                )
             }
             Self::Cycle { chain } => {
                 write!(f, "dependency cycle detected ({} plugin(s))", chain.len())
@@ -103,26 +124,44 @@ impl std::error::Error for ResolveError {}
 /// Single contract-name index entry. The cap name is the
 /// `[[exposes]] name` field of the provider — distinct from
 /// the contract name itself (which is the resolver key).
+///
+/// DI Phase 21: `priority` is the provider-side priority from
+/// `[[exposes]].priority` (default 0 when the field is absent
+/// — `EmptyPriority` rejects `Some(0)` at validate time, so
+/// `unwrap_or(0)` is equivalent to "no hint"). The resolver's
+/// `priority` filter at `resolve()` time picks the highest
+/// `priority` candidate; equal priority falls back to
+/// `(version, name)` lex with a boot-time warning.
+///
+/// The consumer-side `requires[*].priority` is a separate
+/// concept (recorded on `ResolvedBinding::priority` for
+/// diagnostics) and does NOT participate in provider
+/// selection. Provider priority is the only selection lever.
 #[derive(Debug, Clone)]
 struct ContractEntry<'a> {
     plugin: PluginId,
     cap_name: &'a str,
+    priority: u32,
 }
 
 /// Build a contract-name index over every manifest. Detects
-/// two failure modes at construction time:
-///  - `DuplicateName`: two manifests share the same `(name, version)`.
-///  - `Ambiguous`: two manifests publish the same `contract_name`.
+/// `DuplicateName`: two manifests share the same `(name, version)`.
 ///
-/// Both are boot errors — the caller surfaces them before
-/// any plugin starts minting. Detecting at index-build time
-/// is what lets the rest of the resolver assume "every
-/// contract has exactly one provider" and run a single
-/// hash-table lookup per `requires` entry.
-type ContractIndex<'a> = BTreeMap<String, ContractEntry<'a>>;
+/// `Ambiguous` (multi-provider) is NOT raised at index-build
+/// time — DI Phase 21 lets `resolve()` see every candidate
+/// so it can apply the consumer's `priority` filter and
+/// either pick the top-priority winner or surface
+/// `AmbiguousPriority` as a warning. The old
+/// `build_contract_index` raised `Ambiguous` eagerly, which
+/// prevented the consumer-side priority filter from ever
+/// running.
+///
+/// `DuplicateName` is still boot-fatal (two manifests sharing
+/// the same `(name, version)` is a configuration mistake).
+type ContractIndex<'a> = BTreeMap<String, Vec<ContractEntry<'a>>>;
 
 fn build_contract_index(manifests: &[PluginManifest]) -> Result<ContractIndex<'_>, ResolveError> {
-    let mut by_contract: BTreeMap<String, ContractEntry<'_>> = BTreeMap::new();
+    let mut by_contract: BTreeMap<String, Vec<ContractEntry<'_>>> = BTreeMap::new();
     // Phase 9.5 cleanup: the previous code carried a
     // `BTreeMap<PluginId, &PluginManifest>` alongside the
     // contract index. It was built, returned, then
@@ -145,21 +184,20 @@ fn build_contract_index(manifests: &[PluginManifest]) -> Result<ContractIndex<'_
             if e.contract_name.is_empty() {
                 continue;
             }
-            if by_contract.contains_key(&e.contract_name) {
-                let other = by_contract.get(&e.contract_name).unwrap();
-                return Err(ResolveError::Ambiguous {
-                    contract: e.contract_name.clone(),
-                    a: format!("{}@{}", other.plugin.name, other.plugin.version),
-                    b: format!("{}@{}", pid.name, pid.version),
-                });
-            }
-            by_contract.insert(
-                e.contract_name.clone(),
-                ContractEntry {
+            by_contract
+                .entry(e.contract_name.clone())
+                .or_default()
+                .push(ContractEntry {
                     plugin: pid.clone(),
                     cap_name: &e.name,
-                },
-            );
+                    // DI Phase 21: propagate the provider's
+                    // `[[exposes]].priority` into the index so
+                    // `resolve()` can apply the max-priority
+                    // filter. `validate()` already rejects
+                    // `priority: Some(0)` so this `unwrap_or(0)`
+                    // is "no hint" rather than "explicit zero".
+                    priority: e.priority.unwrap_or(0),
+                });
         }
     }
 
@@ -253,6 +291,11 @@ pub struct ResolvedBinding {
     /// and for any downstream type that wants to surface the
     /// capability-type vocabulary.
     pub contract: String,
+    /// DI Phase 21: priority used during selection. Carried on
+    /// the binding for diagnostics (the boot render prints it)
+    /// and so future "explicit binding inspection" tooling can
+    /// surface why a particular provider won.
+    pub priority: u32,
 }
 
 /// `Reachable` — one row of a consumer's binding table.
@@ -342,15 +385,61 @@ pub fn resolve(manifests: &[PluginManifest]) -> Result<ResolvedPlan, ResolveErro
         in_degree.entry(pid.clone()).or_insert(0);
         edges.entry(pid.clone()).or_default();
         for req in &m.requires {
-            let provider: &ContractEntry<'_> =
+            // DI Phase 21: priority defaults to 0 for backward
+            // compat with manifests that don't declare priority.
+            let req_priority = req.priority.unwrap_or(0);
+
+            let candidates =
                 by_contract
                     .get(&req.contract)
                     .ok_or_else(|| ResolveError::Unprovided {
                         contract: req.contract.clone(),
                         by: pid.name.clone(),
                     })?;
-            let provider_pid = provider.plugin.clone();
-            let provider_cap_name = provider.cap_name;
+            if candidates.is_empty() {
+                return Err(ResolveError::Unprovided {
+                    contract: req.contract.clone(),
+                    by: pid.name.clone(),
+                });
+            }
+
+            // DI Phase 21: provider-side priority filter.
+            // Highest `priority` wins; equal priority falls
+            // back to `(version, name)` lex with a boot-time
+            // warning. The consumer's `requires[*].priority`
+            // (already captured in `req_priority`) is a
+            // diagnostic hint recorded on `ResolvedBinding`,
+            // NOT a selection criterion — provider priority
+            // is.
+            let max_priority = candidates.iter().map(|c| c.priority).max().unwrap_or(0);
+            let top: Vec<&ContractEntry<'_>> = candidates
+                .iter()
+                .filter(|c| c.priority == max_priority)
+                .collect();
+
+            // Tie-break on `(version, name)` lex within the
+            // top-priority set. The warning surfaces when
+            // more than one top-priority provider remains.
+            let mut sorted: Vec<&ContractEntry<'_>> = top.to_vec();
+            sorted.sort_by(|a, b| {
+                a.plugin
+                    .version
+                    .cmp(&b.plugin.version)
+                    .then_with(|| a.plugin.name.cmp(&b.plugin.name))
+            });
+
+            if sorted.len() > 1 {
+                let provider_ids: Vec<PluginId> = sorted.iter().map(|c| c.plugin.clone()).collect();
+                let report = ResolveError::AmbiguousPriority {
+                    contract: req.contract.clone(),
+                    providers: provider_ids,
+                };
+                eprintln!("[resolver] warning: {}", report);
+            }
+
+            let chosen = sorted[0].clone();
+            let provider_pid = chosen.plugin.clone();
+            let provider_cap_name = chosen.cap_name;
             if provider_pid == pid {
                 return Err(ResolveError::SelfRequirement {
                     plugin: pid,
@@ -371,6 +460,7 @@ pub fn resolve(manifests: &[PluginManifest]) -> Result<ResolvedPlan, ResolveErro
                     provider: provider_pid,
                     capability: provider_cap_name.to_string(),
                     contract: req.contract.clone(),
+                    priority: req_priority,
                 });
         }
     }

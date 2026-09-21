@@ -13,7 +13,7 @@ use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::personality::composition::resolve::ResolvedBinding;
-use odyssey::personality::lifecycle::mint::CapabilityFactory;
+use odyssey::personality::lifecycle::mint::{CapabilityFactory, MintError, TypedBindings};
 use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
 use serde_json::Value;
 
@@ -32,6 +32,7 @@ impl Resource for EchoResource {
 pub struct EchoBuiltin;
 
 impl BuiltinManifest for EchoBuiltin {
+    type Resource = EchoResource;
     fn manifest(&self) -> PluginManifest {
         // `tool_schema` is opaque to the kernel but lets the
         // `tool_descriptor` cap answer "what is this tool's
@@ -69,6 +70,14 @@ impl EchoBuiltin {
     /// orchestrator's existing teardown path
     /// (`default_ruin` revoking the returned ids) works
     /// unchanged.
+    ///
+    /// DI Phase 21: `typed_bindings` carries the consumer's
+    /// pre-resolved typed slot ids. Echo is a leaf (no
+    /// `requires`), so this argument is unused; the
+    /// underscore-prefixed name documents the intent. The
+    /// `grant_to` failure surface is mapped to
+    /// `MintError::GrantFailed` so the orchestrator can
+    /// surface a typed boot-time error instead of panicking.
     pub fn mint(
         &self,
         factory: &CapabilityFactory,
@@ -77,7 +86,8 @@ impl EchoBuiltin {
         kind: CapKind,
         budget: CapabilityBudget,
         _bindings: &[ResolvedBinding],
-    ) -> SlotId {
+        _typed_bindings: &TypedBindings,
+    ) -> Result<SlotId, MintError> {
         use odyssey::core::rights::rights::{CapabilityRights, Rights};
 
         let pc = factory.plugin_cspace(plugin);
@@ -88,7 +98,11 @@ impl EchoBuiltin {
         };
         pc.inner()
             .grant_to::<EchoResource>(local_slot, factory.space(), rights, decl.name.clone())
-            .expect("grant from plugin cspace to global should succeed")
+            .map_err(|e| MintError::GrantFailed {
+                plugin: plugin.name.clone(),
+                cap: decl.name.clone(),
+                source: e,
+            })
     }
 
     /// Phase 11: colocated registration helper. Returns the
@@ -97,11 +111,23 @@ impl EchoBuiltin {
     /// default teardown (just `cspace.revoke_tree` per slot) —
     /// no custom cleanup needed for stateless builtins like
     /// echo.
+    ///
+    /// DI Phase 21: `MintFn` signature widens (typed_bindings
+    /// parameter, `Result` return). The closure body forwards
+    /// the new argument to the inherent `mint`.
     pub fn register() -> (PluginManifest, MintFn, RuinFn) {
         (
             EchoBuiltin.manifest(),
-            |factory, plugin, decl, kind, budget, bindings| {
-                EchoBuiltin.mint(factory, plugin, decl, kind, budget, bindings)
+            |factory, plugin, decl, kind, budget, bindings, typed_bindings| {
+                EchoBuiltin.mint(
+                    factory,
+                    plugin,
+                    decl,
+                    kind,
+                    budget,
+                    bindings,
+                    typed_bindings,
+                )
             },
             default_ruin,
         )

@@ -23,7 +23,7 @@ use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::personality::composition::resolve::ResolvedBinding;
-use odyssey::personality::lifecycle::mint::CapabilityFactory;
+use odyssey::personality::lifecycle::mint::{CapabilityFactory, MintError, TypedBindings};
 use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
 use serde_json::{Value, json};
 
@@ -94,6 +94,7 @@ impl Resource for DatabaseResource {
 pub struct DatabaseBuiltin;
 
 impl BuiltinManifest for DatabaseBuiltin {
+    type Resource = DatabaseResource;
     fn manifest(&self) -> PluginManifest {
         // The database's input shape is discriminated by the
         // `op` field. JSON Schema's `oneOf` expresses the
@@ -176,6 +177,16 @@ impl DatabaseBuiltin {
     /// orchestrator's existing teardown path
     /// (`default_ruin` revoking the returned ids) works
     /// unchanged.
+    ///
+    /// DI Phase 21: `typed_bindings` is unused (database is a
+    /// leaf); return type widens to `Result<SlotId, MintError>`
+    /// so the kernel-side `grant_to` surfaces as a typed
+    /// DI Phase 21: `typed_bindings` is unused (database is a
+    /// leaf). The `.expect(...)` is unchanged: a kernel-side
+    /// `grant_to` failure today panics (caught by the
+    /// orchestrator's `catch_unwind` on `MintFn`). The
+    /// `MintError` enum exists as a future-shape surface; the
+    /// `MintFn` typedef stays `SlotId`.
     pub fn mint(
         &self,
         factory: &CapabilityFactory,
@@ -184,7 +195,8 @@ impl DatabaseBuiltin {
         kind: CapKind,
         budget: CapabilityBudget,
         _bindings: &[ResolvedBinding],
-    ) -> SlotId {
+        _typed_bindings: &TypedBindings,
+    ) -> Result<SlotId, MintError> {
         use odyssey::core::rights::rights::{CapabilityRights, Rights};
 
         let pc = factory.plugin_cspace(plugin);
@@ -202,17 +214,32 @@ impl DatabaseBuiltin {
         };
         pc.inner()
             .grant_to::<DatabaseResource>(local_slot, factory.space(), rights, decl.name.clone())
-            .expect("grant from plugin cspace to global should succeed")
+            .map_err(|e| MintError::GrantFailed {
+                plugin: plugin.name.clone(),
+                cap: decl.name.clone(),
+                source: e,
+            })
     }
 
     /// Phase 11: colocated registration helper. Returns the
     /// `(manifest, mint_fn, ruin_fn)` triple; see
     /// `builtins/src/echo.rs::register` for rationale.
+    ///
+    /// DI Phase 21: closure forwards `typed_bindings` to the
+    /// inherent `mint`.
     pub fn register() -> (PluginManifest, MintFn, RuinFn) {
         (
             DatabaseBuiltin.manifest(),
-            |factory, plugin, decl, kind, budget, bindings| {
-                DatabaseBuiltin.mint(factory, plugin, decl, kind, budget, bindings)
+            |factory, plugin, decl, kind, budget, bindings, typed_bindings| {
+                DatabaseBuiltin.mint(
+                    factory,
+                    plugin,
+                    decl,
+                    kind,
+                    budget,
+                    bindings,
+                    typed_bindings,
+                )
             },
             default_ruin,
         )

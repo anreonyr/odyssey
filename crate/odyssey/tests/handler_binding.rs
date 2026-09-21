@@ -38,7 +38,7 @@ use odyssey::personality::composition::resolve::ResolvedBinding;
 use odyssey::personality::lifecycle::loader::{
     Handler, HandlerRegistry, load_plugin_from_path, load_plugin_from_path_with_handlers,
 };
-use odyssey::personality::lifecycle::mint::CapabilityFactory;
+use odyssey::personality::lifecycle::mint::{CapabilityFactory, MintError, TypedBindings};
 
 // ---------------------------------------------------------------------------
 // Stub resource + handler
@@ -60,7 +60,9 @@ impl Resource for StubResource {}
 /// factory's cspace and returning the fresh `SlotId`. This
 /// is the same shape every concrete `MintFn` has — a
 /// non-capturing fn pointer that hardcodes its `R` at the
-/// definition site.
+/// definition site. DI Phase 21: returns
+/// `Result<SlotId, MintError>`; the kernel mint path can't
+/// fail for this stub, so we wrap with `Ok(...)`.
 fn stub_handler(
     factory: &CapabilityFactory,
     plugin: &PluginId,
@@ -68,8 +70,9 @@ fn stub_handler(
     kind: CapKind,
     budget: CapabilityBudget,
     _bindings: &[ResolvedBinding],
-) -> SlotId {
-    factory.mint::<StubResource>(kind, decl, plugin, budget, Arc::new(StubResource))
+    _typed_bindings: &TypedBindings,
+) -> Result<SlotId, MintError> {
+    Ok(factory.mint::<StubResource>(kind, decl, plugin, budget, Arc::new(StubResource)))
 }
 
 // ---------------------------------------------------------------------------
@@ -129,7 +132,16 @@ fn registered_handler_is_invoked_for_bound_capability() {
     let decl = loaded.manifest.exposes[0].clone();
     let budget = CapabilityBudget::new(5000);
 
-    let slot_id = (loaded.mint_fn)(&factory, &plugin, &decl, decl.kind, budget, &[]);
+    let slot_id = (loaded.mint_fn)(
+        &factory,
+        &plugin,
+        &decl,
+        decl.kind,
+        budget,
+        &[],
+        &TypedBindings::default(),
+    )
+    .expect("stub handler should not fail");
 
     // Factory's allocator starts at raw = 1; a fresh cspace
     // + first mint produces SlotId::new(1). This confirms
@@ -143,17 +155,17 @@ fn registered_handler_is_invoked_for_bound_capability() {
 }
 
 // ---------------------------------------------------------------------------
-// Negative: capability name not in registry → placeholder panic
+// Negative: capability name not in registry → typed error
 // ---------------------------------------------------------------------------
 
 #[test]
-fn unbound_capability_panics_with_placeholder_message() {
+fn unbound_capability_returns_handler_returned_error() {
     // The plugin exposes two capabilities; the registry only
     // covers one. When the orchestrator (or this test) calls
     // mint_fn for the unbound name, the loader's bound
-    // mint_fn falls into its placeholder branch and panics
-    // with the same message shape the original placeholder
-    // uses.
+    // mint_fn surfaces a `MintError::HandlerReturned`
+    // describing the missing handler — DI Phase 21 converts
+    // the previous panic into a typed boot-time error.
     let manifest_json = r#"{
         "plugin": {"name": "handler_test_b", "version": "0.1.0"},
         "exposes": [
@@ -180,23 +192,37 @@ fn unbound_capability_panics_with_placeholder_message() {
         .clone();
     let budget = CapabilityBudget::new(5000);
 
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        (loaded.mint_fn)(&factory, &plugin, &decl, decl.kind, budget, &[])
-    }));
-
-    assert!(
-        outcome.is_err(),
-        "mint_fn for an unbound capability must panic — the placeholder contract is loud failure"
+    let outcome = (loaded.mint_fn)(
+        &factory,
+        &plugin,
+        &decl,
+        decl.kind,
+        budget,
+        &[],
+        &TypedBindings::default(),
     );
+
+    match outcome {
+        Err(MintError::HandlerReturned { cap, message, .. }) => {
+            assert_eq!(cap, "other_cap", "error must name the unbound cap");
+            assert!(
+                message.contains("no handler bound"),
+                "error message must describe the missing handler; got `{message}`"
+            );
+        }
+        other => panic!(
+            "mint_fn for an unbound capability must return MintError::HandlerReturned; got {other:?}"
+        ),
+    }
 }
 
 // ---------------------------------------------------------------------------
-// Negative: the original placeholder still panics for callers of
-// load_plugin_from_path (no registry installed).
+// Negative: the original placeholder returns a typed error for
+// callers of load_plugin_from_path (no registry installed).
 // ---------------------------------------------------------------------------
 
 #[test]
-fn placeholder_mint_fn_panics_when_invoked() {
+fn placeholder_mint_fn_returns_handler_returned_error() {
     let manifest_json = r#"{
         "plugin": {"name": "handler_test_c", "version": "0.1.0"},
         "exposes": [{"name": "demo_cap", "kind": "sync", "contract_name": "demo"}]
@@ -215,9 +241,15 @@ fn placeholder_mint_fn_panics_when_invoked() {
     let decl = loaded.manifest.exposes[0].clone();
     let budget = CapabilityBudget::new(5000);
 
-    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        (loaded.mint_fn)(&factory, &plugin, &decl, decl.kind, budget, &[])
-    }));
+    let outcome = (loaded.mint_fn)(
+        &factory,
+        &plugin,
+        &decl,
+        decl.kind,
+        budget,
+        &[],
+        &TypedBindings::default(),
+    );
 
     assert!(
         outcome.is_err(),

@@ -34,7 +34,7 @@ use odyssey::core::identity::ids::{PluginId, SlotId};
 use odyssey::core::identity::kind::CapKind;
 use odyssey::core::manifest::manifest::{CapabilityDecl, ManifestBuilder, PluginManifest};
 use odyssey::personality::composition::resolve::ResolvedBinding;
-use odyssey::personality::lifecycle::mint::CapabilityFactory;
+use odyssey::personality::lifecycle::mint::{CapabilityFactory, MintError, TypedBindings};
 use odyssey::personality::lifecycle::run::{MintFn, RuinFn, default_ruin};
 use serde_json::{Value, json};
 
@@ -1116,6 +1116,7 @@ impl Resource for LlmEmbedResource {
 pub struct LlmBuiltin;
 
 impl BuiltinManifest for LlmBuiltin {
+    type Resource = LlmCompleteResource;
     fn manifest(&self) -> PluginManifest {
         ManifestBuilder::new("llm")
             .expose(NAME_COMPLETE, CONTRACT_COMPLETE)
@@ -1134,7 +1135,8 @@ impl LlmBuiltin {
         kind: CapKind,
         budget: CapabilityBudget,
         _bindings: &[ResolvedBinding],
-    ) -> SlotId {
+        _typed_bindings: &TypedBindings,
+    ) -> Result<SlotId, MintError> {
         use odyssey::core::rights::rights::{CapabilityRights, Rights};
 
         // Backend selection: if `OPENAI_API_BASE` is set, use
@@ -1188,7 +1190,11 @@ impl LlmBuiltin {
                         rights,
                         decl.name.clone(),
                     )
-                    .expect("grant from plugin cspace to global should succeed")
+                    .map_err(|e| MintError::GrantFailed {
+                        plugin: plugin.name.clone(),
+                        cap: decl.name.clone(),
+                        source: e,
+                    })
             }
             NAME_EMBED => {
                 let local_slot = pc.mint(
@@ -1204,7 +1210,11 @@ impl LlmBuiltin {
                         rights,
                         decl.name.clone(),
                     )
-                    .expect("grant from plugin cspace to global should succeed")
+                    .map_err(|e| MintError::GrantFailed {
+                        plugin: plugin.name.clone(),
+                        cap: decl.name.clone(),
+                        source: e,
+                    })
             }
             other => panic!("llm: unexpected capability name `{other}`"),
         }
@@ -1213,8 +1223,16 @@ impl LlmBuiltin {
     pub fn register() -> (PluginManifest, MintFn, RuinFn) {
         (
             LlmBuiltin.manifest(),
-            |factory, plugin, decl, kind, budget, bindings| {
-                LlmBuiltin.mint(factory, plugin, decl, kind, budget, bindings)
+            |factory, plugin, decl, kind, budget, bindings, typed_bindings| {
+                LlmBuiltin.mint(
+                    factory,
+                    plugin,
+                    decl,
+                    kind,
+                    budget,
+                    bindings,
+                    typed_bindings,
+                )
             },
             default_ruin,
         )
