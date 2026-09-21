@@ -484,10 +484,8 @@ impl ResolvedPlan {
             // group, entries appear in the order they're
             // emitted by Kahn's algorithm.
             let mut group_order: Vec<Option<BundleId>> = Vec::new();
-            let mut group_index: std::collections::HashMap<
-                Option<BundleId>,
-                usize,
-            > = std::collections::HashMap::new();
+            let mut group_index: std::collections::HashMap<Option<BundleId>, usize> =
+                std::collections::HashMap::new();
             for p in &self.mint_order {
                 let bundle = self.bundles.get(p).cloned().unwrap_or(None);
                 let idx = match group_index.get(&bundle) {
@@ -518,13 +516,96 @@ impl ResolvedPlan {
             }
         }
         out.push_str("\nBindings:\n");
-        for (plugin, bindings) in &self.bindings {
-            out.push_str(&format!("  {}@{}:\n", plugin.name, plugin.version));
-            for b in bindings {
-                out.push_str(&format!(
-                    "    handle={} <- {}@{}::{}\n",
-                    b.handle, b.provider.name, b.provider.version, b.capability
-                ));
+        // Bindings section groups consumers by their bundle (the
+        // consumer's bundle is the natural anchor — bindings ARE
+        // the consumer's requirements). Within a bundle,
+        // consumers appear in mint-order (the resolver's canonical
+        // topological walk); within a consumer, bindings appear
+        // in their declaration order. Each binding entry also
+        // annotates the *provider's* bundle when present — this
+        // makes cross-bundle `requires` visible (e.g.,
+        // `agent_describe` in the observers bundle requiring
+        // `echo` in the tool-caps bundle).
+        //
+        // Pre-bundle fallback: when no plugin in the plan carries
+        // a bundle, the bindings section renders byte-identical
+        // to the original flat list — preserves the historical
+        // output for callers that haven't migrated.
+        //
+        // Plugins without `requires` are not in `self.bindings`
+        // at all (the resolver only inserts entries when a `req`
+        // was processed — see `build.rs` in `resolve()`), so
+        // they correctly do not appear here.
+        if !any_bundled {
+            for (plugin, bindings) in &self.bindings {
+                out.push_str(&format!("  {}@{}:\n", plugin.name, plugin.version));
+                for b in bindings {
+                    out.push_str(&format!(
+                        "    handle={} <- {}@{}::{}\n",
+                        b.handle, b.provider.name, b.provider.version, b.capability
+                    ));
+                }
+            }
+        } else {
+            // Group consumers by their bundle. Order is
+            // determined by the FIRST appearance of each
+            // consumer's bundle id in `mint_order` — same
+            // ordering principle as the Mint order section
+            // above (preserves the topological walk: consumers
+            // appear after their providers in mint order, so
+            // bundles whose consumers come later also come
+            // later here).
+            let mut consumer_group_order: Vec<Option<BundleId>> = Vec::new();
+            let mut consumer_group_index: std::collections::HashMap<Option<BundleId>, usize> =
+                std::collections::HashMap::new();
+            let mut consumer_groups: Vec<Vec<PluginId>> = Vec::new();
+            for p in &self.mint_order {
+                // Skip plugins with no bindings — only consumers
+                // appear in `self.bindings`, so this naturally
+                // drops providers from the iteration.
+                let Some(_) = self.bindings.get(p) else {
+                    continue;
+                };
+                let bundle = self.bundles.get(p).cloned().unwrap_or(None);
+                let idx = match consumer_group_index.get(&bundle) {
+                    Some(&i) => i,
+                    None => {
+                        consumer_group_index.insert(bundle.clone(), consumer_group_order.len());
+                        consumer_group_order.push(bundle.clone());
+                        consumer_groups.push(Vec::new());
+                        consumer_group_order.len() - 1
+                    }
+                };
+                consumer_groups[idx].push(p.clone());
+            }
+            for (bundle, members) in consumer_group_order.iter().zip(consumer_groups.iter()) {
+                match bundle {
+                    Some(b) => out.push_str(&format!("  [bundle {}]\n", b)),
+                    None => out.push_str("  [unbundled]\n"),
+                }
+                for plugin_id in members {
+                    let bindings = &self.bindings[plugin_id];
+                    out.push_str(&format!("    {}@{}:\n", plugin_id.name, plugin_id.version));
+                    for b in bindings {
+                        // Annotate the provider's bundle when
+                        // present. `bundles` is populated for
+                        // every plugin in mint_order, so the
+                        // lookup always succeeds when bundles
+                        // are present at all.
+                        let provider_bundle =
+                            self.bundles.get(&b.provider).cloned().unwrap_or(None);
+                        match provider_bundle {
+                            Some(pb) => out.push_str(&format!(
+                                "      handle={} <- {}@{}::{} (bundle {})\n",
+                                b.handle, b.provider.name, b.provider.version, b.capability, pb
+                            )),
+                            None => out.push_str(&format!(
+                                "      handle={} <- {}@{}::{}\n",
+                                b.handle, b.provider.name, b.provider.version, b.capability
+                            )),
+                        }
+                    }
+                }
             }
         }
         out
@@ -824,7 +905,10 @@ mod bundle_render_tests {
         ];
         let err = resolve(&manifests).expect_err("duplicate name must error");
         match err {
-            ResolveError::DuplicateName { plugin, seen_in_bundle } => {
+            ResolveError::DuplicateName {
+                plugin,
+                seen_in_bundle,
+            } => {
                 assert_eq!(plugin.name, "echo");
                 assert_eq!(
                     seen_in_bundle, None,
@@ -842,7 +926,10 @@ mod bundle_render_tests {
         ];
         let err = resolve(&manifests).expect_err("duplicate name must error (bundled second)");
         match err {
-            ResolveError::DuplicateName { plugin, seen_in_bundle } => {
+            ResolveError::DuplicateName {
+                plugin,
+                seen_in_bundle,
+            } => {
                 assert_eq!(plugin.name, "echo");
                 assert_eq!(
                     seen_in_bundle,
@@ -860,9 +947,11 @@ mod bundle_render_tests {
         // the consumer is bundled. The manifest requires a
         // contract that no other manifest publishes.
         let observers = BundleId::new("observers", "0.1.0");
-        let manifests = vec![
-            manifest_requiring("observer", "missing_contract", Some(observers.clone())),
-        ];
+        let manifests = vec![manifest_requiring(
+            "observer",
+            "missing_contract",
+            Some(observers.clone()),
+        )];
         let err = resolve(&manifests).expect_err("missing contract must error");
         match err {
             ResolveError::Unprovided {
@@ -913,6 +1002,125 @@ mod bundle_render_tests {
         assert!(
             text.contains("no provider for contract `demo` (requested by observer)"),
             "Display must preserve pre-bundle error text when bundle is None; got: {text}"
+        );
+    }
+
+    /// Helper that emits a manifest exposing one cap.
+    /// Use `manifest_consumer(...)` for a manifest that
+    /// EXPOSES one contract and REQUIRES another (the
+    /// resolver would SelfRequirement-error if both sides
+    /// pointed at the same contract).
+    fn manifest_provider(
+        name: &str,
+        expose_contract: &str,
+        bundle: Option<BundleId>,
+    ) -> PluginManifest {
+        let b = ManifestBuilder::new(name);
+        let b = match bundle {
+            Some(bid) => b.bundle(bid.name, bid.version),
+            None => b,
+        };
+        b.expose("self_cap", expose_contract).build()
+    }
+
+    /// Helper that emits a manifest exposing one contract and
+    /// requiring another (must differ — otherwise
+    /// `SelfRequirement` fires).
+    fn manifest_consumer(
+        name: &str,
+        expose_contract: &str,
+        require_contract: &str,
+        bundle: Option<BundleId>,
+    ) -> PluginManifest {
+        let b = ManifestBuilder::new(name);
+        let b = match bundle {
+            Some(bid) => b.bundle(bid.name, bid.version),
+            None => b,
+        };
+        b.expose("self_cap", expose_contract)
+            .requires("handle_x", require_contract)
+            .build()
+    }
+
+    #[test]
+    fn render_groups_bindings_by_consumer_bundle() {
+        // Provider in `providers` bundle exposes
+        // `provider_contract`. Consumer in `observers` bundle
+        // exposes `observer_contract` AND requires
+        // `provider_contract` — cross-bundle requires.
+        // Verify the Bindings section groups by consumer bundle
+        // and annotates the provider's bundle on each binding
+        // line.
+        let observers = BundleId::new("observers", "0.1.0");
+        let providers = BundleId::new("providers", "0.1.0");
+        let manifests = vec![
+            manifest_provider("provider", "provider_contract", Some(providers.clone())),
+            manifest_consumer(
+                "observer",
+                "observer_contract",
+                "provider_contract",
+                Some(observers.clone()),
+            ),
+        ];
+        let plan = resolve(&manifests).expect("resolve ok");
+        let rendered = plan.render();
+
+        // Headings must appear under "Bindings:".
+        assert!(
+            rendered.contains("[bundle observers@0.1.0]"),
+            "render must list `observers` bundle heading; got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains("[bundle providers@0.1.0]"),
+            "render must list `providers` bundle heading; got:\n{rendered}"
+        );
+
+        // The observer (consumer) must appear under its own
+        // bundle heading, with its provider's bundle annotated
+        // on each binding line.
+        assert!(
+            rendered.contains("    observer@0.1.0:"),
+            "observer must appear as a consumer under [bundle observers]; got:\n{rendered}"
+        );
+        assert!(
+            rendered.contains(
+                "      handle=handle_x <- provider@0.1.0::self_cap (bundle providers@0.1.0)"
+            ),
+            "provider's bundle must be annotated on the binding line; got:\n{rendered}"
+        );
+    }
+
+    #[test]
+    fn render_falls_back_to_flat_bindings_when_no_plugin_is_bundled() {
+        // Pre-bundle regression: byte-identical Bindings
+        // section when no manifest carries a bundle. The
+        // pre-bundle format was:
+        //
+        //   consumer@version:
+        //     handle=... <- provider@version::cap
+        //
+        // (no `(bundle ...)` annotation on the binding line).
+        let manifests = vec![
+            manifest_provider("provider", "provider_contract", None),
+            manifest_consumer("consumer", "consumer_contract", "provider_contract", None),
+        ];
+        let plan = resolve(&manifests).expect("resolve ok");
+        let rendered = plan.render();
+
+        // No bundle headings anywhere in the output.
+        assert!(
+            !rendered.contains("[bundle"),
+            "flat render must not contain bundle headings; got:\n{rendered}"
+        );
+        // Binding line uses the pre-bundle shape exactly —
+        // no `(bundle ...)` annotation.
+        assert!(
+            rendered.contains("    handle=handle_x <- provider@0.1.0::self_cap"),
+            "flat render must omit provider-bundle annotation; got:\n{rendered}"
+        );
+        assert!(
+            !rendered.contains("(bundle"),
+            "flat render must NOT annotate provider's bundle; got:\n{rendered}"
         );
     }
 }

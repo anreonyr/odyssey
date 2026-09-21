@@ -47,15 +47,15 @@
 
 use odyssey::personality::lifecycle::run::{MintFn, RuinFn};
 
-use odyssey::core::manifest::manifest::PluginManifest;
 use odyssey::core::manifest::BundleId;
+use odyssey::core::manifest::manifest::PluginManifest;
 
 // Sibling modules in the same crate (`odyssey_builtin` per
 // `[lib] name` in Cargo.toml). `crate::*` resolves to the
 // crate's root because `bundles/` is a submodule of
 // `src/lib.rs`.
-use crate::{agent, database, echo, inspectors};
 use crate::model::{embedder, generator, reranker};
+use crate::{agent, database, echo, inspectors};
 
 /// Stamp every member manifest in `entries` with `id` and
 /// return the stamped slice. The orchestrator consumes the
@@ -67,7 +67,10 @@ use crate::model::{embedder, generator, reranker};
 /// manifest owns its `bundle: Option<BundleId>` field
 /// (precedent `064cada` — no mirror state, manifest is
 /// the single source of truth).
-fn stamp(id: BundleId, entries: Vec<(PluginManifest, MintFn, RuinFn)>) -> Vec<(PluginManifest, MintFn, RuinFn)> {
+fn stamp(
+    id: BundleId,
+    entries: Vec<(PluginManifest, MintFn, RuinFn)>,
+) -> Vec<(PluginManifest, MintFn, RuinFn)> {
     entries
         .into_iter()
         .map(|(mut m, mint, ruin)| {
@@ -185,7 +188,10 @@ mod tests {
         let entries = tool_caps();
         assert_eq!(entries.len(), 2);
         assert_all_stamped(&entries, "tool-caps");
-        let names: Vec<&str> = entries.iter().map(|(m, _, _)| m.plugin.name.as_str()).collect();
+        let names: Vec<&str> = entries
+            .iter()
+            .map(|(m, _, _)| m.plugin.name.as_str())
+            .collect();
         assert!(names.contains(&"echo"));
         assert!(names.contains(&"database"));
     }
@@ -195,7 +201,10 @@ mod tests {
         let entries = observers();
         assert_eq!(entries.len(), 2);
         assert_all_stamped(&entries, "observers");
-        let names: Vec<&str> = entries.iter().map(|(m, _, _)| m.plugin.name.as_str()).collect();
+        let names: Vec<&str> = entries
+            .iter()
+            .map(|(m, _, _)| m.plugin.name.as_str())
+            .collect();
         assert!(names.contains(&"agent_list"));
         assert!(names.contains(&"agent_describe"));
     }
@@ -205,7 +214,10 @@ mod tests {
         let entries = inspectors_bundle();
         assert_eq!(entries.len(), 2);
         assert_all_stamped(&entries, "inspectors");
-        let names: Vec<&str> = entries.iter().map(|(m, _, _)| m.plugin.name.as_str()).collect();
+        let names: Vec<&str> = entries
+            .iter()
+            .map(|(m, _, _)| m.plugin.name.as_str())
+            .collect();
         assert!(names.contains(&"inspector"));
         assert!(names.contains(&"schema_inspector"));
     }
@@ -215,7 +227,10 @@ mod tests {
         let entries = model_providers();
         assert_eq!(entries.len(), 3);
         assert_all_stamped(&entries, "model-providers");
-        let names: Vec<&str> = entries.iter().map(|(m, _, _)| m.plugin.name.as_str()).collect();
+        let names: Vec<&str> = entries
+            .iter()
+            .map(|(m, _, _)| m.plugin.name.as_str())
+            .collect();
         assert!(names.contains(&"generator"));
         assert!(names.contains(&"embedder"));
         assert!(names.contains(&"reranker"));

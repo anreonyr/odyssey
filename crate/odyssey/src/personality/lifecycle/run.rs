@@ -36,6 +36,7 @@ use crate::capability::enforce::space::CapabilitySpace;
 use crate::core::clock::clock::SystemClock;
 use crate::core::identity::ids::{PluginId, SlotId};
 use crate::core::identity::kind::CapKind;
+use crate::core::manifest::BundleId;
 use crate::core::manifest::manifest::{CapabilityDecl, PluginManifest};
 use crate::personality::composition::resolve::{ResolvedBinding, ResolvedPlan, resolve};
 use crate::personality::lifecycle::lifecycle_event::{LifecycleEvent, LifecycleEventBus};
@@ -322,6 +323,19 @@ fn ruin_via_registry(
     };
 
     println!("\n[shutdown] tearing down runtime plugins (reverse mint order):");
+    // Collect per-plugin teardown results during iteration, then
+    // print them grouped by bundle after iteration completes. The
+    // underlying iteration is still reverse mint — preserved for
+    // any future custom `RuinFn` whose order-of-revoke semantics
+    // depend on dependencies being torn down consumers-first.
+    // Grouping is purely a display affordance.
+    //
+    // `record` shape: (PluginId, total_revoked) — what to print.
+    // Plugins with no minted slots (or whose `RuinFn` returned
+    // 0 with no slots to revoke) are filtered out, matching the
+    // pre-bundle behaviour where the per-plugin line only
+    // printed when there was something to report.
+    let mut record: Vec<(PluginId, usize)> = Vec::new();
     for plugin_id in plan.mint_order.iter().rev() {
         let Some(slot_ids) = minted.get(plugin_id) else {
             continue;
@@ -364,10 +378,55 @@ fn ruin_via_registry(
         let local_revoked = factory.reclaim_plugin(plugin_id);
         let total_revoked = global_revoked + local_revoked;
         if total_revoked > 0 || !slot_ids.is_empty() {
+            record.push((plugin_id.clone(), total_revoked));
+        }
+    }
+    // Decide grouping: fall back to the pre-bundle flat format
+    // when no plugin in the plan carries a bundle (mirrors the
+    // logic in `ResolvedPlan::render`). Group order is determined
+    // by the FIRST appearance of each bundle in `record` —
+    // `record` is in reverse-mint order, so the "first" bundle
+    // we encounter is the LAST one to be torn down (the last to
+    // be torn down is conventionally the consumer that ran last
+    // — e.g., `agent` bundle). The output reads top-to-bottom in
+    // teardown order; bundle headings appear in the same order.
+    let any_bundled = plan.bundles.values().any(|b| b.is_some());
+    if !any_bundled {
+        for (pid, total) in &record {
             println!(
                 "  ✓ {}@{}  revoked {} slot(s)",
-                plugin_id.name, plugin_id.version, total_revoked
+                pid.name, pid.version, total
             );
+        }
+    } else {
+        let mut group_order: Vec<Option<BundleId>> = Vec::new();
+        let mut group_index: std::collections::HashMap<Option<BundleId>, usize> =
+            std::collections::HashMap::new();
+        let mut groups: Vec<Vec<(PluginId, usize)>> = Vec::new();
+        for (pid, total) in &record {
+            let bundle = plan.bundles.get(pid).cloned().unwrap_or(None);
+            let idx = match group_index.get(&bundle) {
+                Some(&i) => i,
+                None => {
+                    group_index.insert(bundle.clone(), group_order.len());
+                    group_order.push(bundle.clone());
+                    groups.push(Vec::new());
+                    group_order.len() - 1
+                }
+            };
+            groups[idx].push((pid.clone(), *total));
+        }
+        for (bundle, members) in group_order.iter().zip(groups.iter()) {
+            match bundle {
+                Some(b) => println!("  [bundle {b}]"),
+                None => println!("  [unbundled]"),
+            }
+            for (pid, total) in members {
+                println!(
+                    "    ✓ {}@{}  revoked {} slot(s)",
+                    pid.name, pid.version, total
+                );
+            }
         }
     }
     let remaining = cspace.len();

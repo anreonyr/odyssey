@@ -101,10 +101,7 @@ mod tests {
         // tie on name -> version
         assert!(BundleId::new("a", "0.1.0") < BundleId::new("a", "0.2.0"));
         // equal
-        assert_eq!(
-            BundleId::new("a", "0.1.0"),
-            BundleId::new("a", "0.1.0")
-        );
+        assert_eq!(BundleId::new("a", "0.1.0"), BundleId::new("a", "0.1.0"));
     }
 
     #[test]
